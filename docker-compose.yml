@@ -1,0 +1,86 @@
+# ─────────────────────────────────────────────
+#  OPALBAR — Docker Compose (local dev)
+# ─────────────────────────────────────────────
+version: '3.9'
+
+services:
+  # ── PostgreSQL ─────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: opalbar_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: opalbar
+      POSTGRES_PASSWORD: opalbar_secret
+      POSTGRES_DB: opalbar_db
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U opalbar -d opalbar_db']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis ──────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: opalbar_redis
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── API (optional — run locally with nx) ───
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: opalbar_api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      DATABASE_URL: postgresql://opalbar:opalbar_secret@postgres:5432/opalbar_db?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      JWT_ACCESS_SECRET: opalbar_access_secret_dev_min_32_chars_ok
+      JWT_REFRESH_SECRET: opalbar_refresh_secret_dev_min_32_chars_ok
+      SMTP_HOST: mailhog
+      SMTP_PORT: 1025
+      SMTP_USER: test@opalbar.com
+      SMTP_PASS: test
+      EMAIL_FROM: OPALBAR Dev <dev@opalbar.com>
+      ADMIN_EMAIL: admin@opalbar.com
+      ADMIN_PASSWORD: Admin@123456
+    ports:
+      - '3000:3000'
+    profiles:
+      - full # Only start with: docker-compose --profile full up
+
+  # ── MailHog (email testing) ────────────────
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: opalbar_mailhog
+    ports:
+      - '1025:1025'   # SMTP
+      - '8025:8025'   # Web UI
+    profiles:
+      - dev
+
+volumes:
+  postgres_data:
+  redis_data:

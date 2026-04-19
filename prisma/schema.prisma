@@ -1,0 +1,744 @@
+// ─────────────────────────────────────────────────────────────────────────────
+//  OPALBAR APP — Prisma Schema v1.0
+//  PostgreSQL · Prisma ORM
+// ─────────────────────────────────────────────────────────────────────────────
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────
+//  ENUMS
+// ─────────────────────────────────────────────
+
+enum UserRole {
+  USER
+  MODERATOR
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  BANNED
+  PENDING_VERIFICATION
+  DELETED
+}
+
+enum OtpType {
+  EMAIL_VERIFICATION
+  PHONE_VERIFICATION
+  PASSWORD_RESET
+  LOGIN_2FA
+  CHANGE_EMAIL
+  CHANGE_PHONE
+}
+
+enum EventStatus {
+  DRAFT
+  PUBLISHED
+  CANCELLED
+  COMPLETED
+  FULL
+}
+
+enum AttendanceStatus {
+  REGISTERED
+  ATTENDED
+  CANCELLED
+  NO_SHOW
+}
+
+enum OfferType {
+  PERCENTAGE
+  FIXED_AMOUNT
+  FREE_ITEM
+  BUY_ONE_GET_ONE
+  COMBO
+}
+
+enum OfferStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  EXPIRED
+  DEPLETED
+}
+
+enum PostStatus {
+  PENDING_REVIEW
+  PUBLISHED
+  REJECTED
+  HIDDEN
+  DELETED
+}
+
+enum ReactionType {
+  LIKE
+  LOVE
+  FIRE
+  CHEER
+  SAD
+}
+
+enum ReportReason {
+  SPAM
+  HATE_SPEECH
+  VIOLENCE
+  MISINFORMATION
+  INAPPROPRIATE
+  COPYRIGHT
+  OTHER
+}
+
+enum ReportStatus {
+  PENDING
+  REVIEWED
+  RESOLVED
+  DISMISSED
+}
+
+enum ReportTargetType {
+  POST
+  COMMENT
+  USER
+}
+
+enum ModerationAction {
+  APPROVED
+  REJECTED
+  HIDDEN
+  WARNED
+  BANNED_USER
+  ESCALATED
+}
+
+enum WalletTransactionType {
+  EARN
+  REDEEM
+  EXPIRE
+  BONUS
+  ADJUSTMENT
+  REFUND
+}
+
+enum WalletReferenceType {
+  EVENT_ATTENDANCE
+  OFFER_REDEMPTION
+  POST_ENGAGEMENT
+  REFERRAL
+  WELCOME_BONUS
+  ADMIN_ADJUSTMENT
+}
+
+enum NotificationType {
+  EVENT_REMINDER
+  EVENT_NEW
+  OFFER_NEW
+  OFFER_EXPIRING
+  COMMUNITY_REPLY
+  COMMUNITY_REACTION
+  COMMUNITY_MENTION
+  POST_APPROVED
+  POST_REJECTED
+  POINTS_EARNED
+  POINTS_REDEEMED
+  LEVEL_UP
+  ACCOUNT_ALERT
+  SYSTEM
+}
+
+enum DataRequestStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum ContentType {
+  IMAGE
+  VIDEO
+}
+
+// ─────────────────────────────────────────────
+//  USER & AUTH
+// ─────────────────────────────────────────────
+
+model User {
+  id           String     @id @default(cuid())
+  email        String?    @unique
+  phone        String?    @unique
+  passwordHash String?
+  role         UserRole   @default(USER)
+  status       UserStatus @default(PENDING_VERIFICATION)
+  isVerified   Boolean    @default(false)
+  points       Int        @default(0)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  deletedAt    DateTime?
+
+  // Relations
+  profile              UserProfile?
+  interests            UserInterest[]
+  consent              UserConsent?
+  sessions             Session[]
+  otps                 Otp[]
+  events               EventAttendee[]
+  offerRedemptions     OfferRedemption[]
+  posts                Post[]
+  comments             Comment[]
+  reactions            Reaction[]
+  reports              Report[]         @relation("reporter")
+  reportedItems        Report[]         @relation("reportedUser")
+  moderationLogs       ModerationLog[]  @relation("moderator")
+  walletTransactions   WalletTransaction[]
+  notifications        Notification[]
+  notificationSettings NotificationSettings?
+  deletionRequests     DataDeletionRequest[]
+  exportRequests       DataExportRequest[]
+  loginAttempts        LoginAttempt[]
+
+  @@index([email])
+  @@index([phone])
+  @@index([status])
+  @@index([role])
+}
+
+model UserProfile {
+  id          String    @id @default(cuid())
+  userId      String    @unique
+  firstName   String
+  lastName    String
+  bio         String?   @db.VarChar(500)
+  avatarUrl   String?
+  birthDate   DateTime?
+  city        String?
+  country     String?   @default("MX")
+  language    String    @default("es")
+  loyaltyLevel LoyaltyLevel? @relation(fields: [loyaltyLevelId], references: [id])
+  loyaltyLevelId String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model UserInterest {
+  id         String   @id @default(cuid())
+  userId     String
+  categoryId String
+  createdAt  DateTime @default(now())
+
+  user     User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category EventCategory @relation(fields: [categoryId], references: [id])
+
+  @@unique([userId, categoryId])
+  @@index([userId])
+}
+
+model UserConsent {
+  id                  String   @id @default(cuid())
+  userId              String   @unique
+  termsAccepted       Boolean  @default(false)
+  privacyAccepted     Boolean  @default(false)
+  marketingConsent    Boolean  @default(false)
+  analyticsConsent    Boolean  @default(false)
+  pushConsent         Boolean  @default(true)
+  termsVersion        String   @default("1.0")
+  privacyVersion      String   @default("1.0")
+  consentDate         DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  userId       String
+  refreshToken String   @unique
+  deviceName   String?
+  deviceOs     String?
+  deviceToken  String?  // FCM/APNs push token
+  ipAddress    String?
+  userAgent    String?
+  isActive     Boolean  @default(true)
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([refreshToken])
+}
+
+model Otp {
+  id         String   @id @default(cuid())
+  identifier String   // email or phone
+  code       String
+  type       OtpType
+  attempts   Int      @default(0)
+  verified   Boolean  @default(false)
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([identifier, type])
+  @@index([expiresAt])
+}
+
+model LoginAttempt {
+  id        String   @id @default(cuid())
+  userId    String?
+  email     String?
+  phone     String?
+  ipAddress String
+  success   Boolean
+  reason    String?
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([email])
+  @@index([ipAddress])
+  @@index([createdAt])
+}
+
+// ─────────────────────────────────────────────
+//  VENUE
+// ─────────────────────────────────────────────
+
+model Venue {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  description String?  @db.Text
+  address     String
+  city        String
+  state       String?
+  country     String   @default("MX")
+  zipCode     String?
+  lat         Decimal? @db.Decimal(10, 8)
+  lng         Decimal? @db.Decimal(11, 8)
+  phone       String?
+  email       String?
+  website     String?
+  instagram   String?
+  imageUrl    String?
+  coverUrl    String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  events Event[]
+  offers Offer[]
+
+  @@index([slug])
+  @@index([city])
+}
+
+// ─────────────────────────────────────────────
+//  EVENTS
+// ─────────────────────────────────────────────
+
+model EventCategory {
+  id        String   @id @default(cuid())
+  name      String
+  nameEn    String?
+  slug      String   @unique
+  icon      String?
+  color     String?
+  isActive  Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  events    Event[]
+  interests UserInterest[]
+
+  @@index([slug])
+}
+
+model Event {
+  id              String      @id @default(cuid())
+  title           String
+  titleEn         String?
+  description     String      @db.Text
+  descriptionEn   String?     @db.Text
+  imageUrl        String?
+  coverUrl        String?
+  venueId         String
+  categoryId      String
+  startDate       DateTime
+  endDate         DateTime
+  doorsOpenAt     DateTime?
+  status          EventStatus @default(DRAFT)
+  maxCapacity     Int?
+  currentCapacity Int         @default(0)
+  price           Decimal?    @db.Decimal(10, 2)
+  currency        String      @default("MXN")
+  isFree          Boolean     @default(true)
+  tags            String[]
+  pointsReward    Int         @default(50)
+  isHighlighted   Boolean     @default(false)
+  createdById     String
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  venue     Venue          @relation(fields: [venueId], references: [id])
+  category  EventCategory  @relation(fields: [categoryId], references: [id])
+  attendees EventAttendee[]
+  media     EventMedia[]
+
+  @@index([status])
+  @@index([startDate])
+  @@index([venueId])
+  @@index([categoryId])
+  @@index([isHighlighted])
+}
+
+model EventMedia {
+  id          String      @id @default(cuid())
+  eventId     String
+  url         String
+  type        ContentType @default(IMAGE)
+  sortOrder   Int         @default(0)
+  createdAt   DateTime    @default(now())
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([eventId])
+}
+
+model EventAttendee {
+  id           String           @id @default(cuid())
+  userId       String
+  eventId      String
+  status       AttendanceStatus @default(REGISTERED)
+  checkedInAt  DateTime?
+  cancelledAt  DateTime?
+  pointsAwarded Boolean        @default(false)
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, eventId])
+  @@index([userId])
+  @@index([eventId])
+  @@index([status])
+}
+
+// ─────────────────────────────────────────────
+//  OFFERS
+// ─────────────────────────────────────────────
+
+model Offer {
+  id               String      @id @default(cuid())
+  title            String
+  titleEn          String?
+  description      String      @db.Text
+  descriptionEn    String?     @db.Text
+  terms            String?     @db.Text
+  imageUrl         String?
+  venueId          String
+  type             OfferType
+  status           OfferStatus @default(DRAFT)
+  discountValue    Decimal?    @db.Decimal(10, 2)
+  minimumPurchase  Decimal?    @db.Decimal(10, 2)
+  maxRedemptions   Int?
+  currentRedemptions Int       @default(0)
+  maxPerUser       Int         @default(1)
+  startDate        DateTime
+  endDate          DateTime
+  daysOfWeek       Int[]       // 0=Sun, 1=Mon, ..., 6=Sat
+  startTime        String?     // HH:MM
+  endTime          String?     // HH:MM
+  isHighlighted    Boolean     @default(false)
+  pointsRequired   Int         @default(0)
+  categories       String[]
+  createdById      String
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  venue       Venue             @relation(fields: [venueId], references: [id])
+  redemptions OfferRedemption[]
+
+  @@index([status])
+  @@index([venueId])
+  @@index([startDate, endDate])
+  @@index([isHighlighted])
+}
+
+model OfferRedemption {
+  id          String   @id @default(cuid())
+  userId      String
+  offerId     String
+  code        String   @unique @default(cuid())
+  usedAt      DateTime?
+  isUsed      Boolean  @default(false)
+  expiresAt   DateTime?
+  createdAt   DateTime @default(now())
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  offer Offer @relation(fields: [offerId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([offerId])
+  @@index([code])
+}
+
+// ─────────────────────────────────────────────
+//  COMMUNITY
+// ─────────────────────────────────────────────
+
+model Post {
+  id               String     @id @default(cuid())
+  userId           String
+  content          String     @db.VarChar(2000)
+  status           PostStatus @default(PENDING_REVIEW)
+  moderationScore  Float?
+  rejectionReason  String?
+  imageUrl         String?
+  mediaUrls        String[]
+  likesCount       Int        @default(0)
+  commentsCount    Int        @default(0)
+  isPinned         Boolean    @default(false)
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+  deletedAt        DateTime?
+
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  comments  Comment[]
+  reactions Reaction[]
+  reports   Report[]   @relation("postReports")
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model Comment {
+  id           String     @id @default(cuid())
+  userId       String
+  postId       String
+  parentId     String?
+  content      String     @db.VarChar(1000)
+  status       PostStatus @default(PUBLISHED)
+  likesCount   Int        @default(0)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  deletedAt    DateTime?
+
+  user    User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post    Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  parent  Comment?  @relation("CommentReplies", fields: [parentId], references: [id])
+  replies Comment[] @relation("CommentReplies")
+  reports Report[]  @relation("commentReports")
+
+  @@index([postId])
+  @@index([userId])
+  @@index([parentId])
+}
+
+model Reaction {
+  id        String       @id @default(cuid())
+  userId    String
+  postId    String
+  type      ReactionType @default(LIKE)
+  createdAt DateTime     @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, postId])
+  @@index([postId])
+}
+
+model Report {
+  id           String           @id @default(cuid())
+  reporterId   String
+  targetType   ReportTargetType
+  targetId     String
+  reason       ReportReason
+  description  String?          @db.VarChar(500)
+  status       ReportStatus     @default(PENDING)
+  reviewedById String?
+  reviewedAt   DateTime?
+  createdAt    DateTime         @default(now())
+
+  reporter     User     @relation("reporter", fields: [reporterId], references: [id], onDelete: Cascade)
+  reportedUser User?    @relation("reportedUser", fields: [targetId], references: [id], onDelete: Cascade)
+  post         Post?    @relation("postReports", fields: [targetId], references: [id], onDelete: Cascade)
+  comment      Comment? @relation("commentReports", fields: [targetId], references: [id], onDelete: Cascade)
+
+  @@index([targetType, targetId])
+  @@index([reporterId])
+  @@index([status])
+}
+
+model ModerationLog {
+  id           String           @id @default(cuid())
+  moderatorId  String
+  targetType   ReportTargetType
+  targetId     String
+  action       ModerationAction
+  reason       String?          @db.VarChar(500)
+  metadata     Json?
+  createdAt    DateTime         @default(now())
+
+  moderator User @relation("moderator", fields: [moderatorId], references: [id])
+
+  @@index([moderatorId])
+  @@index([targetType, targetId])
+  @@index([createdAt])
+}
+
+// ─────────────────────────────────────────────
+//  WALLET & LOYALTY
+// ─────────────────────────────────────────────
+
+model LoyaltyLevel {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  nameEn      String?
+  slug        String   @unique
+  minPoints   Int
+  maxPoints   Int?
+  color       String   // hex color
+  icon        String
+  benefits    String[] // list of benefit descriptions
+  sortOrder   Int      @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  profiles UserProfile[]
+
+  @@index([minPoints])
+}
+
+model WalletTransaction {
+  id            String                @id @default(cuid())
+  userId        String
+  type          WalletTransactionType
+  points        Int
+  balance       Int                   // balance after transaction
+  description   String
+  descriptionEn String?
+  referenceId   String?
+  referenceType WalletReferenceType?
+  expiresAt     DateTime?
+  createdAt     DateTime              @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([type])
+  @@index([createdAt])
+  @@index([referenceId])
+}
+
+// ─────────────────────────────────────────────
+//  NOTIFICATIONS
+// ─────────────────────────────────────────────
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  type      NotificationType
+  title     String
+  titleEn   String?
+  body      String
+  bodyEn    String?
+  data      Json?
+  imageUrl  String?
+  read      Boolean          @default(false)
+  sentAt    DateTime?
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, read])
+  @@index([createdAt])
+}
+
+model NotificationSettings {
+  id                    String   @id @default(cuid())
+  userId                String   @unique
+  pushEnabled           Boolean  @default(true)
+  emailEnabled          Boolean  @default(true)
+  eventReminders        Boolean  @default(true)
+  newEvents             Boolean  @default(true)
+  newOffers             Boolean  @default(true)
+  communityReplies      Boolean  @default(true)
+  communityReactions    Boolean  @default(false)
+  pointsUpdates         Boolean  @default(true)
+  marketingEmails       Boolean  @default(false)
+  weeklyDigest          Boolean  @default(true)
+  updatedAt             DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ─────────────────────────────────────────────
+//  GDPR / DATA REQUESTS
+// ─────────────────────────────────────────────
+
+model DataDeletionRequest {
+  id            String            @id @default(cuid())
+  userId        String
+  reason        String?
+  scheduledFor  DateTime
+  processedAt   DateTime?
+  status        DataRequestStatus @default(PENDING)
+  createdAt     DateTime          @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+  @@index([scheduledFor])
+}
+
+model DataExportRequest {
+  id           String            @id @default(cuid())
+  userId       String
+  processedAt  DateTime?
+  status       DataRequestStatus @default(PENDING)
+  downloadUrl  String?
+  expiresAt    DateTime?
+  createdAt    DateTime          @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+}
+
+// ─────────────────────────────────────────────
+//  APP CONFIG
+// ─────────────────────────────────────────────
+
+model AppConfig {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String   @db.Text
+  isPublic  Boolean  @default(false)
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+
+  @@index([key])
+  @@index([isPublic])
+}
