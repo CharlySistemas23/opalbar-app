@@ -16,14 +16,15 @@ export default function Register() {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
-  const [phone, setPhone] = useState('+52');
+  const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const passOk = password.length >= 8 && /[A-Z]/.test(password) && /[0-9]/.test(password) && /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password);
-  const phoneOk = /^\+[1-9]\d{7,14}$/.test(phone.trim());
+  const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim().toLowerCase());
+  const phoneOk = phone.trim().length === 0 || /^\+[1-9]\d{7,14}$/.test(phone.trim());
 
   async function handleRegister() {
     setError(null);
@@ -36,12 +37,12 @@ export default function Register() {
       return;
     }
     const mail = email.trim().toLowerCase();
-    if (mail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)) {
+    if (!emailOk) {
       setError(t ? 'Email inválido.' : 'Invalid email.');
       return;
     }
     const cleanPhone = phone.trim();
-    if (!phoneOk) {
+    if (cleanPhone && !phoneOk) {
       setError(
         t
           ? 'Teléfono inválido. Usa formato internacional, ej. +525512345678.'
@@ -63,15 +64,15 @@ export default function Register() {
       await authApi.register({
         firstName: firstName.trim(),
         lastName: lastName.trim(),
-        email: mail || undefined,
-        phone: cleanPhone,
+        email: mail,
+        phone: cleanPhone || undefined,
         password,
         language,
       });
-      // Backend auto-sends PHONE_VERIFICATION OTP on register — no need to re-send here
+      // Backend auto-sends EMAIL_VERIFICATION OTP on register — no need to re-send here
       router.push({
-        pathname: '/(auth)/otp-phone',
-        params: { phone: cleanPhone, email: mail, password },
+        pathname: '/(auth)/otp-email',
+        params: { email: mail, password, purpose: 'EMAIL_VERIFICATION' },
       } as never);
     } catch (err: any) {
       setError(apiError(err, t ? 'No se pudo crear la cuenta.' : 'Could not create account.'));
@@ -130,34 +131,38 @@ export default function Register() {
               </View>
             </View>
 
-            <Field
-              icon="mail"
-              placeholder={t ? 'email@ejemplo.com (opcional)' : 'email@example.com (optional)'}
-              value={email}
-              onChangeText={setEmail}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoComplete="email"
-            />
+            <View style={[styles.inputBox, email ? (emailOk ? styles.inputBoxOk : styles.inputBoxWarn) : null]}>
+              <Feather name="mail" size={18} color={Colors.textMuted} />
+              <TextInput
+                style={styles.input}
+                value={email}
+                onChangeText={setEmail}
+                placeholder={t ? 'email@ejemplo.com' : 'email@example.com'}
+                placeholderTextColor={Colors.textMuted}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoComplete="email"
+              />
+            </View>
+            <Text style={styles.hint}>
+              {t
+                ? 'Te enviaremos un email con un código de 6 dígitos.'
+                : "We'll email you a 6-digit verification code."}
+            </Text>
 
-            <View style={[styles.inputBox, phone.length > 3 ? (phoneOk ? styles.inputBoxOk : styles.inputBoxWarn) : null]}>
+            <View style={[styles.inputBox, phone.length > 0 ? (phoneOk ? styles.inputBoxOk : styles.inputBoxWarn) : null]}>
               <Feather name="phone" size={18} color={Colors.textMuted} />
               <TextInput
                 style={styles.input}
                 value={phone}
                 onChangeText={(v) => setPhone(v.replace(/[^\d+]/g, ''))}
-                placeholder="+525512345678"
+                placeholder={t ? '+525512345678 (opcional)' : '+525512345678 (optional)'}
                 placeholderTextColor={Colors.textMuted}
                 keyboardType="phone-pad"
                 autoComplete="tel"
                 maxLength={16}
               />
             </View>
-            <Text style={styles.hint}>
-              {t
-                ? 'Te enviaremos un SMS con un código de 6 dígitos.'
-                : "We'll text you a 6-digit verification code."}
-            </Text>
 
             <View style={[styles.inputBox, password ? (passOk ? styles.inputBoxOk : styles.inputBoxWarn) : null]}>
               <Feather name="lock" size={18} color={Colors.textMuted} />

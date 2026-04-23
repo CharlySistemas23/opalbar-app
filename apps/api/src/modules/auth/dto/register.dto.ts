@@ -28,14 +28,14 @@ export class RegisterDto {
   @MaxLength(50)
   lastName: string;
 
-  @ApiPropertyOptional({ example: 'user@opalbar.com' })
-  @IsOptional()
+  @ApiProperty({ example: 'user@opalbar.com', description: 'Email — required for verification' })
   @IsEmail()
-  email?: string;
+  email: string;
 
-  @ApiProperty({ example: '+525512345678', description: 'Phone number in E.164 format — required for SMS verification' })
+  @ApiPropertyOptional({ example: '+525512345678', description: 'Phone number in E.164 format — optional' })
+  @IsOptional()
   @IsPhoneNumber()
-  phone: string;
+  phone?: string;
 
   @ApiProperty({ example: 'Secure@1234', description: 'Min 8 chars, uppercase, number, special char' })
   @IsString()

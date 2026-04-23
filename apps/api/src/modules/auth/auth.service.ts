@@ -55,20 +55,18 @@ export class AuthService {
   async register(
     dto: RegisterDto,
     ipAddress?: string,
-  ): Promise<{ message: string; phone: string; expiresIn: number }> {
-    // Phone is now required for SMS verification
-    if (!dto.phone) {
-      throw new BadRequestException('Phone number is required');
+  ): Promise<{ message: string; email: string; expiresIn: number }> {
+    // Email is required for verification
+    if (!dto.email) {
+      throw new BadRequestException('Email is required');
     }
 
     // Check uniqueness
-    if (dto.email) {
-      const existingEmail = await this.prisma.user.findUnique({
-        where: { email: dto.email },
-      });
-      if (existingEmail) {
-        throw new ConflictException('An account with this email already exists');
-      }
+    const existingEmail = await this.prisma.user.findUnique({
+      where: { email: dto.email },
+    });
+    if (existingEmail) {
+      throw new ConflictException('An account with this email already exists');
     }
 
     if (dto.phone) {
@@ -147,24 +145,24 @@ export class AuthService {
       return newUser;
     });
 
-    this.logger.log(`New user registered: ${user.id} (${dto.email || dto.phone})`);
+    this.logger.log(`New user registered: ${user.id} (${dto.email})`);
 
-    // Auto-send PHONE_VERIFICATION OTP so the user lands on the verify screen
+    // Auto-send EMAIL_VERIFICATION OTP so the user lands on the verify screen
     let expiresIn = 600;
     try {
       const otp = await this.otpService.sendOtp({
-        phone: dto.phone,
-        type: OtpType.PHONE_VERIFICATION,
+        email: dto.email,
+        type: OtpType.EMAIL_VERIFICATION,
       });
       expiresIn = otp.expiresIn;
     } catch (err: any) {
       // Don't block registration if OTP send fails — user can resend from the verify screen
-      this.logger.error(`Failed to auto-send OTP to ${dto.phone}: ${err?.message ?? err}`);
+      this.logger.error(`Failed to auto-send OTP to ${dto.email}: ${err?.message ?? err}`);
     }
 
     return {
-      message: 'Account created. We sent a verification code to your phone.',
-      phone: dto.phone,
+      message: 'Account created. We sent a verification code to your email.',
+      email: dto.email,
       expiresIn,
     };
   }
