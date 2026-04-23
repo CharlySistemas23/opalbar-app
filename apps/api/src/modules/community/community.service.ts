@@ -313,10 +313,11 @@ export class CommunityService {
     // For replies, notify the parent comment's author instead.
     const actor = await this.prisma.userProfile.findUnique({
       where: { userId },
-      select: { firstName: true, lastName: true },
+      select: { firstName: true, lastName: true, avatarUrl: true },
     });
     const actorName =
       `${actor?.firstName ?? ''} ${actor?.lastName ?? ''}`.trim() || 'Alguien';
+    const actorAvatarUrl = actor?.avatarUrl ?? null;
 
     if (dto.parentId) {
       const parent = await this.prisma.comment.findUnique({
@@ -332,7 +333,7 @@ export class CommunityService {
             titleEn: 'New reply',
             body: `${actorName} respondió a tu comentario.`,
             bodyEn: `${actorName} replied to your comment.`,
-            data: { postId, commentId: comment.id, actorId: userId },
+            data: { postId, commentId: comment.id, actorId: userId, actorName, actorAvatarUrl },
           })
           .catch(() => {});
       }
@@ -345,7 +346,7 @@ export class CommunityService {
           titleEn: 'New comment',
           body: `${actorName} comentó tu publicación.`,
           bodyEn: `${actorName} commented on your post.`,
-          data: { postId, commentId: comment.id, actorId: userId },
+          data: { postId, commentId: comment.id, actorId: userId, actorName, actorAvatarUrl },
         })
         .catch(() => {});
     }
@@ -409,10 +410,11 @@ export class CommunityService {
     if (post.userId !== userId) {
       const actor = await this.prisma.userProfile.findUnique({
         where: { userId },
-        select: { firstName: true, lastName: true },
+        select: { firstName: true, lastName: true, avatarUrl: true },
       });
       const actorName =
         `${actor?.firstName ?? ''} ${actor?.lastName ?? ''}`.trim() || 'Alguien';
+      const actorAvatarUrl = actor?.avatarUrl ?? null;
       this.notifications
         .createNotification({
           userId: post.userId,
@@ -421,7 +423,7 @@ export class CommunityService {
           titleEn: 'New reaction',
           body: `${actorName} le dio like a tu publicación.`,
           bodyEn: `${actorName} liked your post.`,
-          data: { postId, actorId: userId },
+          data: { postId, actorId: userId, actorName, actorAvatarUrl },
         })
         .catch(() => {});
     }

@@ -113,6 +113,7 @@ export default function Profile() {
             fallbackColor={Colors.accentPrimary}
             size="lg"
             showIdleRing
+            isSelf
             onPressNoStories={() => router.push('/(app)/community/new-story' as never)}
           />
           <Text style={styles.profileName}>{fullName}</Text>

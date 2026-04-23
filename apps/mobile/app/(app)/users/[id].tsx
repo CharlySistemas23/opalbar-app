@@ -421,6 +421,7 @@ export default function UserProfile() {
               fallbackColor={colorFor(profile.id)}
               size="xl"
               showIdleRing
+              isSelf={isMe}
             />
             {isMe && (
               <Pressable

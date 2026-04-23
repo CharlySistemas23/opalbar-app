@@ -75,6 +75,10 @@ interface Props {
   onPressNoStories?: () => void;
   /** Keep a subtle decorative ring even when the user has no stories. */
   showIdleRing?: boolean;
+  /** When true, always use the bright accent ring if the user has stories
+   *  (skip the "seen → grey" state). Useful on the user's own profile so
+   *  they can tell at a glance that they have an active story up. */
+  isSelf?: boolean;
 }
 
 export function StoryRing({
@@ -88,6 +92,7 @@ export function StoryRing({
   onPress,
   onPressNoStories,
   showIdleRing,
+  isSelf,
 }: Props) {
   const router = useRouter();
   const dims = SIZE_MAP[size];
@@ -129,7 +134,7 @@ export function StoryRing({
 
   const ringBg = !showRing
     ? 'transparent'
-    : ringState.hasStories && ringState.hasUnseen
+    : ringState.hasStories && (ringState.hasUnseen || isSelf)
       ? Colors.accentPrimary
       : ringState.hasStories
         ? Colors.border

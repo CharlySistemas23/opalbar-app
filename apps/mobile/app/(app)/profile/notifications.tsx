@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, FlatList, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, FlatList, ActivityIndicator, TouchableOpacity, Image, Pressable } from 'react-native';
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -54,30 +54,47 @@ export default function Notifications() {
 
   useEffect(() => { load(); }, [load]);
 
+  // Backend returns `read`; older clients/stubs used `isRead`. Normalize.
+  const isRead = (n: any) => !!(n.read ?? n.isRead);
+
   async function markAll() {
     try {
       await notificationsApi.markAllRead();
-      setItems((prev) => prev.map((n) => ({ ...n, isRead: true })));
+      setItems((prev) => prev.map((n) => ({ ...n, read: true, isRead: true })));
     } catch {}
   }
 
+  async function markReadLocal(id: string) {
+    try { await notificationsApi.markRead(id); } catch {}
+    setItems((prev) => prev.map((x) => (x.id === id ? { ...x, read: true, isRead: true } : x)));
+  }
+
   async function openNotif(n: any) {
-    if (!n.isRead) {
-      try { await notificationsApi.markRead(n.id); } catch {}
-      setItems((prev) => prev.map((x) => (x.id === n.id ? { ...x, isRead: true } : x)));
-    }
-    // Navigate based on type/metadata
+    if (!isRead(n)) await markReadLocal(n.id);
+
     const type = (n.type || '').toUpperCase();
-    const target = n.targetId || n.data?.targetId || n.data?.eventId || n.data?.postId;
-    if (target) {
-      if (type.includes('EVENT')) router.push(`/(app)/events/${target}` as never);
-      else if (type.includes('OFFER')) router.push(`/(app)/offers/${target}` as never);
-      else if (type.includes('COMMENT') || type.includes('POST')) router.push(`/(app)/community/posts/${target}` as never);
-      else if (type.includes('FOLLOW') || type.includes('MESSAGE')) router.push(`/(app)/users/${target}` as never);
+    const d = n.data || {};
+    const postId = d.postId;
+    const target = n.targetId || d.targetId || d.eventId || postId;
+
+    if (type.includes('REACTION') || type.includes('REPLY') || type.includes('MENTION') || type.includes('COMMENT') || type.includes('POST')) {
+      if (postId) return router.push(`/(app)/community/posts/${postId}` as never);
+    }
+    if (type.includes('EVENT') && target) return router.push(`/(app)/events/${target}` as never);
+    if (type.includes('OFFER') && target) return router.push(`/(app)/offers/${target}` as never);
+    if ((type.includes('FOLLOW') || type.includes('MESSAGE')) && target) {
+      return router.push(`/(app)/users/${target}` as never);
     }
   }
 
-  const unreadCount = items.filter((n) => !n.isRead).length;
+  async function openActor(n: any) {
+    const actorId = n.data?.actorId;
+    if (!actorId) return;
+    if (!isRead(n)) await markReadLocal(n.id);
+    router.push(`/(app)/users/${actorId}` as never);
+  }
+
+  const unreadCount = items.filter((n) => !isRead(n)).length;
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
@@ -105,17 +122,39 @@ export default function Notifications() {
           contentContainerStyle={{ paddingBottom: 24 }}
           renderItem={({ item }) => {
             const { icon, color } = iconForType(item.type || '');
+            const unread = !isRead(item);
+            const actorId = item.data?.actorId;
+            const actorAvatar = item.data?.actorAvatarUrl;
             return (
               <TouchableOpacity
-                style={[styles.row, !item.isRead && styles.rowUnread]}
+                style={[styles.row, unread && styles.rowUnread]}
                 onPress={() => openNotif(item)}
                 activeOpacity={0.85}
               >
-                <View style={[styles.iconBox, { backgroundColor: color + '20' }]}>
-                  <Feather name={icon} size={18} color={color} />
-                </View>
+                {actorId ? (
+                  <Pressable
+                    onPress={(e) => { e.stopPropagation?.(); openActor(item); }}
+                    hitSlop={6}
+                    style={({ pressed }) => [styles.actorWrap, pressed && { opacity: 0.8 }]}
+                  >
+                    {actorAvatar ? (
+                      <Image source={{ uri: actorAvatar }} style={styles.actorAvatar} />
+                    ) : (
+                      <View style={[styles.actorAvatar, { backgroundColor: color + '30', alignItems: 'center', justifyContent: 'center' }]}>
+                        <Feather name="user" size={16} color={color} />
+                      </View>
+                    )}
+                    <View style={[styles.actorBadge, { backgroundColor: color }]}>
+                      <Feather name={icon} size={10} color="#fff" />
+                    </View>
+                  </Pressable>
+                ) : (
+                  <View style={[styles.iconBox, { backgroundColor: color + '20' }]}>
+                    <Feather name={icon} size={18} color={color} />
+                  </View>
+                )}
                 <View style={{ flex: 1 }}>
-                  <Text style={[styles.rowTitle, !item.isRead && { fontWeight: '800' }]} numberOfLines={2}>
+                  <Text style={[styles.rowTitle, unread && { fontWeight: '800' }]} numberOfLines={2}>
                     {item.title || item.type || 'Notificación'}
                   </Text>
                   {item.body || item.message ? (
@@ -123,7 +162,7 @@ export default function Notifications() {
                   ) : null}
                   <Text style={styles.rowTime}>{relTime(item.createdAt)}</Text>
                 </View>
-                {!item.isRead && <View style={styles.dot} />}
+                {unread && <View style={styles.dot} />}
               </TouchableOpacity>
             );
           }}
@@ -175,6 +214,17 @@ const styles = StyleSheet.create({
   iconBox: {
     width: 40, height: 40, borderRadius: 12,
     alignItems: 'center', justifyContent: 'center',
+  },
+  actorWrap: { width: 44, height: 44, position: 'relative' },
+  actorAvatar: {
+    width: 44, height: 44, borderRadius: 22,
+    backgroundColor: Colors.bgElevated,
+  },
+  actorBadge: {
+    position: 'absolute', right: -2, bottom: -2,
+    width: 18, height: 18, borderRadius: 9,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 2, borderColor: Colors.bgPrimary,
   },
   rowTitle: { color: Colors.textPrimary, fontSize: 14, fontWeight: '600' },
   rowBody: { color: Colors.textSecondary, fontSize: 12, marginTop: 2, lineHeight: 17 },
