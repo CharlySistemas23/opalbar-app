@@ -2,12 +2,16 @@ import { Injectable, Logger } from '@nestjs/common';
 import { NotificationType } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { paginate, getPaginationOffset, PaginationDto } from '../../common/dto/pagination.dto';
+import { PushService } from '../push/push.service';
 
 @Injectable()
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly push: PushService,
+  ) {}
 
   async getNotifications(userId: string, pagination: PaginationDto) {
     const { page = 1, limit = 20 } = pagination;
@@ -70,26 +74,6 @@ export class NotificationsService {
     body: string,
     data?: Record<string, unknown>,
   ) {
-    try {
-      // Get active device tokens
-      const sessions = await this.prisma.session.findMany({
-        where: { userId, isActive: true, deviceToken: { not: null } },
-        select: { deviceToken: true },
-      });
-
-      const tokens = sessions.map((s) => s.deviceToken!).filter(Boolean);
-
-      if (tokens.length === 0) return;
-
-      // Placeholder — In production: call FCM/APNs API
-      this.logger.log(`Push notification queued for user ${userId}: "${title}" → ${tokens.length} device(s)`);
-
-      // FCM implementation would go here:
-      // const fcmServerKey = this.config.get('fcm.serverKey');
-      // await fetch('https://fcm.googleapis.com/fcm/send', { ... })
-
-    } catch (error) {
-      this.logger.error(`Failed to send push to user ${userId}:`, error);
-    }
+    await this.push.sendToUser(userId, { title, body, data });
   }
 }

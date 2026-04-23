@@ -535,6 +535,13 @@ export default function UserProfile() {
               <Feather name="plus" size={14} color={Colors.textPrimary} />
               <Text style={styles.editLabel}>{t ? 'Publicar' : 'Post'}</Text>
             </Pressable>
+            <Pressable
+              style={({ pressed }) => [styles.editBtn, pressed && { opacity: 0.85 }]}
+              onPress={() => router.push('/(app)/community/new-story' as never)}
+            >
+              <Feather name="plus-circle" size={14} color={Colors.textPrimary} />
+              <Text style={styles.editLabel}>{t ? 'Historia' : 'Story'}</Text>
+            </Pressable>
           </View>
         )}
 

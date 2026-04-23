@@ -3,11 +3,12 @@ import {
   Injectable, NotFoundException,
 } from '@nestjs/common';
 import { createHash } from 'crypto';
-import { PostStatus, ReportTargetType, StoryScope, UserRole } from '@prisma/client';
+import { NotificationType, PostStatus, ReportTargetType, StoryScope, UserRole } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { RedisService } from '../../database/redis.service';
 import { paginate, getPaginationOffset } from '../../common/dto/pagination.dto';
 import { CommunityGateway } from './community.gateway';
+import { NotificationsService } from '../notifications/notifications.service';
 import {
   CreatePostDto, UpdatePostDto, CreateCommentDto,
   ReactDto, CreateReportDto, PostFilterDto, CommunityFeedScope, PostSurface,
@@ -34,6 +35,7 @@ export class CommunityService {
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
     private readonly communityGateway: CommunityGateway,
+    private readonly notifications: NotificationsService,
   ) {}
 
   private static hashFilter(obj: unknown): string {
@@ -307,6 +309,47 @@ export class CommunityService {
       commentId: comment.id,
     });
 
+    // Notify post author on top-level comments.
+    // For replies, notify the parent comment's author instead.
+    const actor = await this.prisma.userProfile.findUnique({
+      where: { userId },
+      select: { firstName: true, lastName: true },
+    });
+    const actorName =
+      `${actor?.firstName ?? ''} ${actor?.lastName ?? ''}`.trim() || 'Alguien';
+
+    if (dto.parentId) {
+      const parent = await this.prisma.comment.findUnique({
+        where: { id: dto.parentId },
+        select: { userId: true },
+      });
+      if (parent && parent.userId !== userId) {
+        this.notifications
+          .createNotification({
+            userId: parent.userId,
+            type: NotificationType.COMMUNITY_REPLY,
+            title: 'Nueva respuesta',
+            titleEn: 'New reply',
+            body: `${actorName} respondió a tu comentario.`,
+            bodyEn: `${actorName} replied to your comment.`,
+            data: { postId, commentId: comment.id, actorId: userId },
+          })
+          .catch(() => {});
+      }
+    } else if (post.userId !== userId) {
+      this.notifications
+        .createNotification({
+          userId: post.userId,
+          type: NotificationType.COMMUNITY_REPLY,
+          title: 'Nuevo comentario',
+          titleEn: 'New comment',
+          body: `${actorName} comentó tu publicación.`,
+          bodyEn: `${actorName} commented on your post.`,
+          data: { postId, commentId: comment.id, actorId: userId },
+        })
+        .catch(() => {});
+    }
+
     return comment;
   }
 
@@ -362,6 +405,27 @@ export class CommunityService {
     ]);
     await this.invalidatePostCache(postId);
     this.communityGateway.emitChanged({ type: 'post_reacted', postId });
+
+    if (post.userId !== userId) {
+      const actor = await this.prisma.userProfile.findUnique({
+        where: { userId },
+        select: { firstName: true, lastName: true },
+      });
+      const actorName =
+        `${actor?.firstName ?? ''} ${actor?.lastName ?? ''}`.trim() || 'Alguien';
+      this.notifications
+        .createNotification({
+          userId: post.userId,
+          type: NotificationType.COMMUNITY_REACTION,
+          title: 'Nueva reacción',
+          titleEn: 'New reaction',
+          body: `${actorName} le dio like a tu publicación.`,
+          bodyEn: `${actorName} liked your post.`,
+          data: { postId, actorId: userId },
+        })
+        .catch(() => {});
+    }
+
     return { reacted: true, type: dto.type };
   }
 
