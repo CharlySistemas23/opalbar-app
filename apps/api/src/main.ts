@@ -114,7 +114,7 @@ Todos los endpoints protegidos requieren un **Bearer Token** JWT obtenido en \`P
   app.enableShutdownHooks();
 
   // ── Start ─────────────────────────────────
-  await app.listen(port);
+  await app.listen(port, '0.0.0.0');
 
   Logger.log(
     `[API] OPALBAR API running on: http://localhost:${port}/${apiPrefix}`,
