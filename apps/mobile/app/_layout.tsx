@@ -21,6 +21,7 @@ import { useAuthStore } from '@/stores/auth.store';
 import { usePushRegistration } from '@/hooks/usePushRegistration';
 import { ToastHost } from '@/components/Toast';
 import { OfflineBanner } from '@/components/OfflineBanner';
+import { UpdateOverlay } from '@/components/UpdateOverlay';
 
 // ── Web diagnostic: catch ALL errors before React mounts ───────────────────
 if (Platform.OS === 'web' && typeof window !== 'undefined') {
@@ -185,6 +186,7 @@ export default function RootLayout() {
           <Stack.Screen name="(guest)" />
         </Stack>
         <ToastHost />
+        <UpdateOverlay />
       </SafeAreaProvider>
     </ErrorBoundary>
   );

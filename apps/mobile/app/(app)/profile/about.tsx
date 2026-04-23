@@ -1,9 +1,12 @@
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Linking, Alert } from 'react-native';
+import { useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Linking, Alert, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { useAppStore } from '@/stores/app.store';
 import { Colors, Typography, Spacing, Radius } from '@/constants/tokens';
+import { checkForUpdateManual } from '@/components/UpdateOverlay';
+import { toast } from '@/components/Toast';
 
 const LEGAL_URLS = {
   terms: 'https://opalbar.app/terms',
@@ -14,6 +17,20 @@ export default function About() {
   const router = useRouter();
   const { language } = useAppStore();
   const t = language === 'es';
+  const [checking, setChecking] = useState(false);
+
+  async function onCheckUpdates() {
+    if (checking) return;
+    setChecking(true);
+    const res = await checkForUpdateManual();
+    setChecking(false);
+    if (res.kind === 'none') {
+      toast(t ? 'Ya tienes la versión más reciente.' : 'You are on the latest version.', 'success');
+    } else if (res.kind === 'error') {
+      toast(t ? 'No se pudo comprobar. Intenta de nuevo.' : 'Check failed. Try again.', 'danger');
+    }
+    // 'downloading' → UpdateOverlay takes over and auto-reloads.
+  }
 
   const openLegal = async (url: string) => {
     try {
@@ -63,6 +80,20 @@ export default function About() {
         </View>
 
         <View style={styles.card}>
+          <TouchableOpacity style={styles.linkRow} onPress={onCheckUpdates} activeOpacity={0.85} disabled={checking}>
+            <View style={styles.updateRow}>
+              <Feather name="download-cloud" size={18} color={Colors.accentPrimary} />
+              <Text style={styles.linkLabel}>{t ? 'Buscar actualizaciones' : 'Check for updates'}</Text>
+            </View>
+            {checking ? (
+              <ActivityIndicator size="small" color={Colors.accentPrimary} />
+            ) : (
+              <Text style={styles.arrow}>›</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.card}>
           <TouchableOpacity style={styles.linkRow} onPress={() => openLegal(LEGAL_URLS.terms)} activeOpacity={0.85}>
             <Text style={styles.linkLabel}>{t ? 'Términos de servicio' : 'Terms of service'}</Text>
             <Text style={styles.arrow}>›</Text>
@@ -104,4 +135,5 @@ const styles = StyleSheet.create({
   linkLabel: { fontSize: Typography.fontSize.base, color: Colors.textPrimary },
   arrow: { fontSize: 20, color: Colors.textDisabled },
   copy: { fontSize: Typography.fontSize.xs, color: Colors.textDisabled, textAlign: 'center' },
+  updateRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing[3] },
 });
