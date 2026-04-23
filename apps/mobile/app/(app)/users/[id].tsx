@@ -22,6 +22,7 @@ import { useAuthStore } from '@/stores/auth.store';
 import { useAppStore } from '@/stores/app.store';
 import { toast } from '@/components/Toast';
 import { StoryRing } from '@/components/StoryRing';
+import { Heart } from '@/components/Heart';
 import { Colors, Radius } from '@/constants/tokens';
 import { sharePost } from '@/utils/share';
 import { uploadImage, UploadError } from '@/utils/uploadImage';
@@ -624,7 +625,7 @@ export default function UserProfile() {
                   {(p._count?.reactions > 0 || p._count?.comments > 0) && (
                     <View style={styles.tileOverlay}>
                       <View style={styles.tileOverlayRow}>
-                        <Feather name="heart" size={12} color="#fff" />
+                        <Heart filled size={12} color="#fff" />
                         <Text style={styles.tileOverlayText}>{p._count?.reactions ?? 0}</Text>
                       </View>
                       <View style={styles.tileOverlayRow}>
@@ -1024,7 +1025,7 @@ function FeedList({
                 {likes > 0 && (
                   <View style={styles.fbStatsLeft}>
                     <View style={styles.fbLikeBubble}>
-                      <Feather name="heart" size={10} color="#fff" />
+                      <Heart filled size={10} color="#fff" />
                     </View>
                     <Text style={styles.fbStatsText}>
                       {likes} {likes === 1 ? (t ? 'me gusta' : 'like') : t ? 'me gustan' : 'likes'}
@@ -1046,8 +1047,8 @@ function FeedList({
                 style={({ pressed }) => [styles.fbActionBtn, pressed && styles.pressed]}
                 onPress={() => onToggleLike(p.id)}
               >
-                <Feather
-                  name="heart"
+                <Heart
+                  filled={!!p.hasReacted}
                   size={18}
                   color={p.hasReacted ? Colors.accentDanger : Colors.textSecondary}
                 />

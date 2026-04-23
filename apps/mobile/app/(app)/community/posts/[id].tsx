@@ -25,6 +25,7 @@ import { useAppStore } from '@/stores/app.store';
 import { ReportSheet } from '@/components/ReportSheet';
 import { toast } from '@/components/Toast';
 import { Colors } from '@/constants/tokens';
+import { Heart } from '@/components/Heart';
 import { useCommunityRealtime } from '@/hooks/useCommunityRealtime';
 import { useFeedback } from '@/hooks/useFeedback';
 import { sharePost } from '@/utils/share';
@@ -419,7 +420,7 @@ export default function PostDetail() {
                     <Image source={{ uri: post.imageUrl }} style={styles.img} resizeMode="cover" />
                     {showLikeBurst && (
                       <View pointerEvents="none" style={styles.likeBurst}>
-                        <Feather name="heart" size={110} color="#fff" />
+                        <Heart filled size={110} color="#fff" />
                       </View>
                     )}
                   </Pressable>
@@ -431,7 +432,7 @@ export default function PostDetail() {
                     {likeCount > 0 ? (
                       <View style={styles.statsStripLeft}>
                         <View style={styles.likeBubble}>
-                          <Feather name="heart" size={10} color="#fff" />
+                          <Heart filled size={10} color="#fff" />
                         </View>
                         <Text style={styles.statsStripText}>
                           {likeCount}{' '}
@@ -469,8 +470,8 @@ export default function PostDetail() {
                     onPress={toggleLike}
                     hitSlop={4}
                   >
-                    <Feather
-                      name="heart"
+                    <Heart
+                      filled={liked}
                       size={20}
                       color={liked ? Colors.accentDanger : Colors.textSecondary}
                     />
@@ -845,14 +846,14 @@ function CommentBubble({
 
           {likes > 0 && (
             <View style={styles.bubbleLikeChip}>
-              <Feather name="heart" size={9} color="#fff" />
+              <Heart filled size={9} color="#fff" />
               <Text style={styles.bubbleLikeChipText}>{likes}</Text>
             </View>
           )}
 
           {pulse && (
             <View pointerEvents="none" style={styles.bubblePulse}>
-              <Feather name="heart" size={44} color={Colors.accentDanger} />
+              <Heart filled size={44} color={Colors.accentDanger} />
             </View>
           )}
         </Pressable>

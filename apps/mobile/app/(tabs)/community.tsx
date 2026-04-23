@@ -22,6 +22,7 @@ import { useAppStore } from '@/stores/app.store';
 import { Colors, Radius } from '@/constants/tokens';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
+import { Heart } from '@/components/Heart';
 import { useFeedback } from '@/hooks/useFeedback';
 import { useCommunityRealtime } from '@/hooks/useCommunityRealtime';
 import { sharePost } from '@/utils/share';
@@ -630,7 +631,7 @@ function PostCard({
             <Image source={{ uri: post.imageUrl }} style={styles.postImg} resizeMode="cover" />
             {showLikeBurst && (
               <View pointerEvents="none" style={styles.likeBurst}>
-                <Feather name="heart" size={96} color="#fff" />
+                <Heart filled size={96} color="#fff" />
               </View>
             )}
           </Pressable>
@@ -640,11 +641,10 @@ function PostCard({
         <View style={styles.actionsBar}>
           <View style={styles.actionsLeft}>
             <TouchableOpacity style={styles.actionBtn} onPress={onLike} hitSlop={8} activeOpacity={0.6}>
-              <Feather
-                name="heart"
+              <Heart
                 size={24}
+                filled={!!post.hasReacted}
                 color={post.hasReacted ? Colors.accentDanger : Colors.textPrimary}
-                style={post.hasReacted ? { opacity: 1 } : undefined}
               />
             </TouchableOpacity>
             <TouchableOpacity style={styles.actionBtn} onPress={onPress} hitSlop={8} activeOpacity={0.6}>
