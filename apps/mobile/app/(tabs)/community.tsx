@@ -271,7 +271,9 @@ export default function Community() {
           <Feather name="plus" size={24} color={Colors.textPrimary} />
         </TouchableOpacity>
 
-        <Text style={styles.title} pointerEvents="none">OPAL BAR</Text>
+        <View style={styles.titleWrap} pointerEvents="none">
+          <Text style={styles.title}>OPAL BAR</Text>
+        </View>
 
         <View style={styles.hdrRight}>
           <TouchableOpacity
@@ -730,19 +732,20 @@ const styles = StyleSheet.create({
     paddingTop: 6,
     paddingBottom: 10,
   },
-  title: {
+  titleWrap: {
     position: 'absolute',
     left: 0,
     right: 0,
     top: 6,
     bottom: 10,
-    textAlign: 'center',
-    textAlignVertical: 'center',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  title: {
     color: Colors.accentPrimary,
     fontSize: 20,
     fontWeight: '800',
     letterSpacing: 1.8,
-    lineHeight: 40,
   },
   hdrRight: { flexDirection: 'row', gap: 14 },
   iconBtn: {
