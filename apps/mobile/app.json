@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "OPALBAR",
-    "slug": "opalbar",
+    "slug": "opalbar-app",
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
@@ -72,6 +72,11 @@
     "experiments": {
       "typedRoutes": true
     },
-    "scheme": "opalbar"
+    "scheme": "opalbar",
+    "extra": {
+      "eas": {
+        "projectId": "ea5c700a-7691-454c-b81b-f0f853f1a7b4"
+      }
+    }
   }
 }
