@@ -61,7 +61,6 @@ export class OtpService {
     const attempts = await this.redis.incr(attemptsKey);
 
     if (attempts === 1) {
-      // First attempt — set TTL window (5 min)
       await this.redis.expire(attemptsKey, 300);
     }
 
@@ -72,39 +71,41 @@ export class OtpService {
       );
     }
 
-    // Generate OTP
-    const otpLength = this.config.get<number>('otp.length', 6);
-    const code = this.generateCode(otpLength);
     const expiresMinutes = this.config.get<number>('otp.expiresMinutes', 10);
-    const expiresAt = new Date(Date.now() + expiresMinutes * 60 * 1000);
 
-    // Invalidate any existing OTP for this identifier+type
-    await this.prisma.otp.updateMany({
-      where: { identifier, type: dto.type, verified: false },
-      data: { verified: true }, // mark old ones as used
-    });
-
-    // Create new OTP in DB
-    await this.prisma.otp.create({
-      data: { identifier, code, type: dto.type, expiresAt },
-    });
-
-    // Cache in Redis (quick lookup)
-    const otpKey = RedisService.otpKey(identifier, dto.type);
-    await this.redis.setJson(otpKey, { code, expiresAt: expiresAt.toISOString() }, expiresMinutes * 60);
-
-    // Send
     if (isEmail) {
+      // EMAIL: generate locally, persist in DB/Redis, send via SMTP
+      const otpLength = this.config.get<number>('otp.length', 6);
+      const code = this.generateCode(otpLength);
+      const expiresAt = new Date(Date.now() + expiresMinutes * 60 * 1000);
+
+      await this.prisma.otp.updateMany({
+        where: { identifier, type: dto.type, verified: false },
+        data: { verified: true },
+      });
+
+      await this.prisma.otp.create({
+        data: { identifier, code, type: dto.type, expiresAt },
+      });
+
+      const otpKey = RedisService.otpKey(identifier, dto.type);
+      await this.redis.setJson(
+        otpKey,
+        { code, expiresAt: expiresAt.toISOString() },
+        expiresMinutes * 60,
+      );
+
       await this.sendEmailOtp(dto.email!, code, dto.type, expiresMinutes);
+
+      if (process.env.NODE_ENV !== 'production') {
+        this.logger.warn(`[DEV] OTP code for ${identifier}: ${code}`);
+      }
     } else {
-      await this.sendSmsOtp(dto.phone!, code, dto.type, expiresMinutes);
+      // PHONE: delegate generation + storage to Twilio Verify
+      await this.sendSmsOtpViaVerify(dto.phone!, dto.type);
     }
 
     this.logger.log(`OTP sent to ${identifier} (type: ${dto.type})`);
-    // DEV ONLY: also log the code when not in production
-    if (process.env.NODE_ENV !== 'production') {
-      this.logger.warn(`[DEV] OTP code for ${identifier}: ${code}`);
-    }
 
     return {
       message: isEmail
@@ -119,54 +120,57 @@ export class OtpService {
   // ─────────────────────────────────────────
 
   async verifyOtp(dto: VerifyOtpDto): Promise<boolean> {
-    const otpKey = RedisService.otpKey(dto.identifier, dto.type);
+    const isEmail = dto.identifier.includes('@');
 
-    // Try Redis first (fast path)
-    const cached = await this.redis.getJson<{ code: string; expiresAt: string }>(otpKey);
-    if (cached) {
-      if (new Date(cached.expiresAt) < new Date()) {
+    if (isEmail) {
+      const otpKey = RedisService.otpKey(dto.identifier, dto.type);
+
+      // Try Redis first (fast path)
+      const cached = await this.redis.getJson<{ code: string; expiresAt: string }>(otpKey);
+      if (cached) {
+        if (new Date(cached.expiresAt) < new Date()) {
+          await this.redis.del(otpKey);
+          throw new BadRequestException('OTP has expired. Please request a new code.');
+        }
+        if (cached.code !== dto.code) {
+          throw new BadRequestException('Invalid OTP code');
+        }
         await this.redis.del(otpKey);
-        throw new BadRequestException('OTP has expired. Please request a new code.');
-      }
-      if (cached.code !== dto.code) {
-        throw new BadRequestException('Invalid OTP code');
-      }
-      // Valid — clear cache
-      await this.redis.del(otpKey);
-    } else {
-      // Fallback to DB
-      const otp = await this.prisma.otp.findFirst({
-        where: {
-          identifier: dto.identifier,
-          type: dto.type,
-          verified: false,
-          expiresAt: { gt: new Date() },
-        },
-        orderBy: { createdAt: 'desc' },
-      });
+      } else {
+        const otp = await this.prisma.otp.findFirst({
+          where: {
+            identifier: dto.identifier,
+            type: dto.type,
+            verified: false,
+            expiresAt: { gt: new Date() },
+          },
+          orderBy: { createdAt: 'desc' },
+        });
 
-      if (!otp) {
-        throw new BadRequestException('OTP not found or expired. Please request a new code.');
-      }
+        if (!otp) {
+          throw new BadRequestException('OTP not found or expired. Please request a new code.');
+        }
 
-      if (otp.attempts >= this.config.get<number>('otp.maxAttempts', 5)) {
-        throw new TooManyRequestsException('Too many failed attempts. Please request a new code.');
-      }
+        if (otp.attempts >= this.config.get<number>('otp.maxAttempts', 5)) {
+          throw new TooManyRequestsException('Too many failed attempts. Please request a new code.');
+        }
 
-      if (otp.code !== dto.code) {
-        // Increment attempts
+        if (otp.code !== dto.code) {
+          await this.prisma.otp.update({
+            where: { id: otp.id },
+            data: { attempts: { increment: 1 } },
+          });
+          throw new BadRequestException('Invalid OTP code');
+        }
+
         await this.prisma.otp.update({
           where: { id: otp.id },
-          data: { attempts: { increment: 1 } },
+          data: { verified: true },
         });
-        throw new BadRequestException('Invalid OTP code');
       }
-
-      // Mark as verified
-      await this.prisma.otp.update({
-        where: { id: otp.id },
-        data: { verified: true },
-      });
+    } else {
+      // Phone: delegate verification to Twilio Verify
+      await this.checkSmsOtpViaVerify(dto.identifier, dto.code);
     }
 
     // Clear rate limit
@@ -245,34 +249,84 @@ export class OtpService {
   }
 
   // ─────────────────────────────────────────
-  //  SMS SENDER (Twilio)
+  //  SMS SENDER (Twilio Verify)
   // ─────────────────────────────────────────
 
-  private async sendSmsOtp(
-    phone: string,
-    code: string,
-    type: OtpType,
-    expiresMinutes: number,
-  ): Promise<void> {
+  private async getTwilioClient() {
     const accountSid = this.config.get<string>('twilio.accountSid');
     const authToken = this.config.get<string>('twilio.authToken');
-    const fromNumber = this.config.get<string>('twilio.fromNumber');
+    const serviceSid = this.config.get<string>('twilio.verifyServiceSid');
 
-    if (!accountSid || !authToken || !fromNumber) {
-      this.logger.warn('Twilio not configured — SMS not sent');
+    if (!accountSid || !authToken || !serviceSid) {
+      return null;
+    }
+
+    const twilio = await import('twilio');
+    return {
+      client: twilio.default(accountSid, authToken),
+      serviceSid,
+    };
+  }
+
+  private async sendSmsOtpViaVerify(phone: string, type: OtpType): Promise<void> {
+    const twilio = await this.getTwilioClient();
+    if (!twilio) {
+      this.logger.warn('Twilio Verify not configured — SMS not sent');
+      if (process.env.NODE_ENV !== 'production') {
+        throw new BadRequestException(
+          'SMS OTP no está configurado. Configura TWILIO_VERIFY_SERVICE_SID.',
+        );
+      }
       return;
     }
 
-    const message = this.getSmsMessage(code, type, expiresMinutes);
+    const locale = this.config.get<string>('twilio.verifyLocale', 'es');
 
     try {
-      // Dynamic import to avoid issues when Twilio isn't configured
-      const twilio = await import('twilio');
-      const client = twilio.default(accountSid, authToken);
-      await client.messages.create({ body: message, from: fromNumber, to: phone });
-      this.logger.log(`SMS OTP sent to ${phone}`);
-    } catch (error) {
-      this.logger.error(`Failed to send SMS OTP to ${phone}:`, error);
+      await twilio.client.verify.v2
+        .services(twilio.serviceSid)
+        .verifications.create({
+          to: phone,
+          channel: 'sms',
+          locale,
+        });
+      this.logger.log(`[Verify] SMS OTP sent to ${phone} (type: ${type})`);
+    } catch (error: any) {
+      this.logger.error(
+        `[Verify] Failed to send SMS OTP to ${phone}: ${error?.message ?? error}`,
+      );
+      throw new BadRequestException(
+        error?.message || 'No se pudo enviar el código SMS. Intenta de nuevo.',
+      );
+    }
+  }
+
+  private async checkSmsOtpViaVerify(phone: string, code: string): Promise<void> {
+    const twilio = await this.getTwilioClient();
+    if (!twilio) {
+      throw new BadRequestException('SMS OTP no está configurado.');
+    }
+
+    try {
+      const result = await twilio.client.verify.v2
+        .services(twilio.serviceSid)
+        .verificationChecks.create({ to: phone, code });
+
+      if (result.status !== 'approved') {
+        throw new BadRequestException('Invalid OTP code');
+      }
+    } catch (error: any) {
+      if (error instanceof BadRequestException) throw error;
+      // Twilio 404 = no pending verification (expired or never sent)
+      if (error?.status === 404) {
+        throw new BadRequestException(
+          'OTP not found or expired. Please request a new code.',
+        );
+      }
+      this.logger.error(
+        `[Verify] Check failed for ${phone}: ${error?.message ?? error}`,
+      );
+      throw new BadRequestException(error?.message || 'Invalid OTP code');
     }
   }
 
@@ -368,15 +422,4 @@ export class OtpService {
 </html>`;
   }
 
-  private getSmsMessage(code: string, type: OtpType, expiresMinutes: number): string {
-    const messages: Record<OtpType, string> = {
-      EMAIL_VERIFICATION: `OPALBAR: Tu código de verificación es ${code}. Válido por ${expiresMinutes} min.`,
-      PHONE_VERIFICATION: `OPALBAR: Tu código de verificación es ${code}. Válido por ${expiresMinutes} min.`,
-      PASSWORD_RESET: `OPALBAR: Tu código para restablecer contraseña es ${code}. Válido por ${expiresMinutes} min.`,
-      LOGIN_2FA: `OPALBAR: Tu código de acceso es ${code}. Válido por ${expiresMinutes} min.`,
-      CHANGE_EMAIL: `OPALBAR: Tu código de confirmación es ${code}. Válido por ${expiresMinutes} min.`,
-      CHANGE_PHONE: `OPALBAR: Tu código de confirmación es ${code}. Válido por ${expiresMinutes} min.`,
-    };
-    return messages[type];
-  }
 }

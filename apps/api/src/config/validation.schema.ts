@@ -46,6 +46,8 @@ export const validationSchema = Joi.object({
   TWILIO_ACCOUNT_SID: Joi.string().optional(),
   TWILIO_AUTH_TOKEN: Joi.string().optional(),
   TWILIO_FROM_NUMBER: Joi.string().optional(),
+  TWILIO_VERIFY_SERVICE_SID: Joi.string().optional(),
+  TWILIO_VERIFY_LOCALE: Joi.string().default('es'),
 
   // Throttle
   THROTTLE_TTL: Joi.number().default(60),
