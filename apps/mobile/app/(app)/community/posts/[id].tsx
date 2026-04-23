@@ -27,6 +27,7 @@ import { ReportSheet } from '@/components/ReportSheet';
 import { toast } from '@/components/Toast';
 import { Colors } from '@/constants/tokens';
 import { useCommunityRealtime } from '@/hooks/useCommunityRealtime';
+import { useFeedback } from '@/hooks/useFeedback';
 
 // ─────────────────────────────────────────────
 //  Post Detail — Instagram × Facebook hybrid
@@ -70,6 +71,7 @@ export default function PostDetail() {
   const { isAuthenticated, user: me } = useAuthStore();
   const { language } = useAppStore();
   const t = language === 'es';
+  const fb = useFeedback();
 
   const [post, setPost] = useState<any>(null);
   const [comments, setComments] = useState<any[]>([]);
@@ -140,10 +142,12 @@ export default function PostDetail() {
     if (!isAuthenticated) return router.push('/(auth)/login' as never);
     try {
       if (liked) {
+        fb.tap();
         await communityApi.removeReaction(id);
         setLiked(false);
         setLikeCount((c) => Math.max(0, c - 1));
       } else {
+        fb.like();
         await communityApi.react(id, 'LIKE');
         setLiked(true);
         setLikeCount((c) => c + 1);
@@ -170,12 +174,14 @@ export default function PostDetail() {
       lastTap.current = now;
       pendingOpen.current = setTimeout(() => {
         pendingOpen.current = null;
+        fb.tap();
         setPreviewVisible(true);
       }, 280);
     }
   }
 
   async function handleShare() {
+    fb.tap();
     try {
       const aName =
         `${post?.user?.profile?.firstName ?? ''} ${post?.user?.profile?.lastName ?? ''}`.trim() ||
@@ -192,6 +198,7 @@ export default function PostDetail() {
   }
 
   async function handleBookmark() {
+    fb.select();
     setIsSaved((v) => !v);
     try {
       await usersApi.toggleSave('POST', id);
@@ -211,8 +218,10 @@ export default function PostDetail() {
     setSending(true);
     try {
       await communityApi.addComment(id, parentId ? { content: body, parentId } : { content: body });
+      fb.send();
       await load();
     } catch (err: any) {
+      fb.error();
       Alert.alert(t ? 'Error' : 'Error', apiError(err));
       if (!overrideText) setComment(body);
       setReplyTo(savedReply);
@@ -223,9 +232,11 @@ export default function PostDetail() {
 
   async function onToggleCommentLike(commentId: string) {
     if (!isAuthenticated) return router.push('/(auth)/login' as never);
+    let willLike = false;
     const toggleLikeInTree = (nodes: any[]): any[] =>
       nodes.map((n) => {
         if (n.id === commentId) {
+          willLike = !n.hasLiked;
           return {
             ...n,
             hasLiked: !n.hasLiked,
@@ -236,6 +247,7 @@ export default function PostDetail() {
       });
 
     setComments((prev) => toggleLikeInTree(prev));
+    if (willLike) fb.like(); else fb.tap();
     try {
       await communityApi.likeComment(commentId);
     } catch {
@@ -637,7 +649,10 @@ export default function PostDetail() {
               <Pressable
                 key={e}
                 style={({ pressed }) => [styles.emojiChip, pressed && styles.pressed]}
-                onPress={() => setComment((prev) => prev + e)}
+                onPress={() => {
+                  fb.tap();
+                  setComment((prev) => prev + e);
+                }}
               >
                 <Text style={styles.emojiText}>{e}</Text>
               </Pressable>
