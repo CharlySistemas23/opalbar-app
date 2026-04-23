@@ -25,6 +25,9 @@
   "prisma": {
     "seed": "npx ts-node prisma/seed.ts"
   },
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "private": true,
   "devDependencies": {
     "@nestjs/schematics": "^11.0.0",
