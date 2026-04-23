@@ -24,6 +24,7 @@ export class CreateEventDto {
   @ApiPropertyOptional({ type: [String] }) @IsOptional() @IsArray() @IsString({ each: true }) tags?: string[];
   @ApiPropertyOptional({ default: 50 }) @IsOptional() @IsInt() @Min(0) pointsReward?: number;
   @ApiPropertyOptional({ default: false }) @IsOptional() @IsBoolean() isHighlighted?: boolean;
+  @ApiPropertyOptional({ enum: EventStatus }) @IsOptional() @IsEnum(EventStatus) status?: EventStatus;
 }
 
 export class UpdateEventDto {
@@ -54,4 +55,5 @@ export class EventFilterDto extends PaginationDto {
   @ApiPropertyOptional({ default: false }) @IsOptional() @Type(() => Boolean) @IsBoolean() isFree?: boolean;
   @ApiPropertyOptional({ default: false }) @IsOptional() @Type(() => Boolean) @IsBoolean() highlighted?: boolean;
   @ApiPropertyOptional({ enum: EventStatus }) @IsOptional() @IsEnum(EventStatus) status?: EventStatus;
+  @ApiPropertyOptional() @IsOptional() @Type(() => Boolean) @IsBoolean() includeAll?: boolean;
 }

@@ -6,12 +6,13 @@ import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import * as helmet from 'helmet';
 import * as compression from 'compression';
+import * as bodyParser from 'body-parser';
 import { AppModule } from './app/app.module';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
     logger: ['error', 'warn', 'log', 'debug', 'verbose'],
-    bufferLogs: true,
+    bufferLogs: false,
   });
 
   const port = process.env['PORT'] || 3000;
@@ -19,11 +20,15 @@ async function bootstrap() {
   const clientUrl = process.env['CLIENT_URL'] || 'http://localhost:8081';
   const nodeEnv = process.env['NODE_ENV'] || 'development';
 
+  // ── Body parser (allow large base64 images) ──
+  app.use(bodyParser.json({ limit: '10mb' }));
+  app.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
+
   // ── Security ──────────────────────────────
   app.use((helmet as any).default());
 
   // ── Compression ───────────────────────────
-  app.use((compression as any)());
+  app.use((compression as any).default ? (compression as any).default() : (compression as any)());
 
   // ── CORS ──────────────────────────────────
   app.enableCors({
@@ -112,10 +117,10 @@ Todos los endpoints protegidos requieren un **Bearer Token** JWT obtenido en \`P
   await app.listen(port);
 
   Logger.log(
-    `🚀 OPALBAR API running on: http://localhost:${port}/${apiPrefix}`,
+    `[API] OPALBAR API running on: http://localhost:${port}/${apiPrefix}`,
     'Bootstrap',
   );
-  Logger.log(`🌍 Environment: ${nodeEnv}`, 'Bootstrap');
+  Logger.log(`[ENV] Environment: ${nodeEnv}`, 'Bootstrap');
 }
 
 bootstrap().catch((err) => {

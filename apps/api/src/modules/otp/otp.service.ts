@@ -33,7 +33,15 @@ export class OtpService {
         user: config.get<string>('email.user'),
         pass: config.get<string>('email.pass'),
       },
+      connectionTimeout: 10_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 15_000,
     });
+
+    this.transporter.verify().then(
+      () => this.logger.log(`[SMTP] SMTP connected (${config.get<string>('email.user')})`),
+      (err) => this.logger.error(`[SMTP] Connection failed: ${err?.message ?? err}`),
+    );
   }
 
   // ─────────────────────────────────────────
@@ -93,6 +101,10 @@ export class OtpService {
     }
 
     this.logger.log(`OTP sent to ${identifier} (type: ${dto.type})`);
+    // DEV ONLY: also log the code when not in production
+    if (process.env.NODE_ENV !== 'production') {
+      this.logger.warn(`[DEV] OTP code for ${identifier}: ${code}`);
+    }
 
     return {
       message: isEmail
@@ -190,18 +202,46 @@ export class OtpService {
   ): Promise<void> {
     const subject = this.getEmailSubject(type);
     const html = this.buildEmailHtml(code, type, expiresMinutes);
+    const text = this.buildEmailText(code, type, expiresMinutes);
+    const fromAddr = this.config.get<string>('email.user');
 
     try {
-      await this.transporter.sendMail({
+      const info = await this.transporter.sendMail({
         from: this.config.get<string>('email.from'),
         to: email,
+        replyTo: fromAddr,
         subject,
         html,
+        text,
+        headers: {
+          'X-Entity-Ref-ID': `otp-${Date.now()}`,
+          'List-Unsubscribe': `<mailto:${fromAddr}?subject=unsubscribe>`,
+        },
       });
-    } catch (error) {
-      this.logger.error(`Failed to send email OTP to ${email}:`, error);
-      // Don't throw — OTP is saved, user can retry
+      this.logger.log(`[OTP] Sent to ${email} - messageId=${info.messageId}`);
+    } catch (error: any) {
+      this.logger.error(`[OTP] Failed to send to ${email}: ${error?.message ?? error}`);
+      if (process.env.NODE_ENV !== 'production') {
+        this.logger.warn(`[DEV] Fallback — OTP for ${email}: ${code}`);
+      }
     }
+  }
+
+  private buildEmailText(code: string, type: OtpType, expiresMinutes: number): string {
+    const purpose = this.getEmailSubject(type).replace('OPALBAR — ', '');
+    return [
+      `OPALBAR`,
+      ``,
+      `${purpose}`,
+      ``,
+      `Tu código de verificación es: ${code}`,
+      ``,
+      `Expira en ${expiresMinutes} minutos.`,
+      ``,
+      `Si no solicitaste este código, ignora este correo. Nunca lo compartas con nadie.`,
+      ``,
+      `— Equipo OPALBAR`,
+    ].join('\n');
   }
 
   // ─────────────────────────────────────────

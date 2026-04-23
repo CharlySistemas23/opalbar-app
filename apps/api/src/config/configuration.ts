@@ -25,8 +25,12 @@ export default () => ({
   jwt: {
     accessSecret: process.env.JWT_ACCESS_SECRET,
     refreshSecret: process.env.JWT_REFRESH_SECRET,
-    accessExpiresIn: process.env.JWT_ACCESS_EXPIRES_IN || '15m',
-    refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '30d',
+    // Long TTLs: revocation is enforced via Redis blocklist on logout, so short
+    // access tokens add no real security here — only friction. The user shouldn't
+    // see "sesion expirada" mid-session because of a 15-min token expiring
+    // during a slow request.
+    accessExpiresIn: process.env.JWT_ACCESS_EXPIRES_IN || '4h',
+    refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '90d',
   },
 
   otp: {

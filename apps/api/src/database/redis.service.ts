@@ -5,6 +5,14 @@ import { Injectable, OnModuleDestroy, OnModuleInit, Logger } from '@nestjs/commo
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 
+/** Thrown when `withLock` cannot acquire the lock. Callers translate to 409. */
+export class LockBusyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'LockBusyError';
+  }
+}
+
 @Injectable()
 export class RedisService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(RedisService.name);
@@ -28,7 +36,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       enableReadyCheck: true,
     });
 
-    this.client.on('connect', () => this.logger.log('✅ Redis connected'));
+    this.client.on('connect', () => this.logger.log('[REDIS] Connected'));
     this.client.on('error', (err) => this.logger.error('Redis error:', err));
     this.client.on('reconnecting', () => this.logger.warn('Redis reconnecting…'));
   }
@@ -148,6 +156,71 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   /** User sessions set key */
   static userSessionsKey(userId: string): string {
     return `user_sessions:${userId}`;
+  }
+
+  // ── Cache helpers ────────────────────────────
+
+  /** Build a cache key with a namespace prefix. e.g. cache:events:list:{hash} */
+  static cacheKey(namespace: string, ...parts: (string | number | undefined | null)[]): string {
+    const tail = parts.filter((p) => p !== undefined && p !== null).join(':');
+    return `cache:${namespace}${tail ? ':' + tail : ''}`;
+  }
+
+  /**
+   * Try cache; on miss run loader, store with TTL, return.
+   * Use for read-heavy public endpoints (event list, offer list, venue detail).
+   */
+  async cacheWrap<T>(key: string, ttlSeconds: number, loader: () => Promise<T>): Promise<T> {
+    const cached = await this.getJson<T>(key);
+    if (cached !== null && cached !== undefined) return cached as T;
+    const fresh = await loader();
+    await this.setJson(key, fresh, ttlSeconds);
+    return fresh;
+  }
+
+  /**
+   * Delete all keys matching a glob pattern via SCAN (non-blocking).
+   * Call after mutations to invalidate public caches.
+   * e.g. await redis.cacheDelPattern('cache:events:*') after creating an event.
+   */
+  async cacheDelPattern(pattern: string): Promise<number> {
+    let cursor = '0';
+    let deleted = 0;
+    do {
+      const [next, keys] = await this.client.scan(cursor, 'MATCH', pattern, 'COUNT', 200);
+      cursor = next;
+      if (keys.length > 0) {
+        await this.client.del(...keys);
+        deleted += keys.length;
+      }
+    } while (cursor !== '0');
+    return deleted;
+  }
+
+  // ── Distributed lock (SETNX) ────────────────
+
+  /**
+   * Run `fn` while holding an exclusive lock on `key`.
+   * Prevents race conditions when multiple requests mutate the same resource
+   * (e.g. two users redeeming the last offer stock simultaneously).
+   *
+   * Throws LockBusyError if the lock is already held. Callers should translate
+   * that into a 409 Conflict response.
+   */
+  async withLock<T>(key: string, ttlSeconds: number, fn: () => Promise<T>): Promise<T> {
+    const lockKey = `lock:${key}`;
+    const token = Math.random().toString(36).slice(2);
+    const acquired = await this.client.set(lockKey, token, 'EX', ttlSeconds, 'NX');
+    if (acquired !== 'OK') {
+      throw new LockBusyError(`Lock busy: ${key}`);
+    }
+    try {
+      return await fn();
+    } finally {
+      // Only delete if token matches (avoid deleting someone else's lock after expiry)
+      const current = await this.client.get(lockKey);
+      if (current === token) await this.client.del(lockKey);
+    }
   }
 
   // ── Health ───────────────────────────────────

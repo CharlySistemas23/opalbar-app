@@ -2,83 +2,181 @@ import {
   BadRequestException, ForbiddenException,
   Injectable, NotFoundException,
 } from '@nestjs/common';
-import { PostStatus, ReportTargetType } from '@prisma/client';
+import { createHash } from 'crypto';
+import { PostStatus, ReportTargetType, StoryScope, UserRole } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
+import { RedisService } from '../../database/redis.service';
 import { paginate, getPaginationOffset } from '../../common/dto/pagination.dto';
+import { CommunityGateway } from './community.gateway';
 import {
   CreatePostDto, UpdatePostDto, CreateCommentDto,
-  ReactDto, CreateReportDto, PostFilterDto,
+  ReactDto, CreateReportDto, PostFilterDto, CommunityFeedScope, PostSurface,
+  CreateStoryDto, StoryFeedScope,
 } from './dto/community.dto';
+
+// Venue brand identity — rendered client-side as the bar's "author".
+// Centralised here so API responses expose the same fallback label if needed.
+export const VENUE_STORY_AUTHOR = {
+  id: '__venue__',
+  name: 'OPAL BAR PV',
+} as const;
+
+const ADMIN_ROLES: UserRole[] = [UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.MODERATOR];
+
+// Feed is volatile (likes + new posts change often). Short TTL.
+const CACHE_TTL_FEED = 20;
+const CACHE_TTL_POST = 30;
+const WALL_MARKER = '__WALL__';
 
 @Injectable()
 export class CommunityService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly redis: RedisService,
+    private readonly communityGateway: CommunityGateway,
+  ) {}
+
+  private static hashFilter(obj: unknown): string {
+    return createHash('md5').update(JSON.stringify(obj ?? {})).digest('hex').slice(0, 12);
+  }
+
+  private async invalidateFeed(): Promise<void> {
+    await this.redis.cacheDelPattern('cache:community:*');
+  }
 
   // ── POSTS ──────────────────────────────────
 
-  async getPosts(filter: PostFilterDto) {
-    const { page = 1, limit = 20 } = filter;
-    const skip = getPaginationOffset(page, limit);
-    const where = { status: PostStatus.PUBLISHED, deletedAt: null };
+  async getPosts(filter: PostFilterDto, currentUserId?: string) {
+    const key = RedisService.cacheKey(
+      'community',
+      'feed',
+      CommunityService.hashFilter({ ...filter, viewer: currentUserId ?? null }),
+    );
+    return this.redis.cacheWrap(key, CACHE_TTL_FEED, async () => {
+      const { page = 1, limit = 20, userId, scope, surface = PostSurface.COMMUNITY } = filter;
+      const skip = getPaginationOffset(page, limit);
+      const includePendingOwnPosts = !!userId && !!currentUserId && userId === currentUserId;
 
-    const [data, total] = await Promise.all([
-      this.prisma.post.findMany({
-        where,
-        skip,
-        take: limit,
+      let where: any = {
+        deletedAt: null,
+        ...(userId ? { userId } : {}),
+        ...(includePendingOwnPosts
+          ? { status: { in: [PostStatus.PUBLISHED, PostStatus.PENDING_REVIEW] } }
+          : { status: PostStatus.PUBLISHED }),
+      };
+
+      if (surface === PostSurface.WALL) {
+        where = { ...where, mediaUrls: { has: WALL_MARKER } };
+      } else if (surface === PostSurface.COMMUNITY) {
+        where = { ...where, NOT: { mediaUrls: { has: WALL_MARKER } } };
+      }
+
+      // Real "following" feed: only posts from users I follow + my own posts.
+      if (scope === CommunityFeedScope.FOLLOWING) {
+        if (!currentUserId) return paginate([], 0, page, limit);
+        const following = await this.prisma.follow.findMany({
+          where: { followerId: currentUserId },
+          select: { followingId: true },
+        });
+        const visibleUserIds = [currentUserId, ...following.map((f) => f.followingId)];
+        where = { ...where, userId: { in: visibleUserIds } };
+      }
+
+      const [data, total] = await Promise.all([
+        this.prisma.post.findMany({
+          where,
+          skip,
+          take: limit,
+          include: {
+            user: { select: { id: true, profile: { select: { firstName: true, lastName: true, avatarUrl: true } } } },
+            _count: { select: { reactions: true, comments: true } },
+            // Only hydrate the viewer's reaction to compute hasReacted cheaply
+            reactions: currentUserId
+              ? { where: { userId: currentUserId }, select: { id: true }, take: 1 }
+              : false,
+          },
+          orderBy: [{ isPinned: 'desc' }, { createdAt: 'desc' }],
+        }),
+        this.prisma.post.count({ where }),
+      ]);
+
+      // Decorate hasReacted + strip the raw reactions array (front doesn't need it)
+      const decorated = data.map((p: any) => ({
+        ...p,
+        hasReacted: Array.isArray(p.reactions) && p.reactions.length > 0,
+        reactions: undefined,
+      }));
+
+      return paginate(decorated, total, page, limit);
+    });
+  }
+
+  async getPost(id: string, currentUserId?: string) {
+    // Viewer-specific cache so hasReacted reflects the logged-in user
+    const key = RedisService.cacheKey('community', 'post', id, currentUserId ?? 'anon');
+    return this.redis.cacheWrap(key, CACHE_TTL_POST, async () => {
+      const post = await this.prisma.post.findUnique({
+        where: { id },
         include: {
           user: { select: { id: true, profile: { select: { firstName: true, lastName: true, avatarUrl: true } } } },
           _count: { select: { reactions: true, comments: true } },
+          reactions: currentUserId
+            ? { where: { userId: currentUserId }, select: { id: true }, take: 1 }
+            : false,
         },
-        orderBy: [{ isPinned: 'desc' }, { createdAt: 'desc' }],
-      }),
-      this.prisma.post.count({ where }),
-    ]);
-
-    return paginate(data, total, page, limit);
-  }
-
-  async getPost(id: string) {
-    const post = await this.prisma.post.findUnique({
-      where: { id },
-      include: {
-        user: { select: { id: true, profile: { select: { firstName: true, lastName: true, avatarUrl: true } } } },
-        _count: { select: { reactions: true, comments: true } },
-      },
+      });
+      if (!post || post.deletedAt) throw new NotFoundException('Post not found');
+      const hasReacted =
+        Array.isArray((post as any).reactions) && (post as any).reactions.length > 0;
+      return { ...post, reactions: undefined, hasReacted };
     });
-    if (!post || post.deletedAt) throw new NotFoundException('Post not found');
-    return post;
   }
 
   async createPost(userId: string, dto: CreatePostDto) {
-    // Basic content moderation score (placeholder — integrate ML service later)
+    // Manual moderation mode: every post enters the admin queue before publishing.
+    // This matches the owner's workflow ("todo lo reviso manual antes de publicar").
+    // When an ML filter is wired later, change this back to score-based.
     const moderationScore = this.basicModerationCheck(dto.content);
-    const status = moderationScore < 0.5 ? PostStatus.PUBLISHED : PostStatus.PENDING_REVIEW;
+    const status = PostStatus.PENDING_REVIEW;
+
+    const isWallPost = dto.surface === PostSurface.WALL;
 
     const post = await this.prisma.post.create({
       data: {
         userId,
         content: dto.content,
         imageUrl: dto.imageUrl,
+        mediaUrls: isWallPost ? [WALL_MARKER] : [],
         status,
         moderationScore,
       },
     });
 
-    // Award points for posting
+    // Award points for posting (only when auto-published — pending posts don't earn).
     if (status === PostStatus.PUBLISHED) {
-      await this.prisma.$transaction([
-        this.prisma.user.update({ where: { id: userId }, data: { points: { increment: 5 } } }),
-        this.prisma.walletTransaction.create({
-          data: {
-            userId, type: 'EARN', points: 5, balance: 0,
-            description: 'Puntos por publicar en comunidad',
-            referenceId: post.id, referenceType: 'POST_ENGAGEMENT',
-          },
-        }),
-      ]);
+      // Read-then-write inside a transaction so `balance` in WalletTransaction
+      // is accurate (was 0 before). +5 pts per post.
+      const POINTS = 5;
+      const updated = await this.prisma.user.update({
+        where: { id: userId },
+        data: { points: { increment: POINTS } },
+        select: { points: true },
+      });
+      await this.prisma.walletTransaction.create({
+        data: {
+          userId,
+          type: 'EARN',
+          points: POINTS,
+          balance: updated.points,
+          description: 'Puntos por publicar en comunidad',
+          referenceId: post.id,
+          referenceType: 'POST_ENGAGEMENT',
+        },
+      });
     }
 
+    await this.invalidateFeed();
+    this.communityGateway.emitChanged({ type: 'post_created', postId: post.id });
     return post;
   }
 
@@ -86,7 +184,10 @@ export class CommunityService {
     const post = await this.prisma.post.findUnique({ where: { id: postId } });
     if (!post || post.deletedAt) throw new NotFoundException('Post not found');
     if (post.userId !== userId) throw new ForbiddenException('Not authorized');
-    return this.prisma.post.update({ where: { id: postId }, data: dto });
+    const updated = await this.prisma.post.update({ where: { id: postId }, data: dto });
+    await this.invalidateFeed();
+    this.communityGateway.emitChanged({ type: 'post_updated', postId });
+    return updated;
   }
 
   async deletePost(postId: string, userId: string) {
@@ -94,30 +195,101 @@ export class CommunityService {
     if (!post || post.deletedAt) throw new NotFoundException('Post not found');
     if (post.userId !== userId) throw new ForbiddenException('Not authorized');
     await this.prisma.post.update({ where: { id: postId }, data: { deletedAt: new Date() } });
+    await this.invalidateFeed();
+    this.communityGateway.emitChanged({ type: 'post_deleted', postId });
   }
 
   // ── COMMENTS ──────────────────────────────
 
-  async getComments(postId: string) {
-    return this.prisma.comment.findMany({
-      where: { postId, parentId: null, deletedAt: null, status: PostStatus.PUBLISHED },
+  async getComments(postId: string, currentUserId?: string) {
+    const flatComments = await this.prisma.comment.findMany({
+      where: { postId, deletedAt: null, status: PostStatus.PUBLISHED },
       include: {
         user: { select: { id: true, profile: { select: { firstName: true, lastName: true, avatarUrl: true } } } },
-        replies: {
-          where: { deletedAt: null },
-          include: {
-            user: { select: { id: true, profile: { select: { firstName: true, lastName: true, avatarUrl: true } } } },
-          },
-          orderBy: { createdAt: 'asc' },
-        },
+        _count: { select: { likes: true, replies: true } },
       },
       orderBy: { createdAt: 'asc' },
     });
+
+    const ids = flatComments.map((c) => c.id);
+    let likedSet = new Set<string>();
+    if (currentUserId && ids.length > 0) {
+      const mine = await this.prisma.commentLike.findMany({
+        where: { userId: currentUserId, commentId: { in: ids } },
+        select: { commentId: true },
+      });
+      likedSet = new Set(mine.map((m) => m.commentId));
+    }
+
+    const nodes = flatComments.map((c: any) => ({
+      ...c,
+      hasLiked: likedSet.has(c.id),
+      replies: [],
+    }));
+
+    const byId = new Map(nodes.map((n: any) => [n.id, n]));
+    const roots: any[] = [];
+
+    for (const node of nodes) {
+      if (node.parentId && byId.has(node.parentId)) {
+        byId.get(node.parentId).replies.push(node);
+      } else {
+        roots.push(node);
+      }
+    }
+
+    return roots;
+  }
+
+  async toggleCommentLike(commentId: string, userId: string) {
+    const comment = await this.prisma.comment.findUnique({ where: { id: commentId } });
+    if (!comment || comment.deletedAt) throw new NotFoundException('Comment not found');
+
+    const existing = await this.prisma.commentLike.findUnique({
+      where: { userId_commentId: { userId, commentId } },
+    });
+
+    if (existing) {
+      await this.prisma.$transaction([
+        this.prisma.commentLike.delete({ where: { userId_commentId: { userId, commentId } } }),
+        this.prisma.comment.update({ where: { id: commentId }, data: { likesCount: { decrement: 1 } } }),
+      ]);
+      this.communityGateway.emitChanged({
+        type: 'comment_liked',
+        postId: comment.postId,
+        commentId,
+      });
+      return { liked: false };
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.commentLike.create({ data: { userId, commentId } }),
+      this.prisma.comment.update({ where: { id: commentId }, data: { likesCount: { increment: 1 } } }),
+    ]);
+    this.communityGateway.emitChanged({
+      type: 'comment_liked',
+      postId: comment.postId,
+      commentId,
+    });
+    return { liked: true };
   }
 
   async createComment(postId: string, userId: string, dto: CreateCommentDto) {
     const post = await this.prisma.post.findUnique({ where: { id: postId } });
     if (!post || post.deletedAt) throw new NotFoundException('Post not found');
+
+    if (dto.parentId) {
+      const parent = await this.prisma.comment.findFirst({
+        where: {
+          id: dto.parentId,
+          postId,
+          deletedAt: null,
+          status: PostStatus.PUBLISHED,
+        },
+        select: { id: true },
+      });
+      if (!parent) throw new NotFoundException('Parent comment not found');
+    }
 
     const [comment] = await this.prisma.$transaction([
       this.prisma.comment.create({
@@ -128,6 +300,12 @@ export class CommunityService {
         data: { commentsCount: { increment: 1 } },
       }),
     ]);
+
+    this.communityGateway.emitChanged({
+      type: 'comment_created',
+      postId,
+      commentId: comment.id,
+    });
 
     return comment;
   }
@@ -140,6 +318,11 @@ export class CommunityService {
       this.prisma.comment.update({ where: { id: commentId }, data: { deletedAt: new Date() } }),
       this.prisma.post.update({ where: { id: comment.postId }, data: { commentsCount: { decrement: 1 } } }),
     ]);
+    this.communityGateway.emitChanged({
+      type: 'comment_deleted',
+      postId: comment.postId,
+      commentId,
+    });
   }
 
   // ── REACTIONS ─────────────────────────────
@@ -159,6 +342,8 @@ export class CommunityService {
           this.prisma.reaction.delete({ where: { userId_postId: { userId, postId } } }),
           this.prisma.post.update({ where: { id: postId }, data: { likesCount: { decrement: 1 } } }),
         ]);
+        await this.invalidatePostCache(postId);
+        this.communityGateway.emitChanged({ type: 'post_reacted', postId });
         return { reacted: false };
       }
       // Change type
@@ -166,6 +351,8 @@ export class CommunityService {
         where: { userId_postId: { userId, postId } },
         data: { type: dto.type },
       });
+      await this.invalidatePostCache(postId);
+      this.communityGateway.emitChanged({ type: 'post_reacted', postId });
       return { reacted: true, type: dto.type };
     }
 
@@ -173,7 +360,15 @@ export class CommunityService {
       this.prisma.reaction.create({ data: { userId, postId, type: dto.type } }),
       this.prisma.post.update({ where: { id: postId }, data: { likesCount: { increment: 1 } } }),
     ]);
+    await this.invalidatePostCache(postId);
+    this.communityGateway.emitChanged({ type: 'post_reacted', postId });
     return { reacted: true, type: dto.type };
+  }
+
+  private async invalidatePostCache(_postId: string): Promise<void> {
+    // Reuse the broad invalidator — covers both feed and post caches keyed
+    // under cache:community:*
+    await this.invalidateFeed();
   }
 
   // ── REPORTS ───────────────────────────────
@@ -190,6 +385,224 @@ export class CommunityService {
   }
 
   // ── RANKING ───────────────────────────────
+
+  // ── STORIES ──────────────────────────────
+  // Ephemeral 24h posts. Two scopes:
+  //   - VENUE   → posted by admin, rendered as "OPAL BAR PV" (always visible)
+  //   - PERSONAL → posted by any user (Instagram-style)
+
+  /**
+   * Build the two feeds the community screen needs.
+   *   - venue: all active VENUE stories, merged under one virtual author
+   *   - personal: PERSONAL stories, grouped by author
+   *       · scope=following → only from users the viewer follows
+   *       · otherwise       → discovery (everyone)
+   */
+  async getStories(currentUserId?: string, personalScope?: StoryFeedScope) {
+    const now = new Date();
+
+    // "For you" (default) → venue only. Personal stories are private to the
+    // author's followers and only surface in the "Following" feed.
+    const isFollowing = personalScope === StoryFeedScope.FOLLOWING;
+
+    // Following feed needs the viewer's follow list to filter.
+    let followingUserIds: string[] = [];
+    if (isFollowing && currentUserId) {
+      const follows = await this.prisma.follow.findMany({
+        where: { followerId: currentUserId },
+        select: { followingId: true },
+      });
+      followingUserIds = [currentUserId, ...follows.map((f) => f.followingId)];
+    }
+
+    const [venueRows, personalRows] = await Promise.all([
+      this.prisma.story.findMany({
+        where: { scope: StoryScope.VENUE, expiresAt: { gt: now } },
+        orderBy: { createdAt: 'asc' },
+        include: {
+          views: currentUserId
+            ? { where: { userId: currentUserId }, select: { id: true } }
+            : false,
+        },
+      }),
+      isFollowing && followingUserIds.length > 0
+        ? this.prisma.story.findMany({
+            where: {
+              scope: StoryScope.PERSONAL,
+              expiresAt: { gt: now },
+              userId: { in: followingUserIds },
+            },
+            orderBy: [{ userId: 'asc' }, { createdAt: 'asc' }],
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  profile: { select: { firstName: true, lastName: true, avatarUrl: true } },
+                },
+              },
+              views: currentUserId
+                ? { where: { userId: currentUserId }, select: { id: true } }
+                : false,
+            },
+          })
+        : Promise.resolve([]),
+    ]);
+
+    // Venue: single virtual author bundle
+    let venue: null | {
+      user: { id: string; name: string; avatarUrl: null };
+      stories: any[];
+      hasUnseen: boolean;
+    } = null;
+    if (venueRows.length > 0) {
+      const stories = venueRows.map((s) => {
+        const seen = Array.isArray(s.views) && s.views.length > 0;
+        return {
+          id: s.id,
+          mediaUrl: s.mediaUrl,
+          caption: s.caption,
+          viewsCount: s.viewsCount,
+          createdAt: s.createdAt,
+          expiresAt: s.expiresAt,
+          scope: s.scope,
+          seen,
+        };
+      });
+      venue = {
+        user: { id: VENUE_STORY_AUTHOR.id, name: VENUE_STORY_AUTHOR.name, avatarUrl: null },
+        stories,
+        hasUnseen: stories.some((st) => !st.seen),
+      };
+    }
+
+    // Personal: group by author
+    const byAuthor = new Map<string, { user: any; stories: any[]; hasUnseen: boolean }>();
+    for (const s of personalRows) {
+      const entry = byAuthor.get(s.userId) ?? { user: s.user, stories: [], hasUnseen: false };
+      const seen = Array.isArray(s.views) && s.views.length > 0;
+      entry.stories.push({
+        id: s.id,
+        mediaUrl: s.mediaUrl,
+        caption: s.caption,
+        viewsCount: s.viewsCount,
+        createdAt: s.createdAt,
+        expiresAt: s.expiresAt,
+        scope: s.scope,
+        seen,
+      });
+      if (!seen) entry.hasUnseen = true;
+      byAuthor.set(s.userId, entry);
+    }
+    const personal = Array.from(byAuthor.values()).sort((a, b) => {
+      if (a.hasUnseen !== b.hasUnseen) return a.hasUnseen ? -1 : 1;
+      return 0;
+    });
+
+    return { venue, personal };
+  }
+
+  /** Active stories for a single user (used when tapping a profile avatar). */
+  async getUserStories(userId: string, currentUserId?: string) {
+    const now = new Date();
+    const rows = await this.prisma.story.findMany({
+      where: { userId, scope: StoryScope.PERSONAL, expiresAt: { gt: now } },
+      orderBy: { createdAt: 'asc' },
+      include: {
+        user: {
+          select: {
+            id: true,
+            profile: { select: { firstName: true, lastName: true, avatarUrl: true } },
+          },
+        },
+        views: currentUserId
+          ? { where: { userId: currentUserId }, select: { id: true } }
+          : false,
+      },
+    });
+    if (rows.length === 0) return { user: null, stories: [], hasUnseen: false };
+    const stories = rows.map((s) => {
+      const seen = Array.isArray(s.views) && s.views.length > 0;
+      return {
+        id: s.id,
+        mediaUrl: s.mediaUrl,
+        caption: s.caption,
+        viewsCount: s.viewsCount,
+        createdAt: s.createdAt,
+        expiresAt: s.expiresAt,
+        scope: s.scope,
+        seen,
+      };
+    });
+    return { user: rows[0].user, stories, hasUnseen: stories.some((s) => !s.seen) };
+  }
+
+  async createStory(
+    userId: string,
+    dto: CreateStoryDto,
+    scope: StoryScope = StoryScope.PERSONAL,
+  ) {
+    if (!dto.mediaUrl) throw new BadRequestException('mediaUrl is required');
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+    const story = await this.prisma.story.create({
+      data: {
+        userId,
+        mediaUrl: dto.mediaUrl,
+        caption: dto.caption,
+        expiresAt,
+        scope,
+      },
+    });
+    return story;
+  }
+
+  /**
+   * Delete a story. Owner can delete their own; admins/mods can delete any
+   * (used to moderate community content and remove stale venue stories).
+   */
+  async deleteStory(storyId: string, requester: { id: string; role: UserRole }) {
+    const story = await this.prisma.story.findUnique({ where: { id: storyId } });
+    if (!story) throw new NotFoundException('Story not found');
+    const isOwner = story.userId === requester.id;
+    const isAdmin = ADMIN_ROLES.includes(requester.role);
+    if (!isOwner && !isAdmin) throw new ForbiddenException('Not your story');
+    await this.prisma.story.delete({ where: { id: storyId } });
+    return { success: true };
+  }
+
+  /** All active venue stories — used by admin management screen. */
+  async listVenueStories() {
+    const now = new Date();
+    const rows = await this.prisma.story.findMany({
+      where: { scope: StoryScope.VENUE, expiresAt: { gt: now } },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        mediaUrl: true,
+        caption: true,
+        viewsCount: true,
+        createdAt: true,
+        expiresAt: true,
+      },
+    });
+    return { data: rows };
+  }
+
+  async markStoryViewed(storyId: string, userId: string) {
+    const story = await this.prisma.story.findUnique({ where: { id: storyId } });
+    if (!story) throw new NotFoundException('Story not found');
+    // Idempotent — unique constraint on (storyId, userId)
+    try {
+      await this.prisma.storyView.create({ data: { storyId, userId } });
+      await this.prisma.story.update({
+        where: { id: storyId },
+        data: { viewsCount: { increment: 1 } },
+      });
+    } catch {
+      // Already viewed — ignore
+    }
+    return { success: true };
+  }
 
   async getCommunityRanking() {
     return this.prisma.user.findMany({

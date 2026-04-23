@@ -1,0 +1,77 @@
+{
+  "expo": {
+    "name": "OPALBAR",
+    "slug": "opalbar",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0D0D0F",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#0D0D0F"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.opalbar.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "OPAL BAR necesita acceso a la cámara para escanear códigos QR de reservas/ofertas y para que puedas publicar fotos en la comunidad.",
+        "NSPhotoLibraryUsageDescription": "OPAL BAR usa tu galería para subir foto de perfil, historias y publicaciones.",
+        "NSPhotoLibraryAddUsageDescription": "OPAL BAR guarda en tu galería las fotos que capturas dentro de la app.",
+        "NSLocationWhenInUseUsageDescription": "OPAL BAR usa tu ubicación para mostrarte eventos y ofertas cerca de ti, y para validar tu check-in en reservas.",
+        "NSMicrophoneUsageDescription": "OPAL BAR usa el micrófono al grabar videos para historias."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0D0D0F"
+      },
+      "package": "com.opalbar.app",
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.RECORD_AUDIO"
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font",
+      "expo-asset",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "OPAL BAR necesita la cámara para escanear códigos QR y publicar fotos."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "OPAL BAR usa tu galería para subir foto de perfil, historias y publicaciones.",
+          "cameraPermission": "OPAL BAR necesita la cámara para publicar fotos e historias."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "OPAL BAR usa tu ubicación para mostrarte eventos y ofertas cerca de ti, y para validar check-ins."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#F4A340"
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "scheme": "opalbar"
+  }
+}

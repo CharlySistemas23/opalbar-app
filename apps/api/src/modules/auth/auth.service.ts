@@ -4,17 +4,20 @@
 import {
   BadRequestException,
   ConflictException,
+  forwardRef,
+  Inject,
   Injectable,
   Logger,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { User, UserStatus } from '@prisma/client';
+import { OtpType, User, UserStatus } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { v4 as uuidv4 } from 'uuid';
 import { PrismaService } from '../../database/prisma.service';
 import { RedisService } from '../../database/redis.service';
+import { OtpService } from '../otp/otp.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { ChangePasswordDto, ResetPasswordDto } from './dto/change-password.dto';
@@ -41,16 +44,21 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly config: ConfigService,
     private readonly redis: RedisService,
+    @Inject(forwardRef(() => OtpService))
+    private readonly otpService: OtpService,
   ) {}
 
   // ─────────────────────────────────────────
   //  REGISTER
   // ─────────────────────────────────────────
 
-  async register(dto: RegisterDto, ipAddress?: string): Promise<{ message: string }> {
-    // Validate at least one identifier
-    if (!dto.email && !dto.phone) {
-      throw new BadRequestException('Email or phone number is required');
+  async register(
+    dto: RegisterDto,
+    ipAddress?: string,
+  ): Promise<{ message: string; phone: string; expiresIn: number }> {
+    // Phone is now required for SMS verification
+    if (!dto.phone) {
+      throw new BadRequestException('Phone number is required');
     }
 
     // Check uniqueness
@@ -75,6 +83,8 @@ export class AuthService {
     // Hash password
     const passwordHash = await bcrypt.hash(dto.password, BCRYPT_ROUNDS);
 
+    const birthDate = dto.birthDate ? new Date(dto.birthDate) : undefined;
+
     // Create user + profile + consent in a transaction
     const user = await this.prisma.$transaction(async (tx) => {
       const newUser = await tx.user.create({
@@ -88,6 +98,11 @@ export class AuthService {
               firstName: dto.firstName,
               lastName: dto.lastName,
               language: dto.language || 'es',
+              birthDate,
+              city: dto.city,
+              gender: dto.gender,
+              occupation: dto.occupation,
+              discoverySource: dto.discoverySource,
             },
           },
           consent: {
@@ -100,6 +115,22 @@ export class AuthService {
           },
         },
       });
+
+      if (dto.interestCategoryIds && dto.interestCategoryIds.length) {
+        const validCategories = await tx.eventCategory.findMany({
+          where: { id: { in: dto.interestCategoryIds }, isActive: true },
+          select: { id: true },
+        });
+        if (validCategories.length) {
+          await tx.userInterest.createMany({
+            data: validCategories.map((c) => ({
+              userId: newUser.id,
+              categoryId: c.id,
+            })),
+            skipDuplicates: true,
+          });
+        }
+      }
 
       // Log login attempt
       await tx.loginAttempt.create({
@@ -118,8 +149,23 @@ export class AuthService {
 
     this.logger.log(`New user registered: ${user.id} (${dto.email || dto.phone})`);
 
+    // Auto-send PHONE_VERIFICATION OTP so the user lands on the verify screen
+    let expiresIn = 600;
+    try {
+      const otp = await this.otpService.sendOtp({
+        phone: dto.phone,
+        type: OtpType.PHONE_VERIFICATION,
+      });
+      expiresIn = otp.expiresIn;
+    } catch (err: any) {
+      // Don't block registration if OTP send fails — user can resend from the verify screen
+      this.logger.error(`Failed to auto-send OTP to ${dto.phone}: ${err?.message ?? err}`);
+    }
+
     return {
-      message: 'Account created successfully. Please verify your email or phone.',
+      message: 'Account created. We sent a verification code to your phone.',
+      phone: dto.phone,
+      expiresIn,
     };
   }
 
@@ -190,6 +236,68 @@ export class AuthService {
     return {
       user: this.sanitizeUser(user),
       tokens,
+    };
+  }
+
+  // ─────────────────────────────────────────
+  //  LOGIN / SIGN-UP WITH VERIFIED OTP
+  //  Called after OTP verify succeeds. Creates user if missing.
+  // ─────────────────────────────────────────
+
+  async loginWithOtp(
+    identifier: string,
+    meta: { deviceToken?: string; deviceName?: string; deviceOs?: string; ipAddress?: string; userAgent?: string },
+  ): Promise<AuthResponse & { isNewUser: boolean }> {
+    const isEmail = identifier.includes('@');
+    const where = isEmail ? { email: identifier.toLowerCase() } : { phone: identifier };
+
+    let user = await this.prisma.user.findFirst({ where, include: { profile: true } });
+    let isNewUser = false;
+
+    if (!user) {
+      // Auto-create user with empty profile — onboarding will collect more info
+      user = await this.prisma.user.create({
+        data: {
+          email: isEmail ? identifier.toLowerCase() : null,
+          phone: !isEmail ? identifier : null,
+          isVerified: true,
+          status: UserStatus.ACTIVE,
+          profile: {
+            create: {
+              firstName: '',
+              lastName: '',
+              language: 'es',
+            },
+          },
+        },
+        include: { profile: true },
+      });
+      isNewUser = true;
+      this.logger.log(`Auto-registered user via OTP: ${identifier}`);
+    } else {
+      // Mark as verified (first OTP succeeded)
+      if (!user.isVerified) {
+        user = await this.prisma.user.update({
+          where: { id: user.id },
+          data: { isVerified: true },
+          include: { profile: true },
+        });
+      }
+    }
+
+    if (user.status === UserStatus.BANNED) {
+      throw new UnauthorizedException('Your account has been suspended. Contact support.');
+    }
+    if (user.status === UserStatus.DELETED) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    const tokens = await this.createSession(user, meta);
+
+    return {
+      user: this.sanitizeUser(user),
+      tokens,
+      isNewUser,
     };
   }
 

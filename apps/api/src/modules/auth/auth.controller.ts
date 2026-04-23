@@ -78,12 +78,14 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Get new access token using refresh token' })
   @ApiBody({ type: RefreshTokenDto })
-  async refresh(@CurrentUser() user: User & { sessionId: string }) {
+  async refresh(
+    @CurrentUser() user: User & { sessionId: string },
+    @Body() dto: RefreshTokenDto,
+  ) {
     return this.authService.refreshTokens(
       user.id,
       user.sessionId,
-      // The raw refreshToken is validated inside the strategy
-      '',
+      dto.refreshToken,
     );
   }
 

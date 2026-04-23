@@ -3,10 +3,10 @@
 // ─────────────────────────────────────────────
 import { Throttle } from '@nestjs/throttler';
 
-/** 10 requests / 60s — for auth endpoints (login, register) */
+/** DEV: 1000 requests / 60s — relax for testing */
 export const ThrottleAuth = () =>
-  Throttle({ auth: { limit: 10, ttl: 60000 } });
+  Throttle({ auth: { limit: 1000, ttl: 60000 } });
 
-/** 3 requests / 5min — for OTP send endpoints */
+/** DEV: 100 requests / 60s — relax OTP for testing */
 export const ThrottleOtp = () =>
-  Throttle({ otp: { limit: 3, ttl: 300000 } });
+  Throttle({ otp: { limit: 100, ttl: 60000 } });

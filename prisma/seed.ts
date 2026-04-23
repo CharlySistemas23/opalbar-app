@@ -4,12 +4,16 @@
 //  venue, admin user, sample events & offers
 // ─────────────────────────────────────────────
 import { PrismaClient, UserRole, UserStatus, EventStatus, OfferType, OfferStatus } from '@prisma/client';
+import { PrismaPg } from '@prisma/adapter-pg';
+import { Pool } from 'pg';
 import * as bcrypt from 'bcryptjs';
 
-const prisma = new PrismaClient();
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const adapter = new PrismaPg(pool);
+const prisma = new PrismaClient({ adapter });
 
 async function main() {
-  console.log('🌱 Seeding OPALBAR database…');
+  console.log('[DATABASE] Seeding OPALBAR database…');
 
   // ── Loyalty Levels ─────────────────────────
 
@@ -17,44 +21,44 @@ async function main() {
   const levels = await Promise.all([
     prisma.loyaltyLevel.upsert({
       where: { slug: 'bronce' },
-      update: {},
+      update: { icon: 'award' },
       create: {
         name: 'Bronce', nameEn: 'Bronze', slug: 'bronce',
         minPoints: 0, maxPoints: 499,
-        color: '#CD7F32', icon: 'medal',
+        color: '#CD7F32', icon: 'award',
         benefits: ['5% de descuento en la barra', 'Acceso a eventos regulares'],
         sortOrder: 1,
       },
     }),
     prisma.loyaltyLevel.upsert({
       where: { slug: 'plata' },
-      update: {},
+      update: { icon: 'shield' },
       create: {
         name: 'Plata', nameEn: 'Silver', slug: 'plata',
         minPoints: 500, maxPoints: 1499,
-        color: '#C0C0C0', icon: 'medal',
+        color: '#C0C0C0', icon: 'shield',
         benefits: ['10% de descuento en la barra', 'Invitaciones a pre-ventas', 'Mesa preferencial'],
         sortOrder: 2,
       },
     }),
     prisma.loyaltyLevel.upsert({
       where: { slug: 'oro' },
-      update: {},
+      update: { icon: 'star' },
       create: {
         name: 'Oro', nameEn: 'Gold', slug: 'oro',
         minPoints: 1500, maxPoints: 4999,
-        color: '#FFD700', icon: 'crown',
+        color: '#FFD700', icon: 'star',
         benefits: ['15% de descuento en la barra', 'Acceso VIP a eventos', 'Bebida de bienvenida mensual', 'Mesa reservada'],
         sortOrder: 3,
       },
     }),
     prisma.loyaltyLevel.upsert({
       where: { slug: 'diamante' },
-      update: {},
+      update: { icon: 'hexagon' },
       create: {
         name: 'Diamante', nameEn: 'Diamond', slug: 'diamante',
         minPoints: 5000, maxPoints: null,
-        color: '#B9F2FF', icon: 'gem',
+        color: '#B9F2FF', icon: 'hexagon',
         benefits: [
           '20% de descuento en la barra', 'Acceso VIP ilimitado',
           'Botella mensual incluida', 'Concierge personal',
@@ -64,7 +68,7 @@ async function main() {
       },
     }),
   ]);
-  console.log(`    ✅ ${levels.length} loyalty levels created`);
+  console.log(`    [OK] ${levels.length} loyalty levels created`);
 
   // ── Event Categories ───────────────────────
 
@@ -101,33 +105,57 @@ async function main() {
       create: { name: 'Especial', nameEn: 'Special', slug: 'especial', icon: 'star', color: '#FFD700', sortOrder: 6 },
     }),
   ]);
-  console.log(`    ✅ ${categories.length} categories created`);
+  console.log(`    [OK] ${categories.length} categories created`);
 
   // ── Venue ──────────────────────────────────
 
   console.log('  → Venue…');
+  // Real venue data — OPAL BAR PV, Puerto Vallarta.
   const venue = await prisma.venue.upsert({
-    where: { slug: 'opalbar-cdmx' },
-    update: {},
-    create: {
-      name: 'OPALBAR CDMX',
-      slug: 'opalbar-cdmx',
-      description: 'El bar de la comunidad. Donde siempre hay algo pasando.',
-      address: 'Av. Álvaro Obregón 123',
-      city: 'Ciudad de México',
-      state: 'CDMX',
+    where: { slug: 'opalbar-pv' },
+    update: {
+      name: 'OPAL BAR PV',
+      address: 'Ignacio L. Vallarta #230, Zona Romántica, Puerto Vallarta, Jalisco',
+      city: 'Puerto Vallarta',
+      state: 'Jalisco',
       country: 'MX',
-      zipCode: '06700',
-      lat: 19.4178,
-      lng: -99.1535,
-      phone: '+525512345678',
-      email: 'hola@opalbar.com',
+      // Zona Romántica / Ignacio L. Vallarta approx coords:
+      lat: 20.6015,
+      lng: -105.2389,
+      phone: '+523221234567',
+      email: 'hola@opalbarpv.com',
       website: 'https://opalbar.com',
-      instagram: '@opalbar',
+      instagram: '@opalbarpv',
+      openTime: '17:00',   // 5:00 PM
+      closeTime: '01:00',  // 1:00 AM (past midnight)
+      slotMinutes: 30,
+      reservationCapacity: 80,
+      reservationsEnabled: true,
+      isActive: true,
+    },
+    create: {
+      name: 'OPAL BAR PV',
+      slug: 'opalbar-pv',
+      description: 'El bar de la comunidad en Puerto Vallarta. Donde siempre hay algo pasando.',
+      address: 'Ignacio L. Vallarta #230, Zona Romántica, Puerto Vallarta, Jalisco',
+      city: 'Puerto Vallarta',
+      state: 'Jalisco',
+      country: 'MX',
+      lat: 20.6015,
+      lng: -105.2389,
+      phone: '+523221234567',
+      email: 'hola@opalbarpv.com',
+      website: 'https://opalbar.com',
+      instagram: '@opalbarpv',
+      openTime: '17:00',
+      closeTime: '01:00',
+      slotMinutes: 30,
+      reservationCapacity: 80,
+      reservationsEnabled: true,
       isActive: true,
     },
   });
-  console.log(`    ✅ Venue: ${venue.name}`);
+  console.log(`    [OK] Venue: ${venue.name}`);
 
   // ── Admin User ─────────────────────────────
 
@@ -163,7 +191,7 @@ async function main() {
       },
     },
   });
-  console.log(`    ✅ Admin: ${admin.email}`);
+  console.log(`    [OK] Admin: ${admin.email}`);
 
   // ── Sample Events ──────────────────────────
 
@@ -243,7 +271,7 @@ async function main() {
       },
     }),
   ]);
-  console.log(`    ✅ ${events.length} events created`);
+  console.log(`    [OK] ${events.length} events created`);
 
   // ── Sample Offers ──────────────────────────
 
@@ -319,7 +347,7 @@ async function main() {
       },
     }),
   ]);
-  console.log(`    ✅ ${offers.length} offers created`);
+  console.log(`    [OK] ${offers.length} offers created`);
 
   // ── App Config ────────────────────────────
 
@@ -346,17 +374,18 @@ async function main() {
       create: { key: 'welcome_points', value: '100', isPublic: false },
     }),
   ]);
-  console.log('    ✅ App config ready');
+  console.log('    [OK] App config ready');
 
-  console.log('\n✅ Database seeded successfully!');
+  console.log('\n[OK] Database seeded successfully!');
   console.log(`\n🔑 Admin credentials:\n   Email: ${adminEmail}\n   Password: ${adminPassword}`);
 }
 
 main()
   .catch((e) => {
-    console.error('❌ Seed failed:', e);
+    console.error('[ERROR] Seed failed:', e);
     process.exit(1);
   })
   .finally(async () => {
     await prisma.$disconnect();
+    await pool.end();
   });

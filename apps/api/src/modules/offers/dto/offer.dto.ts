@@ -1,4 +1,4 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import { OfferStatus, OfferType } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
@@ -27,6 +27,11 @@ export class CreateOfferDto {
   @ApiPropertyOptional() @IsOptional() @IsString() endTime?: string;
   @ApiPropertyOptional({ default: false }) @IsOptional() @IsBoolean() isHighlighted?: boolean;
   @ApiPropertyOptional({ default: 0 }) @IsOptional() @IsInt() @Min(0) pointsRequired?: number;
+  @ApiPropertyOptional({ enum: OfferStatus }) @IsOptional() @IsEnum(OfferStatus) status?: OfferStatus;
+}
+
+export class UpdateOfferDto extends PartialType(CreateOfferDto) {
+  @ApiPropertyOptional({ enum: OfferStatus }) @IsOptional() @IsEnum(OfferStatus) status?: OfferStatus;
 }
 
 export class OfferFilterDto extends PaginationDto {
@@ -34,4 +39,6 @@ export class OfferFilterDto extends PaginationDto {
   @ApiPropertyOptional({ enum: OfferType }) @IsOptional() @IsEnum(OfferType) type?: OfferType;
   @ApiPropertyOptional() @IsOptional() @Type(() => Boolean) @IsBoolean() highlighted?: boolean;
   @ApiPropertyOptional() @IsOptional() @IsString() date?: string; // filter by active on this date
+  @ApiPropertyOptional({ enum: OfferStatus }) @IsOptional() @IsEnum(OfferStatus) status?: OfferStatus;
+  @ApiPropertyOptional() @IsOptional() @Type(() => Boolean) @IsBoolean() includeAll?: boolean;
 }

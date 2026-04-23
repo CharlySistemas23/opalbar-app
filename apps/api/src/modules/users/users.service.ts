@@ -25,12 +25,18 @@ export class UsersService {
     const profile = await this.prisma.userProfile.upsert({
       where: { userId },
       update: {
-        ...(dto.firstName && { firstName: dto.firstName }),
-        ...(dto.lastName && { lastName: dto.lastName }),
+        ...(dto.firstName !== undefined && { firstName: dto.firstName }),
+        ...(dto.lastName !== undefined && { lastName: dto.lastName }),
         ...(dto.bio !== undefined && { bio: dto.bio }),
         ...(dto.birthDate && { birthDate: new Date(dto.birthDate) }),
         ...(dto.city !== undefined && { city: dto.city }),
+        ...(dto.country !== undefined && { country: dto.country }),
+        ...(dto.avatarUrl !== undefined && { avatarUrl: dto.avatarUrl }),
+        ...(dto.coverUrl !== undefined && { coverUrl: dto.coverUrl }),
         ...(dto.language && { language: dto.language }),
+        ...(dto.gender !== undefined && { gender: dto.gender }),
+        ...(dto.occupation !== undefined && { occupation: dto.occupation }),
+        ...(dto.discoverySource !== undefined && { discoverySource: dto.discoverySource }),
       },
       create: {
         userId,
@@ -39,7 +45,13 @@ export class UsersService {
         bio: dto.bio,
         birthDate: dto.birthDate ? new Date(dto.birthDate) : undefined,
         city: dto.city,
+        country: dto.country || 'MX',
+        avatarUrl: dto.avatarUrl,
+        coverUrl: dto.coverUrl,
         language: dto.language || 'es',
+        gender: dto.gender,
+        occupation: dto.occupation,
+        discoverySource: dto.discoverySource,
       },
     });
     return profile;
@@ -61,10 +73,45 @@ export class UsersService {
   }
 
   async updateNotificationSettings(userId: string, settings: Record<string, boolean>) {
+    // The mobile UI uses simple toggle names ("community", "marketing", …)
+    // while the Prisma model has more granular columns (communityReplies,
+    // communityReactions, marketingEmails, …). Translate before writing —
+    // otherwise Prisma rejects the unknown fields and the optimistic toggle
+    // silently reverts on the client.
+    const patch: Record<string, boolean> = {};
+    for (const [key, value] of Object.entries(settings)) {
+      if (typeof value !== 'boolean') continue;
+      switch (key) {
+        case 'events':
+          patch.newEvents = value;
+          patch.eventReminders = value;
+          break;
+        case 'offers':
+          patch.newOffers = value;
+          break;
+        case 'community':
+          patch.communityReplies = value;
+          patch.communityReactions = value;
+          break;
+        case 'reservations':
+          // No dedicated column yet — ride on eventReminders so the toggle
+          // still has behavior attached instead of being a silent no-op.
+          patch.eventReminders = value;
+          break;
+        case 'marketing':
+          patch.marketingEmails = value;
+          break;
+        default:
+          // Accept raw column names too (pushEnabled, weeklyDigest, …) so
+          // future screens can target them directly.
+          patch[key] = value;
+      }
+    }
+
     return this.prisma.notificationSettings.upsert({
       where: { userId },
-      update: settings,
-      create: { userId, ...settings },
+      update: patch,
+      create: { userId, ...patch },
     });
   }
 
@@ -85,10 +132,23 @@ export class UsersService {
   }
 
   async updateConsent(userId: string, consent: Record<string, boolean>) {
+    // The privacy screen also posts profile-visibility keys (showProfile,
+    // showActivity, allowMessages) that have no UserConsent column yet.
+    // Drop unknown keys so Prisma doesn't reject the upsert — otherwise the
+    // toggle errors out and silently reverts on the client.
+    const allowed = new Set([
+      'termsAccepted', 'privacyAccepted',
+      'marketingConsent', 'analyticsConsent', 'pushConsent',
+    ]);
+    const patch: Record<string, boolean> = {};
+    for (const [k, v] of Object.entries(consent)) {
+      if (typeof v === 'boolean' && allowed.has(k)) patch[k] = v;
+    }
+
     return this.prisma.userConsent.upsert({
       where: { userId },
-      update: { ...consent, updatedAt: new Date() },
-      create: { userId, ...consent },
+      update: { ...patch, updatedAt: new Date() },
+      create: { userId, ...patch },
     });
   }
 
@@ -97,5 +157,151 @@ export class UsersService {
       where: { userId },
       data: { avatarUrl },
     });
+  }
+
+  // ─────────────────────────────────────────────
+  //  SEARCH
+  // ─────────────────────────────────────────────
+
+  async search(query: string, limit: number) {
+    const q = query.trim();
+    if (!q) return [];
+    return this.prisma.user.findMany({
+      where: {
+        deletedAt: null,
+        OR: [
+          { email: { contains: q, mode: 'insensitive' } },
+          { profile: { firstName: { contains: q, mode: 'insensitive' } } },
+          { profile: { lastName: { contains: q, mode: 'insensitive' } } },
+        ],
+      },
+      select: {
+        id: true, email: true, points: true,
+        profile: { select: { firstName: true, lastName: true, avatarUrl: true, bio: true } },
+        _count: { select: { followers: true, following: true, posts: true, events: true } },
+      },
+      take: Math.min(limit, 50),
+    });
+  }
+
+  // ─────────────────────────────────────────────
+  //  PUBLIC PROFILE
+  // ─────────────────────────────────────────────
+
+  async getPublicProfile(id: string, viewerId?: string) {
+    const user = await this.prisma.user.findFirst({
+      where: { id, deletedAt: null },
+      select: {
+        id: true, email: true, createdAt: true, points: true,
+        profile: {
+          select: {
+            firstName: true, lastName: true, avatarUrl: true, coverUrl: true, bio: true,
+            city: true, country: true,
+            birthDate: true, gender: true, occupation: true, language: true,
+            loyaltyLevel: { select: { name: true, color: true, icon: true } },
+          },
+        },
+        _count: {
+          select: {
+            followers: true, following: true, posts: true,
+            events: true, offerRedemptions: true,
+          },
+        },
+      },
+    });
+    if (!user) return null;
+
+    let isFollowing = false;
+    if (viewerId && viewerId !== id) {
+      const existing = await this.prisma.follow.findUnique({
+        where: { followerId_followingId: { followerId: viewerId, followingId: id } },
+      });
+      isFollowing = !!existing;
+    }
+    return { ...user, isFollowing };
+  }
+
+  // ─────────────────────────────────────────────
+  //  FOLLOWS
+  // ─────────────────────────────────────────────
+
+  async follow(followerId: string, followingId: string) {
+    if (followerId === followingId) {
+      throw new Error("Can't follow yourself");
+    }
+    await this.prisma.follow.upsert({
+      where: { followerId_followingId: { followerId, followingId } },
+      create: { followerId, followingId },
+      update: {},
+    });
+    return { ok: true, isFollowing: true };
+  }
+
+  async unfollow(followerId: string, followingId: string) {
+    await this.prisma.follow.deleteMany({
+      where: { followerId, followingId },
+    });
+    return { ok: true, isFollowing: false };
+  }
+
+  async listFollowers(userId: string, limit: number) {
+    const rows = await this.prisma.follow.findMany({
+      where: { followingId: userId },
+      include: {
+        follower: {
+          select: {
+            id: true,
+            profile: { select: { firstName: true, lastName: true, avatarUrl: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: Math.min(limit, 100),
+    });
+    return rows.map((r) => r.follower);
+  }
+
+  async listFollowing(userId: string, limit: number) {
+    const rows = await this.prisma.follow.findMany({
+      where: { followerId: userId },
+      include: {
+        following: {
+          select: {
+            id: true,
+            profile: { select: { firstName: true, lastName: true, avatarUrl: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: Math.min(limit, 100),
+    });
+    return rows.map((r) => r.following);
+  }
+
+  // ─────────────────────────────────────────────
+  //  SAVED ITEMS
+  // ─────────────────────────────────────────────
+
+  async listSaved(userId: string, type?: string) {
+    return this.prisma.savedItem.findMany({
+      where: { userId, ...(type ? { type: type.toUpperCase() as any } : {}) },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+  }
+
+  async toggleSave(userId: string, type: string, targetId: string) {
+    const typeEnum = type.toUpperCase() as any;
+    const existing = await this.prisma.savedItem.findUnique({
+      where: { userId_type_targetId: { userId, type: typeEnum, targetId } },
+    });
+    if (existing) {
+      await this.prisma.savedItem.delete({ where: { id: existing.id } });
+      return { saved: false };
+    }
+    await this.prisma.savedItem.create({
+      data: { userId, type: typeEnum, targetId },
+    });
+    return { saved: true };
   }
 }

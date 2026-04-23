@@ -26,7 +26,7 @@ export const validationSchema = Joi.object({
   // JWT
   JWT_ACCESS_SECRET: Joi.string().min(32).required(),
   JWT_REFRESH_SECRET: Joi.string().min(32).required(),
-  JWT_ACCESS_EXPIRES_IN: Joi.string().default('15m'),
+  JWT_ACCESS_EXPIRES_IN: Joi.string().default('4h'),
   JWT_REFRESH_EXPIRES_IN: Joi.string().default('30d'),
 
   // OTP

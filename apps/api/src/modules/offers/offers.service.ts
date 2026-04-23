@@ -2,66 +2,98 @@ import {
   BadRequestException, ConflictException,
   Injectable, NotFoundException,
 } from '@nestjs/common';
+import { createHash } from 'crypto';
 import { OfferStatus } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
+import { RedisService, LockBusyError } from '../../database/redis.service';
 import { paginate, getPaginationOffset } from '../../common/dto/pagination.dto';
-import { CreateOfferDto, OfferFilterDto } from './dto/offer.dto';
+import { CreateOfferDto, OfferFilterDto, UpdateOfferDto } from './dto/offer.dto';
+
+// Cache TTLs — public reads. Offers change less than events so we can hold longer.
+const CACHE_TTL_LIST = 60;
+const CACHE_TTL_ONE = 120;
 
 @Injectable()
 export class OffersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly redis: RedisService,
+  ) {}
 
-  async findAll(filter: OfferFilterDto) {
-    const { page = 1, limit = 20, search, venueId, type, highlighted, date } = filter;
-    const skip = getPaginationOffset(page, limit);
-    const now = date ? new Date(date) : new Date();
+  private static hashFilter(obj: unknown): string {
+    return createHash('md5').update(JSON.stringify(obj ?? {})).digest('hex').slice(0, 12);
+  }
 
-    const where: any = {
-      status: OfferStatus.ACTIVE,
-      startDate: { lte: now },
-      endDate: { gte: now },
-      ...(venueId && { venueId }),
-      ...(type && { type }),
-      ...(highlighted && { isHighlighted: true }),
-      ...(search && {
-        OR: [
-          { title: { contains: search, mode: 'insensitive' } },
-          { description: { contains: search, mode: 'insensitive' } },
-        ],
-      }),
+  private async invalidate(): Promise<void> {
+    await this.redis.cacheDelPattern('cache:offers:*');
+  }
+
+  async findAll(filter: OfferFilterDto & { status?: OfferStatus; includeAll?: boolean }) {
+    const isPublicList = !(filter as any).includeAll && !(filter as any).status;
+    const key = RedisService.cacheKey('offers', 'list', OffersService.hashFilter(filter));
+
+    const exec = async () => {
+      const { page = 1, limit = 20, search, venueId, type, highlighted, date, status, includeAll } = filter as any;
+      const skip = getPaginationOffset(page, limit);
+      const now = date ? new Date(date) : new Date();
+
+      const where: any = {};
+      if (status) where.status = status;
+      else if (!includeAll) {
+        where.status = OfferStatus.ACTIVE;
+        where.startDate = { lte: now };
+        where.endDate = { gte: now };
+      }
+      Object.assign(where, {
+        ...(venueId && { venueId }),
+        ...(type && { type }),
+        ...(highlighted && { isHighlighted: true }),
+        ...(search && {
+          OR: [
+            { title: { contains: search, mode: 'insensitive' } },
+            { description: { contains: search, mode: 'insensitive' } },
+          ],
+        }),
+      });
+
+      const [data, total] = await Promise.all([
+        this.prisma.offer.findMany({
+          where,
+          skip,
+          take: limit,
+          include: {
+            venue: { select: { id: true, name: true, city: true } },
+            _count: { select: { redemptions: true } },
+          },
+          orderBy: [{ isHighlighted: 'desc' }, { endDate: 'asc' }],
+        }),
+        this.prisma.offer.count({ where }),
+      ]);
+
+      return paginate(data, total, page, limit);
     };
 
-    const [data, total] = await Promise.all([
-      this.prisma.offer.findMany({
-        where,
-        skip,
-        take: limit,
-        include: {
-          venue: { select: { id: true, name: true, city: true } },
-          _count: { select: { redemptions: true } },
-        },
-        orderBy: [{ isHighlighted: 'desc' }, { endDate: 'asc' }],
-      }),
-      this.prisma.offer.count({ where }),
-    ]);
-
-    return paginate(data, total, page, limit);
+    if (isPublicList) return this.redis.cacheWrap(key, CACHE_TTL_LIST, exec);
+    return exec();
   }
 
   async findOne(id: string) {
-    const offer = await this.prisma.offer.findUnique({
-      where: { id },
-      include: {
-        venue: true,
-        _count: { select: { redemptions: true } },
-      },
+    const key = RedisService.cacheKey('offers', 'one', id);
+    return this.redis.cacheWrap(key, CACHE_TTL_ONE, async () => {
+      const offer = await this.prisma.offer.findUnique({
+        where: { id },
+        include: {
+          venue: true,
+          _count: { select: { redemptions: true } },
+        },
+      });
+      if (!offer) throw new NotFoundException('Offer not found');
+      return offer;
     });
-    if (!offer) throw new NotFoundException('Offer not found');
-    return offer;
   }
 
   async create(dto: CreateOfferDto, createdById: string) {
-    return this.prisma.offer.create({
+    const created = await this.prisma.offer.create({
       data: {
         title: dto.title,
         titleEn: dto.titleEn,
@@ -82,13 +114,69 @@ export class OffersService {
         endTime: dto.endTime,
         isHighlighted: dto.isHighlighted ?? false,
         pointsRequired: dto.pointsRequired ?? 0,
-        status: OfferStatus.DRAFT,
+        status: dto.status ?? OfferStatus.DRAFT,
         createdById,
       },
     });
+    await this.invalidate();
+    return created;
+  }
+
+  async update(id: string, dto: UpdateOfferDto) {
+    const existing = await this.prisma.offer.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException('Offer not found');
+
+    const data: any = { ...dto };
+    if (dto.startDate) data.startDate = new Date(dto.startDate);
+    if (dto.endDate) data.endDate = new Date(dto.endDate);
+
+    const updated = await this.prisma.offer.update({
+      where: { id },
+      data,
+      include: {
+        venue: { select: { id: true, name: true, city: true } },
+        _count: { select: { redemptions: true } },
+      },
+    });
+    await this.invalidate();
+    return updated;
+  }
+
+  async remove(id: string) {
+    const existing = await this.prisma.offer.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException('Offer not found');
+    // Hard delete — cascade removes all redemptions
+    await this.prisma.offer.delete({ where: { id } });
+    await this.invalidate();
+  }
+
+  async softArchive(id: string) {
+    const existing = await this.prisma.offer.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException('Offer not found');
+    await this.prisma.offer.update({
+      where: { id },
+      data: { status: OfferStatus.EXPIRED },
+    });
+    await this.invalidate();
   }
 
   async redeem(offerId: string, userId: string) {
+    // Serialize redemptions of the SAME offer. Two concurrent callers on the same
+    // offer would otherwise both pass the `currentRedemptions >= maxRedemptions`
+    // check and oversell. Different offers can proceed in parallel.
+    try {
+      return await this.redis.withLock(`offer:redeem:${offerId}`, 5, () =>
+        this.executeRedeem(offerId, userId),
+      );
+    } catch (err) {
+      if (err instanceof LockBusyError) {
+        throw new ConflictException('Offer is being redeemed by another user, try again in a second');
+      }
+      throw err;
+    }
+  }
+
+  private async executeRedeem(offerId: string, userId: string) {
     const offer = await this.prisma.offer.findUnique({ where: { id: offerId } });
     if (!offer) throw new NotFoundException('Offer not found');
 
@@ -159,6 +247,7 @@ export class OffersService {
         : []),
     ]);
 
+    await this.invalidate();
     return redemption;
   }
 

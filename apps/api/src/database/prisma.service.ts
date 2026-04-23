@@ -8,6 +8,8 @@ import {
   Logger,
 } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
+import { PrismaPg } from '@prisma/adapter-pg';
+import { Pool } from 'pg';
 
 @Injectable()
 export class PrismaService
@@ -15,9 +17,16 @@ export class PrismaService
   implements OnModuleInit, OnModuleDestroy
 {
   private readonly logger = new Logger(PrismaService.name);
+  private pool: Pool;
 
   constructor() {
+    const pool = new Pool({
+      connectionString: process.env.DATABASE_URL,
+    });
+    const adapter = new PrismaPg(pool);
+
     super({
+      adapter,
       log: [
         { emit: 'event', level: 'query' },
         { emit: 'stdout', level: 'info' },
@@ -25,6 +34,8 @@ export class PrismaService
         { emit: 'stdout', level: 'error' },
       ],
     });
+
+    this.pool = pool;
 
     // Log slow queries (>500ms) in development
     if (process.env.NODE_ENV === 'development') {
@@ -39,15 +50,16 @@ export class PrismaService
   async onModuleInit(): Promise<void> {
     try {
       await this.$connect();
-      this.logger.log('✅ Database connected');
+      this.logger.log('[DATABASE] Connected');
     } catch (error) {
-      this.logger.error('❌ Database connection failed', error);
+      this.logger.error('[DATABASE] Connection failed', error);
       throw error;
     }
   }
 
   async onModuleDestroy(): Promise<void> {
     await this.$disconnect();
+    await this.pool.end();
     this.logger.log('Database disconnected');
   }
 

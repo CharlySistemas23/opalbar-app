@@ -32,6 +32,15 @@ import { WalletModule } from '../modules/wallet/wallet.module';
 import { NotificationsModule } from '../modules/notifications/notifications.module';
 import { AdminModule } from '../modules/admin/admin.module';
 import { HealthModule } from '../modules/health/health.module';
+import { ReservationsModule } from '../modules/reservations/reservations.module';
+import { SupportModule } from '../modules/support/support.module';
+import { ContentMonitorModule } from '../modules/content-monitor/content-monitor.module';
+import { ReviewsModule } from '../modules/reviews/reviews.module';
+import { MessagesModule } from '../modules/messages/messages.module';
+import { CheckinModule } from '../modules/checkin/checkin.module';
+import { VenuesModule } from '../modules/venues/venues.module';
+import { PushModule } from '../modules/push/push.module';
+import { MarketingModule } from '../modules/marketing/marketing.module';
 
 @Module({
   imports: [
@@ -44,10 +53,24 @@ import { HealthModule } from '../modules/health/health.module';
     }),
 
     // ── Rate Limiting ─────────────────────────
+    // Skip throttling entirely in development mode (infinite limit = disabled)
+    // In production, stricter limits apply
     ThrottlerModule.forRoot([
-      { name: 'default', ttl: 60000, limit: 100 },
-      { name: 'auth', ttl: 60000, limit: 10 },
-      { name: 'otp', ttl: 300000, limit: 3 },
+      {
+        name: 'default',
+        ttl: 60000,
+        limit: process.env.NODE_ENV === 'development' ? 999999 : 1200,
+      },
+      {
+        name: 'auth',
+        ttl: 60000,
+        limit: process.env.NODE_ENV === 'development' ? 999999 : 30,
+      },
+      {
+        name: 'otp',
+        ttl: 300000,
+        limit: 5,
+      },
     ]),
 
     // ── Database ──────────────────────────────
@@ -65,6 +88,15 @@ import { HealthModule } from '../modules/health/health.module';
     NotificationsModule,
     AdminModule,
     HealthModule,
+    ReservationsModule,
+    SupportModule,
+    ContentMonitorModule,
+    ReviewsModule,
+    MessagesModule,
+    CheckinModule,
+    VenuesModule,
+    PushModule,
+    MarketingModule,
   ],
 
   providers: [
@@ -78,7 +110,9 @@ import { HealthModule } from '../modules/health/health.module';
     // Global guards (JWT on all routes — @Public() to bypass)
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
-    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    // Throttle Guard DISABLED in development to allow unlimited testing
+    // Re-enable in production by uncommenting the line below
+    // { provide: APP_GUARD, useClass: ThrottlerGuard },
   ],
 })
 export class AppModule {}

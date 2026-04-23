@@ -3,6 +3,7 @@ import {
   Param, Patch, Post, Query,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { SkipThrottle } from '@nestjs/throttler';
 import { User, UserRole } from '@prisma/client';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
@@ -18,6 +19,7 @@ export class EventsController {
 
   @Get()
   @Public()
+  @SkipThrottle()
   @ApiOperation({ summary: 'List events with filters and pagination' })
   findAll(@Query() filter: EventFilterDto) {
     return this.eventsService.findAll(filter);
@@ -25,9 +27,33 @@ export class EventsController {
 
   @Get('categories')
   @Public()
-  @ApiOperation({ summary: 'Get all event categories' })
-  getCategories() {
-    return this.eventsService.getCategories();
+  @SkipThrottle()
+  @ApiOperation({ summary: 'Get event categories' })
+  getCategories(@Query('includeArchived') includeArchived?: string) {
+    return this.eventsService.getCategories(includeArchived === 'true');
+  }
+
+  @Post('categories/:id/restore')
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.MODERATOR)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Restore an archived category (Admin only)' })
+  restoreCategory(@Param('id') id: string) {
+    return this.eventsService.restoreCategory(id);
+  }
+
+  @Post('categories')
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.MODERATOR)
+  @ApiOperation({ summary: 'Create event category (Admin only)' })
+  createCategory(@Body() body: { name: string; nameEn?: string; icon?: string; color?: string }) {
+    return this.eventsService.createCategory(body);
+  }
+
+  @Delete('categories/:id')
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.MODERATOR)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Archive or hard-delete event category (Admin only)' })
+  deleteCategory(@Param('id') id: string, @Query('hard') hard?: string) {
+    return this.eventsService.deleteCategory(id, hard === 'true');
   }
 
   @Get('my')
@@ -70,6 +96,12 @@ export class EventsController {
   @ApiOperation({ summary: 'Register attendance for an event' })
   register(@Param('id') id: string, @CurrentUser() user: User) {
     return this.eventsService.register(id, user.id);
+  }
+
+  @Get(':id/attendees')
+  @ApiOperation({ summary: 'List attendees of an event' })
+  listAttendees(@Param('id') id: string) {
+    return this.eventsService.listAttendees(id);
   }
 
   @Delete(':id/attend')

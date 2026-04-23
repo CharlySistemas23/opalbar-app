@@ -1,0 +1,135 @@
+import React, { useEffect } from 'react';
+import { Platform, View, Text, ScrollView } from 'react-native';
+import { Stack, useRouter, useSegments } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
+import * as SplashScreen from 'expo-splash-screen';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { useAuthStore } from '@/stores/auth.store';
+
+// ── Web diagnostic: catch ALL errors before React mounts ───────────────────
+if (Platform.OS === 'web' && typeof window !== 'undefined') {
+  // Show JS errors visually even if React never renders
+  const showWebError = (msg: string) => {
+    const el = document.createElement('div');
+    el.style.cssText =
+      'position:fixed;inset:0;background:#0D0D0F;color:#E45858;padding:24px;' +
+      'font-size:13px;font-family:monospace;z-index:99999;overflow:auto;white-space:pre-wrap;';
+    el.textContent = '⚠ JS Error:\n' + msg;
+    document.body?.appendChild(el);
+  };
+  const origOnError = window.onerror;
+  (window as any).onerror = (msg: any, _src: any, _line: any, _col: any, err: any) => {
+    showWebError(String(err?.stack || msg));
+    if (typeof origOnError === 'function') origOnError.call(window, msg, _src, _line, _col, err);
+    return false;
+  };
+  window.addEventListener('unhandledrejection', (e) => {
+    showWebError('Unhandled rejection:\n' + String((e.reason as any)?.stack || e.reason));
+  });
+}
+
+// ── Visible error boundary ─────────────────────────────────────────────────
+class ErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { error: Error | null }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <View style={{ flex: 1, backgroundColor: '#0D0D0F', padding: 24, paddingTop: 60 }}>
+          <Text style={{ color: '#E45858', fontSize: 18, fontWeight: 'bold', marginBottom: 12 }}>
+            ⚠ Render Error
+          </Text>
+          <ScrollView>
+            <Text style={{ color: '#F4F4F5', fontSize: 13, fontFamily: 'monospace' }}>
+              {this.state.error.message}
+            </Text>
+            {!!this.state.error.stack && (
+              <Text style={{ color: '#B4B4BB', fontSize: 11, marginTop: 16, fontFamily: 'monospace' }}>
+                {this.state.error.stack}
+              </Text>
+            )}
+          </ScrollView>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+// Keep splash screen visible until layout mounts (native only)
+if (Platform.OS !== 'web') {
+  SplashScreen.preventAutoHideAsync().catch(() => {});
+}
+
+/**
+ * Watches for auth-state changes AFTER the app is already running
+ * (e.g. session expiry, manual logout).  Initial routing is handled in
+ * app/index.tsx once the store has finished rehydrating from AsyncStorage.
+ */
+function SessionGuard() {
+  const { isAuthenticated, isGuest, _hasHydrated } = useAuthStore();
+  const segments = useSegments();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (!_hasHydrated) return;
+
+    const timer = setTimeout(() => {
+      const inAuth = segments[0] === '(auth)';
+      const inIndex = segments.length === 0 || segments[0] === 'index';
+      const hasAccess = isAuthenticated || isGuest;
+
+      // While index.tsx is doing its own redirect, stay out of the way
+      if (inIndex) return;
+
+      if (!hasAccess && !inAuth) {
+        router.replace('/(auth)/welcome');
+      } else if (hasAccess && inAuth) {
+        router.replace(isGuest ? '/(guest)/home' : '/(tabs)/home');
+      }
+    }, 0);
+
+    return () => clearTimeout(timer);
+  }, [isAuthenticated, isGuest, _hasHydrated, segments]);
+
+  return null;
+}
+
+export default function RootLayout() {
+  useEffect(() => {
+    // Hide splash screen once the layout has mounted (native only)
+    if (Platform.OS !== 'web') {
+      SplashScreen.hideAsync().catch(() => {});
+    }
+  }, []);
+
+  return (
+    <ErrorBoundary>
+      <SafeAreaProvider style={{ flex: 1, backgroundColor: '#0D0D0F' }}>
+        <StatusBar style="light" />
+        <SessionGuard />
+        <Stack
+          screenOptions={{
+            headerShown: false,
+            animation: 'slide_from_right',
+            contentStyle: { backgroundColor: '#0D0D0F' },
+          }}
+        >
+          <Stack.Screen name="index" />
+          <Stack.Screen name="(auth)" />
+          <Stack.Screen name="(tabs)" />
+          <Stack.Screen name="(app)" />
+          <Stack.Screen name="(guest)" />
+        </Stack>
+      </SafeAreaProvider>
+    </ErrorBoundary>
+  );
+}

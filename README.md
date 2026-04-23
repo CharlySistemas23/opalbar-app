@@ -190,6 +190,38 @@ npx nx serve api
 | **Admin** | PATCH | `/admin/posts/:id/reject` | Admin |
 | **Admin** | GET | `/admin/reports` | Admin |
 | **Admin** | PATCH | `/admin/reports/:id/resolve` | Admin |
+| **Admin** | GET | `/admin/reservations` | Admin |
+| **Admin** | PATCH | `/admin/reservations/:id/status` | Admin |
+| **Admin** | GET | `/admin/support/tickets` | Admin |
+| **Admin** | PATCH | `/admin/support/tickets/:id` | Admin |
+| **Admin** | GET | `/admin/support/quick-replies` | Admin |
+| **Admin** | POST | `/admin/support/quick-replies` | Admin |
+| **Admin** | PATCH | `/admin/support/quick-replies/:id` | Admin |
+| **Admin** | DELETE | `/admin/support/quick-replies/:id` | Admin |
+| **Admin** | GET | `/admin/reviews` | Admin |
+| **Admin** | PATCH | `/admin/reviews/:id/moderate` | Admin |
+| **Reservations** | POST | `/reservations` | JWT |
+| **Reservations** | GET | `/reservations/my` | JWT |
+| **Reservations** | GET | `/reservations/:id` | JWT |
+| **Reservations** | DELETE | `/reservations/:id` | JWT |
+| **Support** | POST | `/support/tickets` | JWT |
+| **Support** | GET | `/support/tickets/my` | JWT |
+| **Support** | GET | `/support/tickets/:id/messages` | JWT |
+| **Support** | POST | `/support/tickets/:id/messages` | JWT |
+| **Support** | GET | `/support/quick-replies` | JWT |
+| **Content Monitor** | GET | `/content-monitor/flags` | Admin |
+| **Content Monitor** | GET | `/content-monitor/flags/stats` | Admin |
+| **Content Monitor** | PATCH | `/content-monitor/flags/:id/review` | Admin |
+| **Content Monitor** | GET | `/content-monitor/rules` | Admin |
+| **Content Monitor** | POST | `/content-monitor/rules` | Admin |
+| **Content Monitor** | PATCH | `/content-monitor/rules/:id` | Admin |
+| **Content Monitor** | DELETE | `/content-monitor/rules/:id` | Admin |
+| **Reviews** | POST | `/reviews` | JWT |
+| **Reviews** | GET | `/reviews/venue/:venueId` | Public |
+| **Reviews** | GET | `/reviews/venue/:venueId/summary` | Public |
+| **Reviews** | GET | `/reviews/my` | JWT |
+| **Reviews** | PATCH | `/reviews/:id` | JWT |
+| **Reviews** | DELETE | `/reviews/:id` | JWT |
 
 ---
 
@@ -206,6 +238,10 @@ npx nx serve api
 | Community | Post, Comment, Reaction, Report, ModerationLog |
 | Wallet | LoyaltyLevel, WalletTransaction, NotificationSettings, Notification |
 | GDPR | DataDeletionRequest, DataExportRequest |
+| Reservations | Reservation |
+| Support | SupportTicket, SupportMessage, SupportQuickReply |
+| Content Monitor | ContentFlag, FilterRule |
+| Reviews | Review |
 | Config | AppConfig |
 
 ---
@@ -305,6 +341,22 @@ Push / PR
                          └── E2E tests (main/develop only)
                                 └── Docker build & push (main only)
 ```
+
+---
+
+## Fase 3 Status: ✅ COMPLETADA
+
+| Bloque | Estado |
+|---|---|
+| Prisma models: Reservation, SupportTicket, SupportMessage, SupportQuickReply, ContentFlag, FilterRule, Review | ✅ |
+| ReservationsModule (CRUD + status flow + admin endpoints) | ✅ |
+| SupportModule (tickets + chat + quick replies) | ✅ |
+| ContentMonitorModule (flags + filter rules + content scanner) | ✅ |
+| ReviewsModule (CRUD + venue ratings + admin moderation) | ✅ |
+| AdminModule extended (reservations + support + reviews endpoints) | ✅ |
+| Mobile routes updated (reservations, support, reviews) | ✅ |
+| Admin panel designs (78 screens: 39 ES + 39 EN) | ✅ |
+| User screens designs (6 screens: 3 ES + 3 EN) | ✅ |
 
 ---
 

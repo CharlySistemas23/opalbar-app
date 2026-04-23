@@ -17,9 +17,12 @@ export const Routes = {
   // ── Main Tabs ──────────────────────────────
   HOME: '/(tabs)/home',
   EVENTS: '/(tabs)/events',
-  OFFERS: '/(tabs)/offers',
+  BAR: '/(tabs)/bar',
   COMMUNITY: '/(tabs)/community',
   PROFILE: '/(tabs)/profile',
+
+  // ── Offers (stack, not tab) ───────────────
+  OFFERS: '/(app)/offers',
 
   // ── Events ────────────────────────────────
   EVENT_DETAIL: '/(app)/events/[id]',
@@ -31,7 +34,6 @@ export const Routes = {
   // ── Community ─────────────────────────────
   POST_DETAIL: '/(app)/community/posts/[id]',
   NEW_POST: '/(app)/community/new-post',
-  WRITE_REVIEW: '/(app)/community/write-review',
 
   // ── Profile ───────────────────────────────
   EDIT_PROFILE: '/(app)/profile/edit',
@@ -49,6 +51,20 @@ export const Routes = {
 
   // ── Venue ─────────────────────────────────
   VENUE_DETAIL: '/(app)/venue/[id]',
+
+  // ── Reservations ──────────────────────────
+  MAKE_RESERVATION: '/(app)/reservations/new',
+  MY_RESERVATIONS: '/(app)/reservations/my',
+  RESERVATION_DETAIL: '/(app)/reservations/[id]',
+
+  // ── Support ───────────────────────────────
+  SUPPORT: '/(app)/support',
+  SUPPORT_CHAT: '/(app)/support/chat/[id]',
+  NEW_TICKET: '/(app)/support/new-ticket',
+
+  // ── Reviews ───────────────────────────────
+  WRITE_REVIEW: '/(app)/venue/[id]/review',
+  MY_REVIEWS: '/(app)/profile/my-reviews',
 
   // ── Guest ─────────────────────────────────
   GUEST_HOME: '/(guest)/home',

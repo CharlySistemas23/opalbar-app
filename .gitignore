@@ -47,3 +47,24 @@ Thumbs.db
 .claude/settings.local.json
 .nx/polygraph
 /generated/prisma
+
+# Portable tools (Redis)
+/tools/redis/
+
+# Env / secrets — NUNCA subir a GitHub
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Expo local
+.expo/
+apps/mobile/.expo/
+
+# EAS / builds locales
+*.apk
+*.ipa
+*.aab
+
+# Logs
+*.log
