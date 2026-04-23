@@ -20,6 +20,7 @@ import { apiError } from '@/api/errors';
 import { useAppStore } from '@/stores/app.store';
 import { Colors } from '@/constants/tokens';
 import { toast } from '@/components/Toast';
+import { uploadImage, UploadError } from '@/utils/uploadImage';
 
 // ─────────────────────────────────────────────
 //  New Story — IG-style composer (aligned w/ new-post)
@@ -36,7 +37,6 @@ export default function NewStory() {
   const t = language === 'es';
 
   const [localImage, setLocalImage] = useState<string | null>(null);
-  const [base64, setBase64] = useState<string | null>(null);
   const [caption, setCaption] = useState('');
   const [picking, setPicking] = useState(false);
   const [publishing, setPublishing] = useState(false);
@@ -56,13 +56,10 @@ export default function NewStory() {
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: [9, 16],
-        quality: 0.7,
-        base64: true,
+        quality: 0.9,
       });
       if (!result.canceled && result.assets[0]) {
-        const a = result.assets[0];
-        setLocalImage(a.uri);
-        setBase64(a.base64 ? `data:image/jpeg;base64,${a.base64}` : null);
+        setLocalImage(result.assets[0].uri);
       }
     } finally {
       setPicking(false);
@@ -84,13 +81,10 @@ export default function NewStory() {
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: [9, 16],
-        quality: 0.7,
-        base64: true,
+        quality: 0.9,
       });
       if (!result.canceled && result.assets[0]) {
-        const a = result.assets[0];
-        setLocalImage(a.uri);
-        setBase64(a.base64 ? `data:image/jpeg;base64,${a.base64}` : null);
+        setLocalImage(result.assets[0].uri);
       }
     } finally {
       setPicking(false);
@@ -98,14 +92,22 @@ export default function NewStory() {
   }
 
   async function publish() {
-    if (!base64 && !localImage) {
+    if (!localImage) {
       Alert.alert(t ? 'Error' : 'Error', t ? 'Selecciona una imagen.' : 'Pick an image.');
       return;
     }
     setPublishing(true);
     try {
+      let mediaUrl: string;
+      try {
+        mediaUrl = await uploadImage(localImage, { kind: 'story' });
+      } catch (err) {
+        const msg = err instanceof UploadError ? err.message : 'upload failed';
+        toast(t ? `No se pudo subir la imagen: ${msg}` : `Could not upload image: ${msg}`, 'danger');
+        return;
+      }
       await communityApi.createStory({
-        mediaUrl: base64 || localImage!,
+        mediaUrl,
         caption: caption.trim() || undefined,
       });
       toast(t ? 'Historia publicada' : 'Story published', 'success');
@@ -117,7 +119,7 @@ export default function NewStory() {
     }
   }
 
-  const canPublish = !!(base64 || localImage) && !publishing;
+  const canPublish = !!localImage && !publishing;
 
   return (
     <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
@@ -165,7 +167,6 @@ export default function NewStory() {
               <Pressable
                 onPress={() => {
                   setLocalImage(null);
-                  setBase64(null);
                 }}
                 style={({ pressed }) => [styles.retakeBtn, pressed && styles.pressed]}
               >

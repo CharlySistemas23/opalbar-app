@@ -21,6 +21,8 @@ import { apiError } from '@/api/errors';
 import { useAuthStore } from '@/stores/auth.store';
 import { useAppStore } from '@/stores/app.store';
 import { Colors } from '@/constants/tokens';
+import { uploadImage, UploadError } from '@/utils/uploadImage';
+import { toast } from '@/components/Toast';
 
 // ─────────────────────────────────────────────
 //  New Post — Wall or Community
@@ -53,7 +55,6 @@ export default function NewPost() {
   const canChangeSurface = !surfaceParam;
 
   const [content, setContent] = useState('');
-  const [imageUrl, setImageUrl] = useState('');
   const [localImage, setLocalImage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [pickingImage, setPickingImage] = useState(false);
@@ -84,13 +85,10 @@ export default function NewPost() {
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: RATIOS.find((r) => r.key === selectedRatio)!.aspect,
-        quality: 0.75,
-        base64: true,
+        quality: 0.9,
       });
       if (!result.canceled && result.assets[0]) {
-        const asset = result.assets[0];
-        setLocalImage(asset.uri);
-        if (asset.base64) setImageUrl(`data:image/jpeg;base64,${asset.base64}`);
+        setLocalImage(result.assets[0].uri);
       }
     } finally {
       setPickingImage(false);
@@ -112,13 +110,10 @@ export default function NewPost() {
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: RATIOS.find((r) => r.key === selectedRatio)!.aspect,
-        quality: 0.75,
-        base64: true,
+        quality: 0.9,
       });
       if (!result.canceled && result.assets[0]) {
-        const asset = result.assets[0];
-        setLocalImage(asset.uri);
-        if (asset.base64) setImageUrl(`data:image/jpeg;base64,${asset.base64}`);
+        setLocalImage(result.assets[0].uri);
       }
     } finally {
       setPickingImage(false);
@@ -134,12 +129,23 @@ export default function NewPost() {
     (user?.email?.[0]?.toUpperCase() ?? 'U');
 
   async function handleSubmit() {
-    if (!content.trim() && !imageUrl) return;
+    if (!content.trim() && !localImage) return;
     setLoading(true);
     try {
+      let uploadedUrl: string | undefined;
+      if (localImage) {
+        try {
+          uploadedUrl = await uploadImage(localImage, { kind: 'post' });
+        } catch (err) {
+          const msg = err instanceof UploadError ? err.message : 'upload failed';
+          toast(t ? `No se pudo subir la imagen: ${msg}` : `Could not upload image: ${msg}`, 'danger');
+          setLoading(false);
+          return;
+        }
+      }
       const res = await communityApi.createPost({
         content: content.trim() || '',
-        imageUrl: imageUrl.trim() || undefined,
+        imageUrl: uploadedUrl,
         surface: isWallPost ? 'wall' : 'community',
       });
       refreshUser();
@@ -169,7 +175,7 @@ export default function NewPost() {
     }
   }
 
-  const canPublish = (content.trim().length > 0 || !!imageUrl) && !loading;
+  const canPublish = (content.trim().length > 0 || !!localImage) && !loading;
 
   return (
     <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
@@ -327,7 +333,6 @@ export default function NewPost() {
                 style={({ pressed }) => [styles.removeBtn, pressed && styles.pressed]}
                 onPress={() => {
                   setLocalImage(null);
-                  setImageUrl('');
                 }}
                 hitSlop={10}
               >

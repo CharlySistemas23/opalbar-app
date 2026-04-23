@@ -9,6 +9,7 @@ import { apiError } from '@/api/errors';
 import { DateTimeField } from '@/components/DateTimeField';
 import { useSafeBack } from '@/hooks/useSafeBack';
 import { Colors } from '@/constants/tokens';
+import { uploadImage, UploadError } from '@/utils/uploadImage';
 
 interface EventFormProps {
   eventId?: string;
@@ -139,11 +140,16 @@ export function EventForm({ eventId }: EventFormProps) {
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: [16, 9],
-        quality: 0.7,
-        base64: true,
+        quality: 0.9,
       });
-      if (!result.canceled && result.assets[0]?.base64) {
-        setImageUrl(`data:image/jpeg;base64,${result.assets[0].base64}`);
+      if (!result.canceled && result.assets[0]?.uri) {
+        try {
+          const url = await uploadImage(result.assets[0].uri, { kind: 'event' });
+          setImageUrl(url);
+        } catch (err) {
+          const msg = err instanceof UploadError ? err.message : 'Error';
+          Alert.alert('No se pudo subir', msg);
+        }
       }
     } finally { setPickingImage(false); }
   }

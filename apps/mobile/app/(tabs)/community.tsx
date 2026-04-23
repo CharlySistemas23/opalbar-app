@@ -10,7 +10,6 @@ import {
   Alert,
   Modal,
   Pressable,
-  Share,
 } from 'react-native';
 import { useState, useCallback, useMemo, useRef } from 'react';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -25,6 +24,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { useFeedback } from '@/hooks/useFeedback';
 import { useCommunityRealtime } from '@/hooks/useCommunityRealtime';
+import { sharePost } from '@/utils/share';
 
 // ─────────────────────────────────────────────
 //  Community Feed — Instagram-style
@@ -564,17 +564,15 @@ function PostCard({
   };
 
   async function handleShare() {
-    try {
-      const message = post.text
-        ? `"${post.text}" — ${post.author.name} en OPAL BAR`
-        : `${post.author.name} publicó en OPAL BAR`;
-      // Skip url when it's a base64 data URI (too heavy for share sheet)
-      const url =
-        post.imageUrl && !post.imageUrl.startsWith('data:')
-          ? post.imageUrl
-          : undefined;
-      await Share.share({ message, url });
-    } catch {}
+    await sharePost({
+      id: post.id,
+      content: post.text,
+      authorName: post.author.name,
+      imageUrl: post.imageUrl,
+      likes: post.likes,
+      comments: post.comments,
+      t,
+    });
   }
 
   async function handleBookmark() {

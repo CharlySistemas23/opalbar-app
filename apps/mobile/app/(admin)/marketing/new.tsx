@@ -20,6 +20,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { adminApi } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { Colors, Radius } from '@/constants/tokens';
+import { uploadImage, UploadError } from '@/utils/uploadImage';
 
 
 type TemplateId = 'OFFER' | 'EVENT' | 'BIRTHDAY' | 'WELCOME' | 'NEWS' | 'GENERIC';
@@ -194,23 +195,17 @@ export default function NewCampaignWizard() {
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
       aspect: [16, 9],
-      quality: 0.7,
-      base64: true,
+      quality: 0.9,
     });
-    if (result.canceled || !result.assets?.[0]?.base64) return;
-
-    const asset = result.assets[0];
-    const mime = asset.mimeType || 'image/jpeg';
-    const dataUrl = `data:${mime};base64,${asset.base64}`;
+    if (result.canceled || !result.assets?.[0]?.uri) return;
 
     try {
       setHeroUploading(true);
-      const res = await adminApi.marketing.uploadAsset(dataUrl);
-      const payload = res.data?.data ?? res.data ?? {};
-      if (!payload?.url) throw new Error('Upload response missing URL');
-      setHeroImageUrl(payload.url);
+      const url = await uploadImage(result.assets[0].uri, { kind: 'marketing' });
+      setHeroImageUrl(url);
     } catch (err: any) {
-      Alert.alert('No se pudo subir', apiError(err, 'Intenta con una imagen más pequeña.'));
+      const msg = err instanceof UploadError ? err.message : apiError(err, 'Intenta con una imagen más pequeña.');
+      Alert.alert('No se pudo subir', msg);
     } finally {
       setHeroUploading(false);
     }

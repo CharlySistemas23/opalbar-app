@@ -13,7 +13,6 @@ import {
   Modal,
   Pressable,
   ScrollView,
-  Share,
 } from 'react-native';
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -28,6 +27,7 @@ import { toast } from '@/components/Toast';
 import { Colors } from '@/constants/tokens';
 import { useCommunityRealtime } from '@/hooks/useCommunityRealtime';
 import { useFeedback } from '@/hooks/useFeedback';
+import { sharePost } from '@/utils/share';
 
 // ─────────────────────────────────────────────
 //  Post Detail — Instagram × Facebook hybrid
@@ -181,20 +181,20 @@ export default function PostDetail() {
   }
 
   async function handleShare() {
+    if (!post) return;
     fb.tap();
-    try {
-      const aName =
-        `${post?.user?.profile?.firstName ?? ''} ${post?.user?.profile?.lastName ?? ''}`.trim() ||
-        'Usuario';
-      const msg = post?.content
-        ? `"${post.content}" — ${aName} en OPAL BAR`
-        : `${aName} publicó en OPAL BAR`;
-      const url =
-        post?.imageUrl && !post.imageUrl.startsWith('data:')
-          ? post.imageUrl
-          : undefined;
-      await Share.share({ message: msg, url });
-    } catch {}
+    const aName =
+      `${post.user?.profile?.firstName ?? ''} ${post.user?.profile?.lastName ?? ''}`.trim() ||
+      (t ? 'Usuario' : 'User');
+    await sharePost({
+      id: post.id,
+      content: post.content,
+      authorName: aName,
+      imageUrl: post.imageUrl,
+      likes: likeCount,
+      comments: comments.length,
+      t,
+    });
   }
 
   async function handleBookmark() {

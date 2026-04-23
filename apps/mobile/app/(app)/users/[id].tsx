@@ -23,6 +23,8 @@ import { useAppStore } from '@/stores/app.store';
 import { toast } from '@/components/Toast';
 import { StoryRing } from '@/components/StoryRing';
 import { Colors, Radius } from '@/constants/tokens';
+import { sharePost } from '@/utils/share';
+import { uploadImage, UploadError } from '@/utils/uploadImage';
 
 // ─────────────────────────────────────────────
 //  User Profile — Instagram × Facebook hybrid
@@ -150,28 +152,34 @@ export default function UserProfile() {
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: [16, 9],
-        quality: 0.7,
-        base64: true,
+        quality: 0.9,
       });
-      if (result.canceled || !result.assets[0]?.base64) return;
-      const dataUri = `data:image/jpeg;base64,${result.assets[0].base64}`;
+      if (result.canceled || !result.assets[0]?.uri) return;
+      const localUri = result.assets[0].uri;
+      const prevCover = me?.profile?.coverUrl ?? null;
       setCoverUploading(true);
-      // Optimistic update — show the new cover immediately.
+      // Optimistic: show the local URI immediately while the upload runs.
       setProfile((p: any) => ({
         ...p,
-        profile: { ...(p?.profile ?? {}), coverUrl: dataUri },
+        profile: { ...(p?.profile ?? {}), coverUrl: localUri },
       }));
       try {
-        await usersApi.updateProfile({ coverUrl: dataUri });
+        const remoteUrl = await uploadImage(localUri, { kind: 'cover' });
+        await usersApi.updateProfile({ coverUrl: remoteUrl });
+        setProfile((p: any) => ({
+          ...p,
+          profile: { ...(p?.profile ?? {}), coverUrl: remoteUrl },
+        }));
         await refreshUser();
         toast(t ? 'Portada actualizada.' : 'Cover updated.', 'success');
       } catch (err: any) {
-        // Revert on failure so the UI reflects persisted state.
+        // Revert on failure.
         setProfile((p: any) => ({
           ...p,
-          profile: { ...(p?.profile ?? {}), coverUrl: me?.profile?.coverUrl ?? null },
+          profile: { ...(p?.profile ?? {}), coverUrl: prevCover },
         }));
-        toast(err?.response?.data?.message || 'Error', 'danger');
+        const msg = err instanceof UploadError ? err.message : (err?.response?.data?.message || 'Error');
+        toast(msg, 'danger');
       } finally {
         setCoverUploading(false);
       }
@@ -195,19 +203,23 @@ export default function UserProfile() {
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: [1, 1],
-        quality: 0.7,
-        base64: true,
+        quality: 0.9,
       });
-      if (result.canceled || !result.assets[0]?.base64) return;
-      const dataUri = `data:image/jpeg;base64,${result.assets[0].base64}`;
+      if (result.canceled || !result.assets[0]?.uri) return;
+      const localUri = result.assets[0].uri;
       setAvatarUploading(true);
       const prev = profile?.profile?.avatarUrl ?? null;
       setProfile((p: any) => ({
         ...p,
-        profile: { ...(p?.profile ?? {}), avatarUrl: dataUri },
+        profile: { ...(p?.profile ?? {}), avatarUrl: localUri },
       }));
       try {
-        await usersApi.updateProfile({ avatarUrl: dataUri });
+        const remoteUrl = await uploadImage(localUri, { kind: 'avatar' });
+        await usersApi.updateProfile({ avatarUrl: remoteUrl });
+        setProfile((p: any) => ({
+          ...p,
+          profile: { ...(p?.profile ?? {}), avatarUrl: remoteUrl },
+        }));
         await refreshUser();
         toast(t ? 'Foto actualizada.' : 'Photo updated.', 'success');
       } catch (err: any) {
@@ -215,7 +227,8 @@ export default function UserProfile() {
           ...p,
           profile: { ...(p?.profile ?? {}), avatarUrl: prev },
         }));
-        toast(err?.response?.data?.message || 'Error', 'danger');
+        const msg = err instanceof UploadError ? err.message : (err?.response?.data?.message || 'Error');
+        toast(msg, 'danger');
       } finally {
         setAvatarUploading(false);
       }
@@ -953,14 +966,15 @@ function FeedList({
   }
 
   async function handleShare(p: any) {
-    try {
-      const msg = p.content
-        ? `"${p.content}" — ${name} en OPAL BAR`
-        : `${name} publicó en OPAL BAR`;
-      const url =
-        p.imageUrl && !p.imageUrl.startsWith('data:') ? p.imageUrl : undefined;
-      await Share.share({ message: msg, url });
-    } catch {}
+    await sharePost({
+      id: p.id,
+      content: p.content,
+      authorName: name,
+      imageUrl: p.imageUrl,
+      likes: p._count?.reactions ?? p.likesCount ?? 0,
+      comments: p._count?.comments ?? p.commentsCount ?? 0,
+      t,
+    });
   }
 
   return (

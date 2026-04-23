@@ -10,6 +10,8 @@ import { apiError } from '@/api/errors';
 import { useAuthStore } from '@/stores/auth.store';
 import { useAppStore } from '@/stores/app.store';
 import { Colors, Radius } from '@/constants/tokens';
+import { uploadImage, UploadError } from '@/utils/uploadImage';
+import { toast } from '@/components/Toast';
 
 export default function EditProfile() {
   const router = useRouter();
@@ -74,15 +76,10 @@ export default function EditProfile() {
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: [1, 1],
-        quality: 0.7,
-        base64: true,
+        quality: 0.9,
       });
       if (!result.canceled && result.assets[0]) {
-        const asset = result.assets[0];
-        // For MVP: store as base64 data URI (backend should handle real upload in prod)
-        const dataUri = `data:image/jpeg;base64,${asset.base64}`;
-        setLocalAvatar(asset.uri);
-        setAvatarUrl(dataUri);
+        setLocalAvatar(result.assets[0].uri);
       }
     } catch (err) {
       Alert.alert(t ? 'Error' : 'Error', t ? 'No se pudo abrir la galería.' : 'Could not open gallery.');
@@ -98,12 +95,25 @@ export default function EditProfile() {
     }
     setLoading(true);
     try {
+      let finalAvatarUrl = avatarUrl;
+      if (localAvatar) {
+        try {
+          finalAvatarUrl = await uploadImage(localAvatar, { kind: 'avatar' });
+          setAvatarUrl(finalAvatarUrl);
+          setLocalAvatar(null);
+        } catch (err) {
+          const msg = err instanceof UploadError ? err.message : 'upload failed';
+          toast(t ? `No se pudo subir la foto: ${msg}` : `Could not upload photo: ${msg}`, 'danger');
+          setLoading(false);
+          return;
+        }
+      }
       const payload: any = {
         firstName: firstName.trim(),
         lastName: lastName.trim(),
         bio: bio.trim(),
       };
-      if (avatarUrl) payload.avatarUrl = avatarUrl;
+      if (finalAvatarUrl) payload.avatarUrl = finalAvatarUrl;
       if (city.trim()) payload.city = city.trim();
       if (country.trim()) payload.country = country.trim().toUpperCase();
       if (occupation.trim()) payload.occupation = occupation.trim();
@@ -120,6 +130,7 @@ export default function EditProfile() {
   }
 
   const displayAvatar = localAvatar || (avatarUrl && !avatarUrl.startsWith('data:') ? avatarUrl : null);
+  const hasAvatar = !!displayAvatar;
 
   return (
     <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
@@ -148,9 +159,9 @@ export default function EditProfile() {
               activeOpacity={0.85}
               style={styles.avatarPressable}
             >
-              {displayAvatar || avatarUrl?.startsWith('data:') ? (
+              {hasAvatar ? (
                 <Image
-                  source={{ uri: displayAvatar || avatarUrl }}
+                  source={{ uri: displayAvatar! }}
                   style={styles.avatarImg}
                 />
               ) : (

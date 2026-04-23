@@ -11,6 +11,7 @@ import { venueApi } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { useSafeBack } from '@/hooks/useSafeBack';
 import { Colors, Radius } from '@/constants/tokens';
+import { uploadImage, UploadError } from '@/utils/uploadImage';
 
 // ─────────────────────────────────────────────
 //  Admin · Venue editor
@@ -154,14 +155,15 @@ export default function AdminVenueEdit() {
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect,
-        quality: 0.75,
-        base64: true,
+        quality: 0.9,
       });
-      if (!r.canceled && r.assets[0]?.base64) {
-        setter(`data:image/jpeg;base64,${r.assets[0].base64}`);
+      if (!r.canceled && r.assets[0]?.uri) {
+        const url = await uploadImage(r.assets[0].uri, { kind: 'venue' });
+        setter(url);
       }
-    } catch {
-      Alert.alert('Error', 'No se pudo abrir la galería.');
+    } catch (err) {
+      const msg = err instanceof UploadError ? err.message : 'No se pudo subir la imagen.';
+      Alert.alert('Error', msg);
     } finally {
       setBusy(false);
     }

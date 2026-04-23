@@ -15,14 +15,18 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://opalbar-app-production.up.railway.app/api/v1"
+        "EXPO_PUBLIC_API_URL": "https://opalbar-app-production.up.railway.app/api/v1",
+        "EXPO_PUBLIC_CLOUDINARY_CLOUD": "dl9o0umy3",
+        "EXPO_PUBLIC_CLOUDINARY_PRESET": "opalbar_unsigned"
       },
       "channel": "preview"
     },
     "production": {
       "autoIncrement": true,
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://opalbar-app-production.up.railway.app/api/v1"
+        "EXPO_PUBLIC_API_URL": "https://opalbar-app-production.up.railway.app/api/v1",
+        "EXPO_PUBLIC_CLOUDINARY_CLOUD": "dl9o0umy3",
+        "EXPO_PUBLIC_CLOUDINARY_PRESET": "opalbar_unsigned"
       },
       "channel": "production"
     }

@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, ImageBackground, Share, Linking, Platform, Modal, Image } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, ImageBackground, Linking, Platform, Modal, Image } from 'react-native';
 import { useEffect, useState } from 'react';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -8,6 +8,7 @@ import { apiError } from '@/api/errors';
 import { useAuthStore } from '@/stores/auth.store';
 import { useAppStore } from '@/stores/app.store';
 import { Colors, Radius } from '@/constants/tokens';
+import { shareEvent } from '@/utils/share';
 
 function toAbsoluteImageUrl(url?: string): string | undefined {
   if (!url) return undefined;
@@ -95,12 +96,15 @@ export default function EventDetail() {
 
   async function handleShare() {
     if (!event) return;
-    try {
-      await Share.share({
-        message: `${event.title} — ${event.venue?.name || 'OPALBAR'}`,
-        title: event.title,
-      });
-    } catch {}
+    await shareEvent({
+      id: event.id,
+      title: event.title,
+      description: t ? event.description : (event.descriptionEn || event.description),
+      imageUrl: event.imageUrl,
+      startDate: event.startDate,
+      venueName: event.venue?.name,
+      t,
+    });
   }
 
   if (loading) {
