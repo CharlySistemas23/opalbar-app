@@ -2,7 +2,7 @@
   "$schema": "https://railway.com/railway.schema.json",
   "build": {
     "builder": "NIXPACKS",
-    "buildCommand": "npm ci --legacy-peer-deps && npx prisma generate && npx nx build api"
+    "buildCommand": "npx prisma generate && npx nx build api"
   },
   "deploy": {
     "startCommand": "npx prisma migrate deploy && node dist/apps/api/main.js",
