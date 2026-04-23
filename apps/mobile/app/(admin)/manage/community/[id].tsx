@@ -5,11 +5,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { adminApi, communityApi } from '@/api/client';
 import { apiError } from '@/api/errors';
+import { useSafeBack } from '@/hooks/useSafeBack';
 import { Colors } from '@/constants/tokens';
 
 export default function PostModerationDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const goBack = useSafeBack('/(admin)/manage/community');
   const [post, setPost] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -25,7 +27,7 @@ export default function PostModerationDetail() {
     setBusy(true);
     try {
       await adminApi.approvePost(id);
-      router.back();
+      goBack();
     } catch (err) { Alert.alert('Error', apiError(err)); }
     finally { setBusy(false); }
   }
@@ -33,7 +35,7 @@ export default function PostModerationDetail() {
     setBusy(true);
     try {
       await adminApi.rejectPost(id, reason);
-      router.back();
+      goBack();
     } catch (err) { Alert.alert('Error', apiError(err)); }
     finally { setBusy(false); }
   }
@@ -47,7 +49,7 @@ export default function PostModerationDetail() {
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
       <View style={styles.header}>
-        <TouchableOpacity style={styles.iconBtn} onPress={() => router.back()} hitSlop={10}>
+        <TouchableOpacity style={styles.iconBtn} onPress={goBack} hitSlop={10}>
           <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.title}>Revisar post</Text>

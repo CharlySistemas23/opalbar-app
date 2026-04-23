@@ -5,6 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { apiClient, adminApi, supportApi } from '@/api/client';
 import { apiError } from '@/api/errors';
+import { useSafeBack } from '@/hooks/useSafeBack';
 import { Colors } from '@/constants/tokens';
 
 const STATUS_META: Record<string, { bg: string; color: string; label: string }> = {
@@ -18,6 +19,7 @@ const STATUS_META: Record<string, { bg: string; color: string; label: string }> 
 export default function SupportChatAdmin() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const goBack = useSafeBack('/(admin)/manage/support');
   const [ticket, setTicket] = useState<any>(null);
   const [messages, setMessages] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -89,7 +91,7 @@ export default function SupportChatAdmin() {
     <SafeAreaView style={styles.root} edges={['top']}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View style={styles.header}>
-          <TouchableOpacity style={styles.iconBtn} onPress={() => router.back()} hitSlop={10}>
+          <TouchableOpacity style={styles.iconBtn} onPress={goBack} hitSlop={10}>
             <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
           </TouchableOpacity>
           <View style={{ flex: 1 }}>

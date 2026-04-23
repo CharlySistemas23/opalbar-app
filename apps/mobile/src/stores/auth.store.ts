@@ -28,6 +28,7 @@ export interface AuthUser {
   status: string;
   points: number;
   isVerified: boolean;
+  createdAt?: string;
   profile?: {
     firstName: string;
     lastName: string;
@@ -36,6 +37,13 @@ export interface AuthUser {
     coverUrl?: string;
     language: string;
     loyaltyLevel?: { id?: string; name: string; color: string; icon: string };
+  };
+  _count?: {
+    reservations?: number;
+    offerRedemptions?: number;
+    followers?: number;
+    following?: number;
+    posts?: number;
   };
 }
 

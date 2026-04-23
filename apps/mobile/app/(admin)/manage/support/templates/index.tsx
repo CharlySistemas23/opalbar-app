@@ -8,6 +8,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { adminApi } from '@/api/client';
 import { apiError } from '@/api/errors';
+import { useSafeBack } from '@/hooks/useSafeBack';
 import { Colors } from '@/constants/tokens';
 
 const CATEGORY_OPTIONS = [
@@ -20,6 +21,7 @@ const CATEGORY_OPTIONS = [
 
 export default function QuickRepliesList() {
   const router = useRouter();
+  const goBack = useSafeBack('/(admin)/manage/support');
   const [replies, setReplies] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -99,7 +101,7 @@ export default function QuickRepliesList() {
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
       <View style={styles.header}>
-        <TouchableOpacity style={styles.iconBtn} onPress={() => router.back()} hitSlop={10}>
+        <TouchableOpacity style={styles.iconBtn} onPress={goBack} hitSlop={10}>
           <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>

@@ -1,6 +1,6 @@
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert } from 'react-native';
-import { useState } from 'react';
-import { useRouter } from 'expo-router';
+import { useCallback, useState } from 'react';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { useAuthStore } from '@/stores/auth.store';
@@ -51,15 +51,20 @@ const STAFF_ROLES = ['ADMIN', 'SUPER_ADMIN', 'MODERATOR'];
 
 export default function Profile() {
   const router = useRouter();
-  const { user, logout } = useAuthStore();
+  const { user, logout, refreshUser } = useAuthStore();
   const { language } = useAppStore();
   const t = language === 'es';
 
-  const firstName = user?.profile?.firstName ?? 'Ana';
-  const lastName = user?.profile?.lastName ?? 'García';
-  const fullName = `${firstName} ${lastName}`.trim();
-  const initials = (firstName[0] || 'A') + (lastName[0] || 'G');
-  const points = user?.points ?? 1240;
+  useFocusEffect(useCallback(() => { refreshUser(); }, [refreshUser]));
+
+  const firstName = user?.profile?.firstName ?? '';
+  const lastName = user?.profile?.lastName ?? '';
+  const fullName = `${firstName} ${lastName}`.trim() || (user?.email?.split('@')[0] ?? (t ? 'Usuario' : 'User'));
+  const initials = ((firstName[0] || fullName[0] || 'U') + (lastName[0] || '')).slice(0, 2);
+  const points = user?.points ?? 0;
+  const bookings = (user as any)?._count?.reservations ?? 0;
+  const redemptions = (user as any)?._count?.offerRedemptions ?? 0;
+  const memberYear = user?.createdAt ? new Date(user.createdAt).getFullYear() : new Date().getFullYear();
 
   const [showLogout, setShowLogout] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
@@ -112,9 +117,11 @@ export default function Profile() {
           />
           <Text style={styles.profileName}>{fullName}</Text>
           <Text style={styles.profileHandle}>
-            @{(user?.email || '').split('@')[0] || 'anagarcia'}
+            @{(user?.email || '').split('@')[0] || 'opalbar'}
           </Text>
-          <Text style={styles.profileBio}>{t ? 'Miembro desde 2024' : 'Member since 2024'}</Text>
+          <Text style={styles.profileBio}>
+            {t ? `Miembro desde ${memberYear}` : `Member since ${memberYear}`}
+          </Text>
         </View>
 
         <View style={styles.statsContainer}>
@@ -123,11 +130,11 @@ export default function Profile() {
             <Text style={styles.statLabel}>{t ? 'Puntos' : 'Points'}</Text>
           </View>
           <View style={styles.statItem}>
-            <Text style={styles.statNumber}>7</Text>
+            <Text style={styles.statNumber}>{bookings}</Text>
             <Text style={styles.statLabel}>{t ? 'Reservas' : 'Bookings'}</Text>
           </View>
           <View style={styles.statItem}>
-            <Text style={styles.statNumber}>23</Text>
+            <Text style={styles.statNumber}>{redemptions}</Text>
             <Text style={styles.statLabel}>{t ? 'Canjes' : 'Redeemed'}</Text>
           </View>
         </View>

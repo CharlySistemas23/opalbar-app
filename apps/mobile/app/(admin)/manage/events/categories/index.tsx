@@ -8,6 +8,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { adminApi, eventsApi } from '@/api/client';
 import { apiError } from '@/api/errors';
+import { useSafeBack } from '@/hooks/useSafeBack';
 import { Colors } from '@/constants/tokens';
 
 type Tab = 'active' | 'archived';
@@ -19,6 +20,7 @@ const COLOR_PALETTE = [
 
 export default function AdminCategoriesList() {
   const router = useRouter();
+  const goBack = useSafeBack('/(admin)/manage/events');
   const [tab, setTab] = useState<Tab>('active');
   const [active, setActive] = useState<any[]>([]);
   const [archived, setArchived] = useState<any[]>([]);
@@ -127,7 +129,7 @@ export default function AdminCategoriesList() {
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
       <View style={styles.header}>
-        <TouchableOpacity style={styles.iconBtn} onPress={() => router.back()} hitSlop={10}>
+        <TouchableOpacity style={styles.iconBtn} onPress={goBack} hitSlop={10}>
           <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>

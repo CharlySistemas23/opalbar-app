@@ -5,6 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { apiClient, reservationsApi } from '@/api/client';
 import { apiError } from '@/api/errors';
+import { useSafeBack } from '@/hooks/useSafeBack';
 import { Colors } from '@/constants/tokens';
 
 const STATUS_META: Record<string, { bg: string; color: string; label: string }> = {
@@ -18,6 +19,7 @@ const STATUS_META: Record<string, { bg: string; color: string; label: string }> 
 export default function AdminReservationDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const goBack = useSafeBack('/(admin)/manage/reservations');
   const [res, setRes] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -59,7 +61,7 @@ export default function AdminReservationDetail() {
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
       <View style={styles.header}>
-        <TouchableOpacity style={styles.iconBtn} onPress={() => router.back()} hitSlop={10}>
+        <TouchableOpacity style={styles.iconBtn} onPress={goBack} hitSlop={10}>
           <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.title}>Reserva</Text>

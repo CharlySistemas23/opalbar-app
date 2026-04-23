@@ -9,6 +9,7 @@ import { Feather } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { venueApi } from '@/api/client';
 import { apiError } from '@/api/errors';
+import { useSafeBack } from '@/hooks/useSafeBack';
 import { Colors, Radius } from '@/constants/tokens';
 
 // ─────────────────────────────────────────────
@@ -59,6 +60,7 @@ function staticMapUrl(lat: number, lng: number, apiKey?: string): string | null 
 
 export default function AdminVenueEdit() {
   const router = useRouter();
+  const goBack = useSafeBack('/(admin)/manage');
   const googleKey = (process.env as any).EXPO_PUBLIC_GOOGLE_MAPS_KEY as string | undefined;
 
   const [venue, setVenue] = useState<any>(null);
@@ -199,7 +201,7 @@ export default function AdminVenueEdit() {
     try {
       await venueApi.update(venue.id, payload);
       Alert.alert('Listo', 'Bar actualizado.');
-      router.back();
+      goBack();
     } catch (err) {
       Alert.alert('Error', apiError(err));
     } finally {
@@ -221,7 +223,7 @@ export default function AdminVenueEdit() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn} hitSlop={10}>
+          <TouchableOpacity onPress={goBack} style={styles.iconBtn} hitSlop={10}>
             <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
           </TouchableOpacity>
           <Text style={styles.title}>Editar bar</Text>

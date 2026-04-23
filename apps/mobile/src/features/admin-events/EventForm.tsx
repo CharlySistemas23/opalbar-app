@@ -7,6 +7,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { adminApi, eventsApi, venueApi } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { DateTimeField } from '@/components/DateTimeField';
+import { useSafeBack } from '@/hooks/useSafeBack';
 import { Colors } from '@/constants/tokens';
 
 interface EventFormProps {
@@ -15,6 +16,7 @@ interface EventFormProps {
 
 export function EventForm({ eventId }: EventFormProps) {
   const router = useRouter();
+  const goBack = useSafeBack('/(admin)/manage/events');
   const isEdit = !!eventId;
 
   const [title, setTitle] = useState('');
@@ -215,7 +217,7 @@ export function EventForm({ eventId }: EventFormProps) {
       } else {
         await adminApi.createEvent(payload);
       }
-      router.back();
+      goBack();
     } catch (err) {
       Alert.alert('Error', apiError(err));
     } finally { setSaving(false); }
@@ -231,7 +233,7 @@ export function EventForm({ eventId }: EventFormProps) {
           setDeleting(true);
           try {
             await adminApi.deleteEvent(eventId);
-            router.back();
+            goBack();
           } catch (err) {
             Alert.alert('Error', apiError(err));
           } finally { setDeleting(false); }
@@ -268,7 +270,7 @@ export function EventForm({ eventId }: EventFormProps) {
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
       <View style={styles.header}>
-        <TouchableOpacity style={styles.iconBtn} onPress={() => router.back()} hitSlop={10}>
+        <TouchableOpacity style={styles.iconBtn} onPress={goBack} hitSlop={10}>
           <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.title}>{isEdit ? 'Editar Evento' : 'Nuevo Evento'}</Text>

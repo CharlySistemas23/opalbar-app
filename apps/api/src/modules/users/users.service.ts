@@ -14,6 +14,15 @@ export class UsersService {
         interests: { include: { category: true } },
         consent: true,
         notificationSettings: true,
+        _count: {
+          select: {
+            reservations: true,
+            offerRedemptions: true,
+            followers: true,
+            following: true,
+            posts: true,
+          },
+        },
       },
     });
     if (!user) throw new NotFoundException('User not found');

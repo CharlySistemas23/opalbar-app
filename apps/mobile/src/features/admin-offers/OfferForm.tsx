@@ -7,6 +7,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { adminApi, offersApi, venueApi } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { DateTimeField } from '@/components/DateTimeField';
+import { useSafeBack } from '@/hooks/useSafeBack';
 import { Colors } from '@/constants/tokens';
 
 interface OfferFormProps {
@@ -23,6 +24,7 @@ const OFFER_TYPES: { value: string; label: string }[] = [
 
 export function OfferForm({ offerId }: OfferFormProps) {
   const router = useRouter();
+  const goBack = useSafeBack('/(admin)/manage/offers');
   const isEdit = !!offerId;
 
   const [title, setTitle] = useState('');
@@ -136,7 +138,7 @@ export function OfferForm({ offerId }: OfferFormProps) {
       } else {
         await adminApi.createOffer(payload);
       }
-      router.back();
+      goBack();
     } catch (err) {
       Alert.alert('Error', apiError(err));
     } finally { setSaving(false); }
@@ -152,7 +154,7 @@ export function OfferForm({ offerId }: OfferFormProps) {
           setDeleting(true);
           try {
             await adminApi.deleteOffer(offerId);
-            router.back();
+            goBack();
           } catch (err) {
             Alert.alert('Error', apiError(err));
           } finally { setDeleting(false); }
@@ -189,7 +191,7 @@ export function OfferForm({ offerId }: OfferFormProps) {
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
       <View style={styles.header}>
-        <TouchableOpacity style={styles.iconBtn} onPress={() => router.back()} hitSlop={10}>
+        <TouchableOpacity style={styles.iconBtn} onPress={goBack} hitSlop={10}>
           <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.title}>{isEdit ? 'Editar Oferta' : 'Nueva Oferta'}</Text>
