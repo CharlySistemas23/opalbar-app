@@ -125,7 +125,7 @@ export default function EditProfile() {
     <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <View style={styles.header}>
           <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn} hitSlop={10}>

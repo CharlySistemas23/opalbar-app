@@ -135,7 +135,7 @@ export default function Step1Profile() {
     <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         {/* Progress 1/4 */}
         <View style={styles.stepRow}>

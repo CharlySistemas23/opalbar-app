@@ -26,6 +26,7 @@ type AudioModule = typeof import('expo-av');
 
 let _haptics: HapticsModule | null = null;
 let _audio: AudioModule | null = null;
+let _audioModeConfigured = false;
 
 function loadHaptics(): HapticsModule | null {
   if (_haptics) return _haptics;
@@ -50,6 +51,22 @@ function loadAudio(): AudioModule | null {
   }
 }
 
+async function ensureAudioMode(audio: AudioModule) {
+  if (_audioModeConfigured) return;
+  _audioModeConfigured = true;
+  try {
+    // playsInSilentModeIOS: iOS silent switch otherwise kills UI sounds.
+    // shouldDuckAndroid: lower other app audio briefly while our SFX plays.
+    await audio.Audio.setAudioModeAsync({
+      playsInSilentModeIOS: true,
+      shouldDuckAndroid: true,
+      staysActiveInBackground: false,
+    });
+  } catch {
+    // non-fatal — sounds still play on Android even if mode set fails
+  }
+}
+
 // Sound asset registry. The key is the semantic event fired from useFeedback.
 const SOUND_ASSETS: Record<string, any> = {
   pop: require('../../assets/sounds/POP.wav'),
@@ -70,18 +87,22 @@ async function playSound(name: string) {
   const audio = loadAudio();
   if (!audio) return;
 
+  await ensureAudioMode(audio);
+
   try {
     let sound = _soundCache.get(name);
     if (!sound) {
       const { sound: s } = await audio.Audio.Sound.createAsync(asset, {
         shouldPlay: false,
-        volume: 0.6,
+        volume: 1.0,
       });
       sound = s;
       _soundCache.set(name, sound);
     }
-    await sound.setPositionAsync(0);
-    await sound.playAsync();
+    // replayAsync rewinds + plays in a single call. More reliable than
+    // setPositionAsync(0) + playAsync() which on Android sometimes no-ops
+    // when the sound had already finished (only the first play worked).
+    await sound.replayAsync();
   } catch {
     // swallow — sound is best-effort, never block UI
   }

@@ -316,8 +316,8 @@ export default function PostDetail() {
       <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
         <KeyboardAvoidingView
           style={{ flex: 1 }}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={0}
         >
           {/* ── Header ──────────────────────────── */}
           <View style={styles.header}>

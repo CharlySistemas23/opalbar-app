@@ -89,7 +89,7 @@ export default function SupportChatAdmin() {
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <View style={styles.header}>
           <TouchableOpacity style={styles.iconBtn} onPress={goBack} hitSlop={10}>
             <Feather name="arrow-left" size={20} color={Colors.textPrimary} />

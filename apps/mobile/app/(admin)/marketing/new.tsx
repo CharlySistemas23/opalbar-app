@@ -238,7 +238,7 @@ export default function NewCampaignWizard() {
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <View style={styles.header}>
           <TouchableOpacity
             onPress={() => (step === 0 ? router.back() : setStep((s) => (s - 1) as 0 | 1 | 2 | 3))}
