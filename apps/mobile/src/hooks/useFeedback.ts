@@ -50,16 +50,15 @@ function loadAudio(): AudioModule | null {
   }
 }
 
-// Sound asset registry. Wire real mp3s here once added to assets/sounds/.
-// The key is the semantic event; the value is a module id via require().
+// Sound asset registry. The key is the semantic event fired from useFeedback.
 const SOUND_ASSETS: Record<string, any> = {
-  // pop: require('../../assets/sounds/pop.mp3'),
-  // bubble: require('../../assets/sounds/bubble.mp3'),
-  // success: require('../../assets/sounds/success.mp3'),
-  // coin: require('../../assets/sounds/coin.mp3'),
-  // error: require('../../assets/sounds/error.mp3'),
-  // chime: require('../../assets/sounds/chime.mp3'),
-  // notification: require('../../assets/sounds/notification.mp3'),
+  pop: require('../../assets/sounds/POP.wav'),
+  bubble: require('../../assets/sounds/BUBBLE.wav'),
+  success: require('../../assets/sounds/SUCESS.wav'),
+  coin: require('../../assets/sounds/COINT.wav'),
+  error: require('../../assets/sounds/CANCEL.wav'),
+  chime: require('../../assets/sounds/CHIME.wav'),
+  notification: require('../../assets/sounds/NOTIFICATION.wav'),
 };
 
 // Cache loaded Sound instances so we don't re-parse the mp3 each call

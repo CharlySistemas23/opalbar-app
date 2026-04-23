@@ -6,10 +6,12 @@ import { Feather } from '@expo/vector-icons';
 import { adminApi } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { useFeedback } from '@/hooks/useFeedback';
+import { useSafeBack } from '@/hooks/useSafeBack';
 import { Colors } from '@/constants/tokens';
 
 export default function CommunityAdmin() {
   const router = useRouter();
+  const goBack = useSafeBack('/(admin)/manage');
   const [posts, setPosts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -150,7 +152,7 @@ export default function CommunityAdmin() {
           </>
         ) : (
           <>
-            <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} hitSlop={10}>
+            <TouchableOpacity style={styles.backBtn} onPress={goBack} hitSlop={10}>
               <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
             </TouchableOpacity>
             <Text style={styles.title}>Posts pendientes</Text>

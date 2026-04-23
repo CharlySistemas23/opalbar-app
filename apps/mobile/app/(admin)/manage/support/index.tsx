@@ -4,6 +4,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { adminApi } from '@/api/client';
+import { useSafeBack } from '@/hooks/useSafeBack';
 import { Colors } from '@/constants/tokens';
 
 type Filter = 'all' | 'OPEN' | 'IN_REVIEW' | 'RESOLVED';
@@ -25,6 +26,7 @@ const PRIORITY_META: Record<string, { color: string; label: string }> = {
 
 export default function SupportTicketsAdmin() {
   const router = useRouter();
+  const goBack = useSafeBack('/(admin)/manage');
   const [tickets, setTickets] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -48,7 +50,7 @@ export default function SupportTicketsAdmin() {
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} hitSlop={10}>
+        <TouchableOpacity style={styles.backBtn} onPress={goBack} hitSlop={10}>
           <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.title}>Mensajes de usuarios</Text>
