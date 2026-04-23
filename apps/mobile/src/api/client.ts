@@ -4,7 +4,14 @@
 // ─────────────────────────────────────────────
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 
-const BASE_URL = process.env['EXPO_PUBLIC_API_URL'] || 'http://localhost:3000/api/v1';
+// In release/OTA builds __DEV__ is false. If EXPO_PUBLIC_API_URL didn't make
+// it into the bundle (e.g. local .env pointing to a LAN IP leaked into an
+// eas update), fall back to production Railway so the app still works.
+const PROD_API = 'https://opalbar-app-production.up.railway.app/api/v1';
+const DEV_API = 'http://localhost:3000/api/v1';
+const ENV_URL = process.env['EXPO_PUBLIC_API_URL'];
+const isLanUrl = typeof ENV_URL === 'string' && /^https?:\/\/(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?/.test(ENV_URL);
+const BASE_URL = ENV_URL && !(!__DEV__ && isLanUrl) ? ENV_URL : (__DEV__ ? DEV_API : PROD_API);
 
 // ── Axios instance ────────────────────────────
 export const apiClient = axios.create({
