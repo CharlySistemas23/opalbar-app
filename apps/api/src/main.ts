@@ -31,8 +31,16 @@ async function bootstrap() {
   app.use((compression as any).default ? (compression as any).default() : (compression as any)());
 
   // ── CORS ──────────────────────────────────
+  const allowedOrigins = clientUrl.split(',').map((s) => s.trim()).filter(Boolean);
   app.enableCors({
-    origin: nodeEnv === 'production' ? [clientUrl] : true,
+    origin: nodeEnv === 'production'
+      ? (origin, cb) => {
+          if (!origin) return cb(null, true); // mobile apps / curl
+          if (allowedOrigins.includes(origin)) return cb(null, true);
+          if (/^https:\/\/opalbar-app-admin[-a-z0-9]*\.vercel\.app$/.test(origin)) return cb(null, true);
+          return cb(new Error(`CORS blocked: ${origin}`), false);
+        }
+      : true,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Authorization', 'Content-Type', 'X-Request-Id'],
