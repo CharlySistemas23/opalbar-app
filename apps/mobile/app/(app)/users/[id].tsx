@@ -23,6 +23,7 @@ import { useAppStore } from '@/stores/app.store';
 import { toast } from '@/components/Toast';
 import { StoryRing } from '@/components/StoryRing';
 import { Heart } from '@/components/Heart';
+import { useFeedback } from '@/hooks/useFeedback';
 import { Colors, Radius } from '@/constants/tokens';
 import { sharePost } from '@/utils/share';
 import { uploadImage, UploadError } from '@/utils/uploadImage';
@@ -59,6 +60,7 @@ export default function UserProfile() {
   const { user: me, refreshUser } = useAuthStore();
   const { language } = useAppStore();
   const t = language === 'es';
+  const fb = useFeedback();
 
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -122,6 +124,7 @@ export default function UserProfile() {
           isFollowing: false,
           _count: { ...p._count, followers: Math.max(0, (p._count?.followers ?? 1) - 1) },
         }));
+        fb.tap();
         toast(t ? 'Dejaste de seguir.' : 'Unfollowed.', 'info');
       } else {
         await usersApi.follow(id);
@@ -130,9 +133,11 @@ export default function UserProfile() {
           isFollowing: true,
           _count: { ...p._count, followers: (p._count?.followers ?? 0) + 1 },
         }));
+        fb.success();
         toast(t ? 'Ahora sigues a este usuario.' : 'Following.', 'success');
       }
     } catch (err: any) {
+      fb.error();
       toast(err?.response?.data?.message || 'Error', 'danger');
     } finally {
       setBusy(false);
@@ -262,10 +267,12 @@ export default function UserProfile() {
       wallPosts.find((p) => p.id === postId) ??
       communityPosts.find((p) => p.id === postId);
     const willReact = !target?.hasReacted;
+    if (willReact) fb.like(); else fb.tap();
     try {
       if (willReact) await communityApi.react(postId, 'LIKE');
       else await communityApi.removeReaction(postId);
     } catch {
+      fb.error();
       // Revert on failure — keep both lists in sync.
       setWallPosts(patch);
       setCommunityPosts(patch);

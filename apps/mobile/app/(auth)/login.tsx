@@ -7,12 +7,14 @@ import { useAuthStore } from '@/stores/auth.store';
 import { useAppStore } from '@/stores/app.store';
 import { apiError } from '@/api/errors';
 import { Colors, Radius } from '@/constants/tokens';
+import { useFeedback } from '@/hooks/useFeedback';
 
 export default function Login() {
   const router = useRouter();
   const { login, isLoading } = useAuthStore();
   const { language } = useAppStore();
   const t = language === 'es';
+  const fb = useFeedback();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -34,6 +36,7 @@ export default function Login() {
     }
     try {
       await login({ email: mail, password });
+      fb.success();
       router.replace('/(tabs)/home' as never);
     } catch (err: any) {
       if (err?.response?.status === 429) {
@@ -44,6 +47,7 @@ export default function Login() {
         } as never);
         return;
       }
+      fb.error();
       setError(apiError(err, t ? 'Credenciales incorrectas.' : 'Invalid credentials.'));
     }
   }

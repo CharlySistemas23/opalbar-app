@@ -21,6 +21,7 @@ import { useAppStore } from '@/stores/app.store';
 import { Colors } from '@/constants/tokens';
 import { toast } from '@/components/Toast';
 import { uploadImage, UploadError } from '@/utils/uploadImage';
+import { useFeedback } from '@/hooks/useFeedback';
 
 // ─────────────────────────────────────────────
 //  New Story — IG-style composer (aligned w/ new-post)
@@ -33,6 +34,7 @@ const MAX_CAPTION = 200;
 
 export default function NewStory() {
   const router = useRouter();
+  const fb = useFeedback();
   const { language } = useAppStore();
   const t = language === 'es';
 
@@ -110,9 +112,11 @@ export default function NewStory() {
         mediaUrl,
         caption: caption.trim() || undefined,
       });
+      fb.success();
       toast(t ? 'Historia publicada' : 'Story published', 'success');
       router.back();
     } catch (err: any) {
+      fb.error();
       Alert.alert(t ? 'Error' : 'Error', apiError(err));
     } finally {
       setPublishing(false);

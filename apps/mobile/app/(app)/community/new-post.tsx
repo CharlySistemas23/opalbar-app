@@ -23,6 +23,7 @@ import { useAppStore } from '@/stores/app.store';
 import { Colors } from '@/constants/tokens';
 import { uploadImage, UploadError } from '@/utils/uploadImage';
 import { toast } from '@/components/Toast';
+import { useFeedback } from '@/hooks/useFeedback';
 
 // ─────────────────────────────────────────────
 //  New Post — Wall or Community
@@ -43,6 +44,7 @@ const RATIOS: { key: AspectRatioKey; label: string; aspect: [number, number]; ra
 
 export default function NewPost() {
   const router = useRouter();
+  const fb = useFeedback();
   const { surface: surfaceParam, autoPick: autoPickParam } = useLocalSearchParams<{ surface?: string; autoPick?: string }>();
   const { user, refreshUser } = useAuthStore();
   const { language } = useAppStore();
@@ -150,6 +152,7 @@ export default function NewPost() {
       });
       refreshUser();
       const status = res.data?.data?.status;
+      fb.success();
       if (status === 'PENDING_REVIEW') {
         Alert.alert(
           t ? 'En revisión' : 'Pending review',
@@ -166,6 +169,7 @@ export default function NewPost() {
         router.back();
       }
     } catch (err: any) {
+      fb.error();
       Alert.alert(
         t ? 'Error' : 'Error',
         apiError(err, t ? 'No se pudo publicar.' : 'Could not publish.'),
