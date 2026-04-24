@@ -519,8 +519,10 @@ export class AuthService {
       data: { refreshToken },
     });
 
-    // Track in Redis
-    await this.redis.sadd(RedisService.userSessionsKey(user.id), session.id);
+    // Track in Redis (fire-and-forget — never block login on Redis outage)
+    this.redis
+      .sadd(RedisService.userSessionsKey(user.id), session.id)
+      .catch((err) => this.logger.warn(`[AUTH] redis.sadd failed: ${err?.message ?? err}`));
 
     return {
       accessToken,
