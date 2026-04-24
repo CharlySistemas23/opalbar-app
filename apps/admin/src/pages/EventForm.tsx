@@ -177,7 +177,16 @@ export function EventForm() {
   );
 }
 
-function Field({ label, value, onChange, type = 'text', required, multiline, placeholder }: any) {
+type FieldProps = {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  type?: string;
+  required?: boolean;
+  multiline?: boolean;
+  placeholder?: string;
+};
+function Field({ label, value, onChange, type = 'text', required, multiline, placeholder }: FieldProps) {
   return (
     <label className="block">
       <span className="text-xs font-bold text-muted tracking-wide uppercase">{label}{required && ' *'}</span>
@@ -190,7 +199,14 @@ function Field({ label, value, onChange, type = 'text', required, multiline, pla
   );
 }
 
-function Select({ label, value, onChange, options, required }: any) {
+type SelectProps = {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string }[];
+  required?: boolean;
+};
+function Select({ label, value, onChange, options, required }: SelectProps) {
   return (
     <label className="block">
       <span className="text-xs font-bold text-muted tracking-wide uppercase">{label}{required && ' *'}</span>
