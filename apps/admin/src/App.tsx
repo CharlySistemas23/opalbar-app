@@ -7,7 +7,18 @@ import { Layout } from '@/components/Layout';
 import { Dashboard } from '@/pages/Dashboard';
 import { EventsList } from '@/pages/EventsList';
 import { EventForm } from '@/pages/EventForm';
+import { OffersList } from '@/pages/OffersList';
+import { OfferForm } from '@/pages/OfferForm';
 import { Community } from '@/pages/Community';
+import { Users } from '@/pages/Users';
+import { UserDetailRoute } from '@/pages/UserDetailRoute';
+import { Reservations } from '@/pages/Reservations';
+import { Reports } from '@/pages/Reports';
+import { Support } from '@/pages/Support';
+import { PushBroadcast } from '@/pages/PushBroadcast';
+import { Analytics } from '@/pages/Analytics';
+import { Venues } from '@/pages/Venues';
+import { Config } from '@/pages/Config';
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 15_000, refetchOnWindowFocus: false } },
@@ -18,15 +29,6 @@ function Guarded({ children }: { children: React.ReactNode }) {
   if (!initialized) return null;
   if (!user) return <Navigate to="/login" replace />;
   return <>{children}</>;
-}
-
-function Placeholder({ title }: { title: string }) {
-  return (
-    <div className="p-8">
-      <h1 className="text-2xl font-bold">{title}</h1>
-      <p className="text-muted text-sm mt-1">Esta sección llegará en el siguiente sprint.</p>
-    </div>
-  );
 }
 
 export function App() {
@@ -51,15 +53,19 @@ export function App() {
             <Route path="admin/events" element={<EventsList />} />
             <Route path="admin/events/new" element={<EventForm />} />
             <Route path="admin/events/:id" element={<EventForm />} />
-            <Route path="admin/offers" element={<Placeholder title="Ofertas" />} />
-            <Route path="admin/reservations" element={<Placeholder title="Reservaciones" />} />
+            <Route path="admin/offers" element={<OffersList />} />
+            <Route path="admin/offers/new" element={<OfferForm />} />
+            <Route path="admin/offers/:id" element={<OfferForm />} />
+            <Route path="admin/reservations" element={<Reservations />} />
             <Route path="admin/community" element={<Community />} />
-            <Route path="admin/reports" element={<Placeholder title="Reportes" />} />
-            <Route path="admin/support" element={<Placeholder title="Soporte" />} />
-            <Route path="admin/notifications" element={<Placeholder title="Push" />} />
-            <Route path="admin/analytics" element={<Placeholder title="Analytics" />} />
-            <Route path="admin/users" element={<Placeholder title="Usuarios" />} />
-            <Route path="admin/config" element={<Placeholder title="Configuración" />} />
+            <Route path="admin/reports" element={<Reports />} />
+            <Route path="admin/support" element={<Support />} />
+            <Route path="admin/notifications" element={<PushBroadcast />} />
+            <Route path="admin/analytics" element={<Analytics />} />
+            <Route path="admin/venues" element={<Venues />} />
+            <Route path="admin/users" element={<Users />} />
+            <Route path="admin/users/:id" element={<UserDetailRoute />} />
+            <Route path="admin/config" element={<Config />} />
           </Route>
           <Route path="*" element={<Navigate to="/admin" replace />} />
         </Routes>

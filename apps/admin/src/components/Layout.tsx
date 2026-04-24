@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Users, Calendar, Tag, MessageSquare, Flag, Inbox, Bell, BarChart3, Settings, Shield, LogOut, Home } from 'lucide-react';
+import { LayoutDashboard, Users, Calendar, Tag, MessageSquare, Flag, Inbox, Bell, BarChart3, Settings, Shield, LogOut, Home, MapPin } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import clsx from 'clsx';
 
@@ -8,6 +8,7 @@ const NAV = [
   { to: '/admin/events', label: 'Eventos', icon: Calendar },
   { to: '/admin/offers', label: 'Ofertas', icon: Tag },
   { to: '/admin/reservations', label: 'Reservaciones', icon: Home },
+  { to: '/admin/venues', label: 'Venues', icon: MapPin },
   { to: '/admin/community', label: 'Moderación', icon: MessageSquare },
   { to: '/admin/reports', label: 'Reportes', icon: Flag },
   { to: '/admin/support', label: 'Soporte', icon: Inbox },

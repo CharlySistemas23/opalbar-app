@@ -83,19 +83,79 @@ export const authApi = {
 };
 
 export const adminApi = {
+  // Dashboard / insights
   stats: () => apiClient.get('/admin/stats'),
+  activity: (limit = 50) => apiClient.get('/admin/activity', { params: { limit } }),
+  inbox: (limit = 50) => apiClient.get('/admin/inbox', { params: { limit } }),
+  inboxCounts: () => apiClient.get('/admin/inbox/counts'),
+  audienceInsights: () => apiClient.get('/admin/insights/audience'),
+
+  // Users
   users: (params?: any) => apiClient.get('/admin/users', { params }),
   user: (id: string) => apiClient.get(`/admin/users/${id}`),
+  userAudit: (id: string, limit = 50) => apiClient.get(`/admin/users/${id}/audit`, { params: { limit } }),
   banUser: (id: string, reason: string) => apiClient.patch(`/admin/users/${id}/ban`, { reason }),
   unbanUser: (id: string) => apiClient.patch(`/admin/users/${id}/unban`),
+  deleteUser: (id: string) => apiClient.delete(`/admin/users/${id}`),
+  updateRole: (id: string, role: string) => apiClient.patch(`/admin/users/${id}/role`, { role }),
+  adjustPoints: (id: string, delta: number, reason: string) =>
+    apiClient.post(`/admin/users/${id}/points`, { delta, reason }),
+  updateNote: (id: string, note: string | null) => apiClient.patch(`/admin/users/${id}/note`, { note }),
+
+  // Community moderation
   posts: (params?: any) => apiClient.get('/admin/posts/pending', { params }),
   approvePost: (id: string) => apiClient.patch(`/admin/posts/${id}/approve`),
   rejectPost: (id: string, reason: string) => apiClient.patch(`/admin/posts/${id}/reject`, { reason }),
+  bulkApprove: (ids: string[]) => apiClient.post('/admin/posts/bulk/approve', { ids }),
+  bulkReject: (ids: string[], reason?: string) => apiClient.post('/admin/posts/bulk/reject', { ids, reason }),
+
+  // Reports
   reports: (params?: any) => apiClient.get('/admin/reports', { params }),
+  reportDetail: (id: string) => apiClient.get(`/admin/reports/${id}`),
+  resolveReport: (id: string, status: string) => apiClient.patch(`/admin/reports/${id}/resolve`, { status }),
+
+  // Reviews
+  reviews: (params?: any) => apiClient.get('/admin/reviews', { params }),
+  moderateReview: (id: string, action: 'APPROVED' | 'REJECTED', reason?: string) =>
+    apiClient.patch(`/admin/reviews/${id}/moderate`, { status: action, reason }),
+
+  // Reservations
   reservations: (params?: any) => apiClient.get('/admin/reservations', { params }),
   updateReservationStatus: (id: string, status: string, internalNotes?: string) =>
     apiClient.patch(`/admin/reservations/${id}/status`, { status, internalNotes }),
+
+  // Support
   tickets: (params?: any) => apiClient.get('/admin/support/tickets', { params }),
+  updateTicket: (id: string, data: { status?: string; priority?: string; assignedToId?: string }) =>
+    apiClient.patch(`/admin/support/tickets/${id}`, data),
+  ticketMessages: (id: string) => apiClient.get(`/support/tickets/${id}/messages`),
+  sendTicketMessage: (id: string, content: string) =>
+    apiClient.post(`/support/tickets/${id}/messages`, { content }),
+  quickReplies: () => apiClient.get('/admin/support/quick-replies'),
+  createQuickReply: (data: { title: string; body: string; category?: string }) =>
+    apiClient.post('/admin/support/quick-replies', data),
+  updateQuickReply: (id: string, data: any) => apiClient.patch(`/admin/support/quick-replies/${id}`, data),
+  deleteQuickReply: (id: string) => apiClient.delete(`/admin/support/quick-replies/${id}`),
+
+  // Push broadcast
+  broadcast: (title: string, body: string, audience: 'ALL' | 'ADMINS' = 'ALL') =>
+    apiClient.post('/admin/notifications/broadcast', { title, body, audience }),
+
+  // Feature flags
+  flags: () => apiClient.get('/admin/flags'),
+  toggleFlag: (key: string, enabled: boolean) => apiClient.patch(`/admin/flags/${key}`, { enabled }),
+
+  // Loyalty
+  createLoyaltyLevel: (data: any) => apiClient.post('/admin/loyalty-levels', data),
+  updateLoyaltyLevel: (id: string, data: any) => apiClient.patch(`/admin/loyalty-levels/${id}`, data),
+  deleteLoyaltyLevel: (id: string) => apiClient.delete(`/admin/loyalty-levels/${id}`),
+
+  // GDPR
+  gdprRequests: () => apiClient.get('/admin/gdpr/requests'),
+  processExport: (id: string, action: 'APPROVE' | 'REJECT') =>
+    apiClient.patch(`/admin/gdpr/export/${id}`, { action }),
+  processDeletion: (id: string, action: 'APPROVE' | 'REJECT') =>
+    apiClient.patch(`/admin/gdpr/deletion/${id}`, { action }),
 };
 
 export const eventsApi = {
@@ -109,14 +169,18 @@ export const eventsApi = {
 };
 
 export const offersApi = {
-  list: (params?: any) => apiClient.get('/offers', { params }),
+  list: (params?: any) => apiClient.get('/offers', { params: { ...params, includeAll: true } }),
   get: (id: string) => apiClient.get(`/offers/${id}`),
   create: (data: any) => apiClient.post('/offers', data),
   update: (id: string, data: any) => apiClient.patch(`/offers/${id}`, data),
+  delete: (id: string) => apiClient.delete(`/offers/${id}`),
 };
 
 export const venuesApi = {
-  list: () => apiClient.get('/venues'),
+  list: (params?: any) => apiClient.get('/venues', { params }),
+  get: (id: string) => apiClient.get(`/venues/${id}`),
+  update: (id: string, data: any) => apiClient.patch(`/venues/${id}`, data),
+  updateConfig: (id: string, data: any) => apiClient.patch(`/venues/${id}/config`, data),
 };
 
 export function apiError(err: any, fallback = 'Algo salió mal'): string {
