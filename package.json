@@ -107,5 +107,8 @@
     "twilio": "^5.13.1",
     "uuid": "^13.0.0",
     "winston": "^3.19.0"
+  },
+  "optionalDependencies": {
+    "@rollup/rollup-linux-x64-gnu": "4.60.2"
   }
 }
