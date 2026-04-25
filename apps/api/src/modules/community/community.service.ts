@@ -48,6 +48,12 @@ export class CommunityService {
     await this.redis.cacheDelPattern('cache:community:*');
   }
 
+  /** Public alias used by AdminService after moderation so the feed cache
+   * (20 s TTL) doesn't return stale data right after a post is approved. */
+  async invalidateFeedCache(): Promise<void> {
+    return this.invalidateFeed();
+  }
+
   // ── POSTS ──────────────────────────────────
 
   async getPosts(filter: PostFilterDto, currentUserId?: string) {

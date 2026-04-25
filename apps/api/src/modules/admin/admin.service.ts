@@ -13,6 +13,7 @@ import { paginate, getPaginationOffset, PaginationDto } from '../../common/dto/p
 import { PushService } from '../push/push.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { CommunityGateway } from '../community/community.gateway';
+import { CommunityService } from '../community/community.service';
 
 @Injectable()
 export class AdminService {
@@ -23,6 +24,7 @@ export class AdminService {
     private readonly push: PushService,
     private readonly realtime: RealtimeService,
     private readonly communityGateway: CommunityGateway,
+    private readonly community: CommunityService,
   ) {}
 
   async broadcastPush(title: string, body: string, audience: 'ALL' | 'ADMINS' = 'ALL') {
@@ -669,6 +671,9 @@ export class AdminService {
       });
     }
 
+    // Bust the 20 s feed cache so the next mobile fetch sees the new state.
+    await this.community.invalidateFeedCache();
+
     this.realtime.broadcast('post', action === 'approve' ? 'approved' : 'rejected', { id: postId, data: { reason } });
     this.realtime.toUser(post.userId, 'post', action === 'approve' ? 'approved' : 'rejected', { id: postId, data: { reason } });
     // Notify the legacy /community socket so mobile feeds (which subscribe via
@@ -754,6 +759,8 @@ export class AdminService {
         });
       }
     }
+
+    await this.community.invalidateFeedCache();
 
     for (const p of pending) {
       this.realtime.broadcast('post', action === 'approve' ? 'approved' : 'rejected', { id: p.id });
