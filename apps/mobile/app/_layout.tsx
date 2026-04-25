@@ -22,6 +22,7 @@ import { usePushRegistration } from '@/hooks/usePushRegistration';
 import { useRealtimeConnection } from '@/hooks/useRealtime';
 import { ToastHost } from '@/components/Toast';
 import { NotificationListener } from '@/components/NotificationListener';
+import { NotificationBannerHost } from '@/components/NotificationBanner';
 import { OfflineBanner } from '@/components/OfflineBanner';
 import { UpdateOverlay } from '@/components/UpdateOverlay';
 
@@ -196,6 +197,7 @@ export default function RootLayout() {
           <Stack.Screen name="(guest)" />
         </Stack>
         <ToastHost />
+        <NotificationBannerHost />
         <UpdateOverlay />
       </SafeAreaProvider>
     </ErrorBoundary>
