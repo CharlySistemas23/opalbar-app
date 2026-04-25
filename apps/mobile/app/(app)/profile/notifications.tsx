@@ -238,7 +238,8 @@ export default function Notifications() {
           stickySectionHeadersEnabled={false}
           refreshing={refreshing}
           onRefresh={() => { setRefreshing(true); load(); }}
-          contentContainerStyle={{ paddingBottom: Spacing[8] }}
+          style={{ flex: 1 }}
+          contentContainerStyle={{ paddingBottom: Spacing[12], flexGrow: 1 }}
           renderSectionHeader={({ section }) => (
             <Text style={styles.sectionHeader}>{section.title}</Text>
           )}

@@ -48,8 +48,11 @@ export function NotificationListener() {
 
   useRealtime('notification', (env) => {
     if (env.action !== 'created') return;
-    const n = env.data?.data ?? env.data;
-    if (!n) return;
+    // env.data IS the notification record. Older code unwrapped env.data.data,
+    // but that points to the Prisma JSON metadata (actorId/postId/...) which
+    // has no title — so the banner showed the "Notificación" fallback.
+    const n = env.data;
+    if (!n || typeof n !== 'object') return;
 
     const { icon, color } = metaForType(n.type);
     const route = routeForNotif(n);
