@@ -115,18 +115,50 @@ export default function Notifications() {
   const [items, setItems] = useState<Notif[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const PAGE_SIZE = 50;
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (reset = false) => {
     try {
-      const r = await notificationsApi.list();
-      const rows = r.data?.data?.data ?? r.data?.data?.items ?? r.data?.data ?? [];
+      const nextPage = reset ? 1 : 1;
+      const r = await notificationsApi.list({ page: nextPage, limit: PAGE_SIZE });
+      const payload = r.data?.data ?? r.data ?? {};
+      const rows: Notif[] = payload.data ?? payload.items ?? payload ?? [];
       setItems(rows);
+      setPage(1);
+      setHasMore(rows.length >= PAGE_SIZE);
     } catch {}
     finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, []);
+
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    try {
+      const next = page + 1;
+      const r = await notificationsApi.list({ page: next, limit: PAGE_SIZE });
+      const payload = r.data?.data ?? r.data ?? {};
+      const rows: Notif[] = payload.data ?? payload.items ?? payload ?? [];
+      if (rows.length === 0) {
+        setHasMore(false);
+      } else {
+        setItems((prev) => {
+          const seen = new Set(prev.map((x) => x.id));
+          return [...prev, ...rows.filter((r) => !seen.has(r.id))];
+        });
+        setPage(next);
+        if (rows.length < PAGE_SIZE) setHasMore(false);
+      }
+    } catch {}
+    finally {
+      setLoadingMore(false);
+    }
+  }, [page, hasMore, loadingMore]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -240,6 +272,15 @@ export default function Notifications() {
           onRefresh={() => { setRefreshing(true); load(); }}
           style={{ flex: 1 }}
           contentContainerStyle={{ paddingBottom: Spacing[12], flexGrow: 1 }}
+          onEndReachedThreshold={0.4}
+          onEndReached={loadMore}
+          ListFooterComponent={
+            loadingMore ? (
+              <Text style={{ color: Colors.textMuted, textAlign: 'center', paddingVertical: Spacing[4] }}>
+                {es ? 'Cargando…' : 'Loading…'}
+              </Text>
+            ) : null
+          }
           renderSectionHeader={({ section }) => (
             <Text style={styles.sectionHeader}>{section.title}</Text>
           )}
