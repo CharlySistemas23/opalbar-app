@@ -38,16 +38,16 @@ export class AdminService {
       ? { role: { in: ['ADMIN', 'SUPER_ADMIN', 'MODERATOR'] } }
       : { status: 'ACTIVE' };
     const users = await this.prisma.user.findMany({ where, select: { id: true } });
-    let sent = 0;
-    for (const u of users) {
-      const r = await this.push.sendToUser(u.id, {
+    const { sent } = await this.notifications.createForUsers(
+      users.map((u) => u.id),
+      {
+        type: NotificationType.SYSTEM,
         title,
         body,
         data: { type: 'BROADCAST', audience },
-      });
-      sent += r?.sent ?? 0;
-    }
-    this.logger.log(`📣 Broadcast sent: ${sent} notifications to ${users.length} users (${audience})`);
+      },
+    );
+    this.logger.log(`📣 Broadcast persisted+pushed: ${sent} users (${audience})`);
     return { totalUsers: users.length, sent };
   }
 
