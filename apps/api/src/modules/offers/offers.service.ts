@@ -7,6 +7,7 @@ import { OfferStatus } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { RedisService, LockBusyError } from '../../database/redis.service';
 import { paginate, getPaginationOffset } from '../../common/dto/pagination.dto';
+import { RealtimeService } from '../realtime/realtime.service';
 import { CreateOfferDto, OfferFilterDto, UpdateOfferDto } from './dto/offer.dto';
 
 // Cache TTLs — public reads. Offers change less than events so we can hold longer.
@@ -18,6 +19,7 @@ export class OffersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
+    private readonly realtime: RealtimeService,
   ) {}
 
   private static hashFilter(obj: unknown): string {
@@ -119,6 +121,7 @@ export class OffersService {
       },
     });
     await this.invalidate();
+    this.realtime.broadcast('offer', 'created', { id: created.id, data: created });
     return created;
   }
 
@@ -139,6 +142,7 @@ export class OffersService {
       },
     });
     await this.invalidate();
+    this.realtime.broadcast('offer', 'updated', { id, data: updated });
     return updated;
   }
 
@@ -148,6 +152,7 @@ export class OffersService {
     // Hard delete — cascade removes all redemptions
     await this.prisma.offer.delete({ where: { id } });
     await this.invalidate();
+    this.realtime.broadcast('offer', 'deleted', { id });
   }
 
   async softArchive(id: string) {
@@ -158,6 +163,7 @@ export class OffersService {
       data: { status: OfferStatus.EXPIRED },
     });
     await this.invalidate();
+    this.realtime.broadcast('offer', 'status_changed', { id, data: { status: OfferStatus.EXPIRED } });
   }
 
   async redeem(offerId: string, userId: string) {
@@ -248,6 +254,7 @@ export class OffersService {
     ]);
 
     await this.invalidate();
+    this.realtime.toUserAndStaff(userId, 'offer', 'updated', { id: offerId, data: { redeemed: true, redemptionId: redemption.id } });
     return redemption;
   }
 

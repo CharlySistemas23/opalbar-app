@@ -3,6 +3,7 @@ import { MessageSender, TicketStatus, UserRole } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { paginate, getPaginationOffset } from '../../common/dto/pagination.dto';
 import { PushService } from '../push/push.service';
+import { RealtimeService } from '../realtime/realtime.service';
 import { CreateTicketDto, CreateQuickReplyDto, SendMessageDto, TicketFilterDto, UpdateQuickReplyDto, UpdateTicketDto } from './dto/support.dto';
 
 @Injectable()
@@ -10,6 +11,7 @@ export class SupportService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly push: PushService,
+    private readonly realtime: RealtimeService,
   ) {}
 
   // ── Tickets (user) ───────────────────────
@@ -40,6 +42,7 @@ export class SupportService {
       data: { type: 'SUPPORT_TICKET_NEW', ticketId: ticket.id, deepLink: `/(admin)/manage/support/${ticket.id}` },
     }).catch(() => {});
 
+    this.realtime.toUserAndStaff(userId, 'ticket', 'created', { id: ticket.id, data: ticket });
     return ticket;
   }
 
@@ -101,6 +104,7 @@ export class SupportService {
       }),
     ]);
 
+    this.realtime.toUserAndStaff(ticket.userId, 'ticket', 'updated', { id: ticketId, data: { messageId: message.id, sender } });
     return message;
   }
 
@@ -142,7 +146,7 @@ export class SupportService {
     if (dto.status === TicketStatus.RESOLVED) timestamps.resolvedAt = new Date();
     if (dto.status === TicketStatus.CLOSED) timestamps.closedAt = new Date();
 
-    return this.prisma.supportTicket.update({
+    const updated = await this.prisma.supportTicket.update({
       where: { id },
       data: {
         ...(dto.status && { status: dto.status }),
@@ -151,6 +155,8 @@ export class SupportService {
         ...timestamps,
       },
     });
+    this.realtime.toUserAndStaff(ticket.userId, 'ticket', 'updated', { id, data: updated });
+    return updated;
   }
 
   // ── Quick Replies ─────────────────────────

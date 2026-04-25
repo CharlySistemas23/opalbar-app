@@ -41,6 +41,7 @@ import { CheckinModule } from '../modules/checkin/checkin.module';
 import { VenuesModule } from '../modules/venues/venues.module';
 import { PushModule } from '../modules/push/push.module';
 import { MarketingModule } from '../modules/marketing/marketing.module';
+import { RealtimeModule } from '../modules/realtime/realtime.module';
 
 @Module({
   imports: [
@@ -76,6 +77,7 @@ import { MarketingModule } from '../modules/marketing/marketing.module';
     // ── Database ──────────────────────────────
     PrismaModule,
     RedisModule,
+    RealtimeModule,
 
     // ── Feature Modules ───────────────────────
     AuthModule,

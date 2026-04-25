@@ -9,6 +9,7 @@ import { RedisService } from '../../database/redis.service';
 import { paginate, getPaginationOffset } from '../../common/dto/pagination.dto';
 import { CommunityGateway } from './community.gateway';
 import { NotificationsService } from '../notifications/notifications.service';
+import { RealtimeService } from '../realtime/realtime.service';
 import {
   CreatePostDto, UpdatePostDto, CreateCommentDto,
   ReactDto, CreateReportDto, PostFilterDto, CommunityFeedScope, PostSurface,
@@ -36,6 +37,7 @@ export class CommunityService {
     private readonly redis: RedisService,
     private readonly communityGateway: CommunityGateway,
     private readonly notifications: NotificationsService,
+    private readonly realtime: RealtimeService,
   ) {}
 
   private static hashFilter(obj: unknown): string {
@@ -179,6 +181,7 @@ export class CommunityService {
 
     await this.invalidateFeed();
     this.communityGateway.emitChanged({ type: 'post_created', postId: post.id });
+    this.realtime.broadcast('post', 'created', { id: post.id, data: { userId } });
     return post;
   }
 
@@ -189,6 +192,7 @@ export class CommunityService {
     const updated = await this.prisma.post.update({ where: { id: postId }, data: dto });
     await this.invalidateFeed();
     this.communityGateway.emitChanged({ type: 'post_updated', postId });
+    this.realtime.broadcast('post', 'updated', { id: postId });
     return updated;
   }
 
@@ -199,6 +203,7 @@ export class CommunityService {
     await this.prisma.post.update({ where: { id: postId }, data: { deletedAt: new Date() } });
     await this.invalidateFeed();
     this.communityGateway.emitChanged({ type: 'post_deleted', postId });
+    this.realtime.broadcast('post', 'deleted', { id: postId });
   }
 
   // ── COMMENTS ──────────────────────────────
@@ -308,6 +313,7 @@ export class CommunityService {
       postId,
       commentId: comment.id,
     });
+    this.realtime.broadcast('comment', 'created', { id: comment.id, data: { postId, userId } });
 
     // Notify post author on top-level comments.
     // For replies, notify the parent comment's author instead.
@@ -367,6 +373,7 @@ export class CommunityService {
       postId: comment.postId,
       commentId,
     });
+    this.realtime.broadcast('comment', 'deleted', { id: commentId, data: { postId: comment.postId } });
   }
 
   // ── REACTIONS ─────────────────────────────
@@ -388,6 +395,7 @@ export class CommunityService {
         ]);
         await this.invalidatePostCache(postId);
         this.communityGateway.emitChanged({ type: 'post_reacted', postId });
+    this.realtime.broadcast('post', 'reacted', { id: postId });
         return { reacted: false };
       }
       // Change type
@@ -397,6 +405,7 @@ export class CommunityService {
       });
       await this.invalidatePostCache(postId);
       this.communityGateway.emitChanged({ type: 'post_reacted', postId });
+    this.realtime.broadcast('post', 'reacted', { id: postId });
       return { reacted: true, type: dto.type };
     }
 
@@ -406,6 +415,7 @@ export class CommunityService {
     ]);
     await this.invalidatePostCache(postId);
     this.communityGateway.emitChanged({ type: 'post_reacted', postId });
+    this.realtime.broadcast('post', 'reacted', { id: postId });
 
     if (post.userId !== userId) {
       const actor = await this.prisma.userProfile.findUnique({

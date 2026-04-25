@@ -7,6 +7,7 @@ import { AttendanceStatus, EventStatus, UserRole } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { RedisService } from '../../database/redis.service';
 import { paginate, getPaginationOffset } from '../../common/dto/pagination.dto';
+import { RealtimeService } from '../realtime/realtime.service';
 import { CreateEventDto, UpdateEventDto, EventFilterDto } from './dto/event.dto';
 
 // Cache TTLs in seconds — public reads only. Tune per hotness.
@@ -19,6 +20,7 @@ export class EventsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
+    private readonly realtime: RealtimeService,
   ) {}
 
   private static hashFilter(obj: unknown): string {
@@ -137,6 +139,7 @@ export class EventsService {
       },
     });
     await this.invalidate();
+    this.realtime.broadcast('event', 'created', { id: created.id, data: created });
     return created;
   }
 
@@ -169,6 +172,7 @@ export class EventsService {
       },
     });
     await this.invalidate();
+    this.realtime.broadcast('event', 'updated', { id, data: updated });
     return updated;
   }
 
@@ -181,6 +185,7 @@ export class EventsService {
     // Hard delete — cascade handles attendees, media; reservations get eventId=null
     const deleted = await this.prisma.event.delete({ where: { id } });
     await this.invalidate();
+    this.realtime.broadcast('event', 'deleted', { id });
     return deleted;
   }
 
@@ -190,6 +195,7 @@ export class EventsService {
       data: { status: EventStatus.CANCELLED },
     });
     await this.invalidate();
+    this.realtime.broadcast('event', 'status_changed', { id, data: { status: EventStatus.CANCELLED } });
     return result;
   }
 

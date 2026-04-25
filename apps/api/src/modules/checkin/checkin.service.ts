@@ -2,12 +2,14 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { ReservationStatus } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { PushService } from '../push/push.service';
+import { RealtimeService } from '../realtime/realtime.service';
 
 @Injectable()
 export class CheckinService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly push: PushService,
+    private readonly realtime: RealtimeService,
   ) {}
 
   async checkinReservation(code: string, staffId: string) {
@@ -54,6 +56,8 @@ export class CheckinService {
       data: { type: 'RESERVATION_SEATED', reservationId: reservation.id },
     }).catch(() => {});
 
+    this.realtime.toUserAndStaff(reservation.userId, 'checkin', 'created', { id: reservation.id, data: { kind: 'reservation', staffId } });
+    this.realtime.toUserAndStaff(reservation.userId, 'reservation', 'status_changed', { id: reservation.id, data: { seated: true } });
     return { alreadySeated: false, reservation: updated };
   }
 
@@ -91,6 +95,7 @@ export class CheckinService {
       data: { type: 'REDEMPTION_USED', redemptionId: redemption.id },
     }).catch(() => {});
 
+    this.realtime.toUserAndStaff(redemption.userId, 'checkin', 'created', { id: redemption.id, data: { kind: 'redemption', staffId } });
     return { alreadyUsed: false, redemption: updated, staffId };
   }
 

@@ -11,6 +11,7 @@ import {
 import { PrismaService } from '../../database/prisma.service';
 import { paginate, getPaginationOffset, PaginationDto } from '../../common/dto/pagination.dto';
 import { PushService } from '../push/push.service';
+import { RealtimeService } from '../realtime/realtime.service';
 
 @Injectable()
 export class AdminService {
@@ -19,6 +20,7 @@ export class AdminService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly push: PushService,
+    private readonly realtime: RealtimeService,
   ) {}
 
   async broadcastPush(title: string, body: string, audience: 'ALL' | 'ADMINS' = 'ALL') {
@@ -559,6 +561,8 @@ export class AdminService {
       before: { status: user.status },
       after: { status: UserStatus.BANNED },
     });
+
+    this.realtime.toUserAndStaff(userId, 'user', 'banned', { id: userId, data: { reason } });
   }
 
   async unbanUser(moderatorId: string, userId: string) {
@@ -578,6 +582,8 @@ export class AdminService {
       before: { status: user?.status ?? null },
       after: { status: UserStatus.ACTIVE },
     });
+
+    this.realtime.toUserAndStaff(userId, 'user', 'unbanned', { id: userId });
   }
 
   async updateUserRole(adminId: string, userId: string, role: UserRole) {
@@ -591,6 +597,7 @@ export class AdminService {
       before: { role: prev?.role ?? null },
       after: { role },
     });
+    this.realtime.toUserAndStaff(userId, 'user', 'role_changed', { id: userId, data: { role } });
     return result;
   }
 
@@ -659,6 +666,9 @@ export class AdminService {
         },
       });
     }
+
+    this.realtime.broadcast('post', action === 'approve' ? 'approved' : 'rejected', { id: postId, data: { reason } });
+    this.realtime.toUser(post.userId, 'post', action === 'approve' ? 'approved' : 'rejected', { id: postId, data: { reason } });
   }
 
   /**
@@ -736,6 +746,11 @@ export class AdminService {
       }
     }
 
+    for (const p of pending) {
+      this.realtime.broadcast('post', action === 'approve' ? 'approved' : 'rejected', { id: p.id });
+      this.realtime.toUser(p.userId, 'post', action === 'approve' ? 'approved' : 'rejected', { id: p.id });
+    }
+
     return { processed: actionableIds.length, skipped };
   }
 
@@ -783,17 +798,21 @@ export class AdminService {
     if (!request) throw new NotFoundException('Request not found');
 
     if (action === 'REJECT') {
-      return this.prisma.dataExportRequest.update({
+      const r = await this.prisma.dataExportRequest.update({
         where: { id },
         data: { status: 'REJECTED', processedAt: new Date() },
       });
+      this.realtime.toUserAndStaff(request.userId, 'gdpr', 'rejected', { id, data: { kind: 'export' } });
+      return r;
     }
     const downloadUrl = `https://opalbar.com/exports/${request.userId}-${Date.now()}.json`;
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-    return this.prisma.dataExportRequest.update({
+    const r = await this.prisma.dataExportRequest.update({
       where: { id },
       data: { status: 'COMPLETED', processedAt: new Date(), downloadUrl, expiresAt },
     });
+    this.realtime.toUserAndStaff(request.userId, 'gdpr', 'approved', { id, data: { kind: 'export', downloadUrl } });
+    return r;
   }
 
   async processDeletionRequest(id: string, action: 'APPROVE' | 'REJECT') {
@@ -801,10 +820,12 @@ export class AdminService {
     if (!request) throw new NotFoundException('Request not found');
 
     if (action === 'REJECT') {
-      return this.prisma.dataDeletionRequest.update({
+      const r = await this.prisma.dataDeletionRequest.update({
         where: { id },
         data: { status: 'REJECTED', processedAt: new Date() },
       });
+      this.realtime.toUserAndStaff(request.userId, 'gdpr', 'rejected', { id, data: { kind: 'deletion' } });
+      return r;
     }
 
     await this.softDeleteUser(request.userId);
@@ -812,6 +833,8 @@ export class AdminService {
       where: { id },
       data: { status: 'COMPLETED', processedAt: new Date() },
     });
+    this.realtime.toUserAndStaff(request.userId, 'gdpr', 'approved', { id, data: { kind: 'deletion' } });
+    this.realtime.toStaff('user', 'deleted', { id: request.userId });
     return { success: true };
   }
 
@@ -875,6 +898,8 @@ export class AdminService {
       throw new BadRequestException('Cannot delete a super admin');
     }
     await this.softDeleteUser(userId);
+    this.realtime.toStaff('user', 'deleted', { id: userId });
+    this.realtime.toUser(userId, 'user', 'deleted', { id: userId });
     return { success: true };
   }
 
@@ -927,10 +952,12 @@ export class AdminService {
   }
 
   async resolveReport(reportId: string, moderatorId: string, status: ReportStatus) {
-    return this.prisma.report.update({
+    const r = await this.prisma.report.update({
       where: { id: reportId },
       data: { status, reviewedById: moderatorId, reviewedAt: new Date() },
     });
+    this.realtime.toStaff('report', 'updated', { id: reportId, data: { status } });
+    return r;
   }
 
   // ── STATS ─────────────────────────────────

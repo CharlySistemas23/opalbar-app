@@ -1,10 +1,14 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
+import { RealtimeService } from '../realtime/realtime.service';
 import { UpdateProfileDto, UpdateInterestsDto } from './dto/update-profile.dto';
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly realtime: RealtimeService,
+  ) {}
 
   async findById(id: string) {
     const user = await this.prisma.user.findUnique({
@@ -63,6 +67,7 @@ export class UsersService {
         discoverySource: dto.discoverySource,
       },
     });
+    this.realtime.toUserAndStaff(userId, 'user', 'updated', { id: userId });
     return profile;
   }
 
@@ -243,6 +248,7 @@ export class UsersService {
       create: { followerId, followingId },
       update: {},
     });
+    this.realtime.toUsers([followerId, followingId], 'user', 'updated', { id: followingId, data: { follow: true, by: followerId } });
     return { ok: true, isFollowing: true };
   }
 
@@ -250,6 +256,7 @@ export class UsersService {
     await this.prisma.follow.deleteMany({
       where: { followerId, followingId },
     });
+    this.realtime.toUsers([followerId, followingId], 'user', 'updated', { id: followingId, data: { follow: false, by: followerId } });
     return { ok: true, isFollowing: false };
   }
 

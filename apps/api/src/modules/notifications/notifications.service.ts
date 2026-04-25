@@ -3,6 +3,7 @@ import { NotificationType } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { paginate, getPaginationOffset, PaginationDto } from '../../common/dto/pagination.dto';
 import { PushService } from '../push/push.service';
+import { RealtimeService } from '../realtime/realtime.service';
 
 @Injectable()
 export class NotificationsService {
@@ -11,6 +12,7 @@ export class NotificationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly push: PushService,
+    private readonly realtime: RealtimeService,
   ) {}
 
   async getNotifications(userId: string, pagination: PaginationDto) {
@@ -31,17 +33,21 @@ export class NotificationsService {
   }
 
   async markAsRead(userId: string, notificationId: string) {
-    return this.prisma.notification.updateMany({
+    const r = await this.prisma.notification.updateMany({
       where: { id: notificationId, userId },
       data: { read: true, readAt: new Date() },
     });
+    this.realtime.toUser(userId, 'notification', 'read', { id: notificationId });
+    return r;
   }
 
   async markAllAsRead(userId: string) {
-    return this.prisma.notification.updateMany({
+    const r = await this.prisma.notification.updateMany({
       where: { userId, read: false },
       data: { read: true, readAt: new Date() },
     });
+    this.realtime.toUser(userId, 'notification', 'read');
+    return r;
   }
 
   async createNotification(data: {
@@ -59,13 +65,21 @@ export class NotificationsService {
     // Send push notification (placeholder — integrate FCM/APNs)
     await this.sendPush(data.userId, data.title, data.body, data.data);
 
+    // Real-time push to the user's open sockets
+    this.realtime.toUser(data.userId, 'notification', 'created', {
+      id: notification.id,
+      data: notification,
+    });
+
     return notification;
   }
 
   async deleteNotification(userId: string, notificationId: string) {
-    return this.prisma.notification.deleteMany({
+    const r = await this.prisma.notification.deleteMany({
       where: { id: notificationId, userId },
     });
+    this.realtime.toUser(userId, 'notification', 'deleted', { id: notificationId });
+    return r;
   }
 
   private async sendPush(

@@ -1,6 +1,7 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { LayoutDashboard, Users, Calendar, Tag, MessageSquare, MessagesSquare, Flag, Inbox, Bell, BarChart3, Settings, Shield, LogOut, Home, MapPin } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
+import { useRealtime } from '@/hooks/useRealtime';
 import clsx from 'clsx';
 
 const NAV = [
@@ -22,6 +23,7 @@ const NAV = [
 export function Layout() {
   const { user, logout } = useAuthStore();
   const navigate = useNavigate();
+  useRealtime(!!user);
 
   return (
     <div className="min-h-screen flex">

@@ -3,6 +3,7 @@ import { ReviewStatus, UserRole } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { RedisService } from '../../database/redis.service';
 import { paginate, getPaginationOffset } from '../../common/dto/pagination.dto';
+import { RealtimeService } from '../realtime/realtime.service';
 import { CreateReviewDto, ModerationReviewDto, ReviewFilterDto, UpdateReviewDto } from './dto/review.dto';
 
 @Injectable()
@@ -10,6 +11,7 @@ export class ReviewsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
+    private readonly realtime: RealtimeService,
   ) {}
 
   /**
@@ -60,6 +62,7 @@ export class ReviewsService {
     // Starts as PENDING — no visible change yet, but sync keeps the venue row fresh
     // in case seed data had stale values.
     await this.syncVenueRating(dto.venueId);
+    this.realtime.toUserAndStaff(userId, 'review', 'created', { id: created.id, data: created });
     return created;
   }
 
@@ -116,6 +119,7 @@ export class ReviewsService {
     });
     // Edit sends it back to PENDING — previously published stats change.
     await this.syncVenueRating(review.venueId);
+    this.realtime.toUserAndStaff(userId, 'review', 'updated', { id, data: updated });
     return updated;
   }
 
@@ -126,6 +130,7 @@ export class ReviewsService {
 
     const removed = await this.prisma.review.update({ where: { id }, data: { deletedAt: new Date() } });
     await this.syncVenueRating(review.venueId);
+    this.realtime.toUserAndStaff(review.userId, 'review', 'deleted', { id });
     return removed;
   }
 
@@ -191,6 +196,7 @@ export class ReviewsService {
     });
     // Only PUBLISHED rows count in the aggregation; toggling status changes visible stats.
     await this.syncVenueRating(review.venueId);
+    this.realtime.toUserAndStaff(review.userId, 'review', dto.status === ReviewStatus.PUBLISHED ? 'approved' : 'rejected', { id, data: moderated });
     return moderated;
   }
 }

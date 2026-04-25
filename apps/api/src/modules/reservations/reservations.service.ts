@@ -4,6 +4,7 @@ import { PrismaService } from '../../database/prisma.service';
 import { RedisService, LockBusyError } from '../../database/redis.service';
 import { paginate, getPaginationOffset } from '../../common/dto/pagination.dto';
 import { PushService } from '../push/push.service';
+import { RealtimeService } from '../realtime/realtime.service';
 import { CreateReservationDto, ReservationFilterDto, UpdateReservationDto, UpdateReservationStatusDto } from './dto/reservation.dto';
 
 function isSameDay(a: Date, b: Date): boolean {
@@ -18,6 +19,7 @@ export class ReservationsService {
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
     private readonly push: PushService,
+    private readonly realtime: RealtimeService,
   ) {}
 
   async create(dto: CreateReservationDto, userId: string) {
@@ -117,6 +119,7 @@ export class ReservationsService {
       }).catch(() => {});
     }
 
+    this.realtime.toUserAndStaff(userId, 'reservation', 'created', { id: reservation.id, data: reservation });
     return reservation;
   }
 
@@ -185,6 +188,7 @@ export class ReservationsService {
       }).catch(() => {});
     }
 
+    this.realtime.toUserAndStaff(reservation.userId, 'reservation', 'updated', { id, data: { status: ReservationStatus.CANCELLED } });
     return updated;
   }
 
@@ -237,7 +241,9 @@ export class ReservationsService {
     if (dto.partySize != null) data.partySize = dto.partySize;
     if (dto.notes !== undefined) data.notes = dto.notes;
 
-    return this.prisma.reservation.update({ where: { id }, data });
+    const updated = await this.prisma.reservation.update({ where: { id }, data });
+    this.realtime.toUserAndStaff(reservation.userId, 'reservation', 'updated', { id, data: updated });
+    return updated;
   }
 
   async updateStatus(id: string, dto: UpdateReservationStatusDto) {
@@ -250,7 +256,7 @@ export class ReservationsService {
     if (dto.status === ReservationStatus.COMPLETED) timestamps.completedAt = new Date();
     if (dto.status === ReservationStatus.CANCELLED) timestamps.cancelledAt = new Date();
 
-    return this.prisma.reservation.update({
+    const updated = await this.prisma.reservation.update({
       where: { id },
       data: {
         status: dto.status,
@@ -259,5 +265,7 @@ export class ReservationsService {
         ...timestamps,
       },
     });
+    this.realtime.toUserAndStaff(reservation.userId, 'reservation', 'status_changed', { id, data: { status: dto.status } });
+    return updated;
   }
 }

@@ -1,6 +1,7 @@
 import { ForbiddenException, Inject, Injectable, NotFoundException, forwardRef } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
 import { MessagesGateway } from './messages.gateway';
+import { RealtimeService } from '../realtime/realtime.service';
 
 @Injectable()
 export class MessagesService {
@@ -8,6 +9,7 @@ export class MessagesService {
     private readonly prisma: PrismaService,
     @Inject(forwardRef(() => MessagesGateway))
     private readonly gateway: MessagesGateway,
+    private readonly realtime: RealtimeService,
   ) {}
 
   // Deterministic thread key: sort user IDs so pair (a,b) == (b,a)
@@ -131,8 +133,15 @@ export class MessagesService {
       data: { lastMessageAt: new Date() },
     });
 
-    // Real-time push to anyone in the thread room
+    // Real-time push to anyone in the thread room (existing DM gateway)
     this.gateway.emitNewMessage(threadId!, msg);
+
+    // Real-time fan-out: both participants + admin moderation feed
+    const thread = maybeThread ?? (await this.prisma.messageThread.findUnique({ where: { id: threadId! } }));
+    if (thread) {
+      this.realtime.toUsers([thread.userAId, thread.userBId], 'message', 'sent', { id: msg.id, data: msg });
+    }
+    this.realtime.toStaff('message', 'sent', { id: msg.id, data: { threadId, senderId: meId } });
 
     return msg;
   }
@@ -141,10 +150,12 @@ export class MessagesService {
     const msg = await this.prisma.message.findUnique({ where: { id: messageId } });
     if (!msg) throw new NotFoundException('Message not found');
     if (msg.senderId !== meId) throw new ForbiddenException('Not your message');
-    return this.prisma.message.update({
+    const r = await this.prisma.message.update({
       where: { id: messageId },
       data: { deletedAt: new Date() },
     });
+    this.realtime.toStaff('message', 'deleted', { id: messageId });
+    return r;
   }
 
   // ─────────────────────────────────────────
@@ -243,12 +254,15 @@ export class MessagesService {
   async adminDeleteMessage(messageId: string, adminId: string) {
     const msg = await this.prisma.message.findUnique({ where: { id: messageId } });
     if (!msg) throw new NotFoundException('Message not found');
-    return this.prisma.message.update({
+    const r = await this.prisma.message.update({
       where: { id: messageId },
       data: {
         deletedAt: new Date(),
         content: `[Eliminado por moderación · ${new Date().toISOString()}]`,
       },
     });
+    this.realtime.toStaff('message', 'deleted', { id: messageId });
+    this.realtime.toUser(msg.senderId, 'message', 'deleted', { id: messageId });
+    return r;
   }
 }

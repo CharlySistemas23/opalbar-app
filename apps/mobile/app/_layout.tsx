@@ -19,6 +19,7 @@ import {
 } from '@expo-google-fonts/inter';
 import { useAuthStore } from '@/stores/auth.store';
 import { usePushRegistration } from '@/hooks/usePushRegistration';
+import { useRealtimeConnection } from '@/hooks/useRealtime';
 import { ToastHost } from '@/components/Toast';
 import { OfflineBanner } from '@/components/OfflineBanner';
 import { UpdateOverlay } from '@/components/UpdateOverlay';
@@ -96,6 +97,12 @@ if (Platform.OS !== 'web') {
  */
 function PushGuard() {
   usePushRegistration();
+  return null;
+}
+
+function RealtimeBridge() {
+  const { isAuthenticated } = useAuthStore();
+  useRealtimeConnection(isAuthenticated);
   return null;
 }
 
@@ -177,6 +184,7 @@ export default function RootLayout() {
         <OfflineBanner />
         <SessionGuard />
         <PushGuard />
+        <RealtimeBridge />
         <Stack screenOptions={{ headerShown: false }}>
           <Stack.Screen name="index" />
           <Stack.Screen name="(auth)" />
