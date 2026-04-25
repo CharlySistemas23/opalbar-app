@@ -1,6 +1,8 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { NotificationType } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { RealtimeService } from '../realtime/realtime.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { UpdateProfileDto, UpdateInterestsDto } from './dto/update-profile.dto';
 
 @Injectable()
@@ -8,6 +10,7 @@ export class UsersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly realtime: RealtimeService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async findById(id: string) {
@@ -243,12 +246,36 @@ export class UsersService {
     if (followerId === followingId) {
       throw new Error("Can't follow yourself");
     }
-    await this.prisma.follow.upsert({
+    const result = await this.prisma.follow.upsert({
       where: { followerId_followingId: { followerId, followingId } },
       create: { followerId, followingId },
       update: {},
     });
     this.realtime.toUsers([followerId, followingId], 'user', 'updated', { id: followingId, data: { follow: true, by: followerId } });
+
+    // Only notify when the follow row was actually created (upsert returned a
+    // brand-new id). Otherwise re-clicking "follow" would re-spam the user.
+    const isNew = result.createdAt.getTime() > Date.now() - 5_000;
+    if (isNew) {
+      const actor = await this.prisma.userProfile.findUnique({
+        where: { userId: followerId },
+        select: { firstName: true, lastName: true, avatarUrl: true },
+      });
+      const actorName =
+        `${actor?.firstName ?? ''} ${actor?.lastName ?? ''}`.trim() || 'Alguien';
+      this.notifications
+        .createNotification({
+          userId: followingId,
+          type: NotificationType.COMMUNITY_FOLLOW,
+          title: 'Nuevo seguidor',
+          titleEn: 'New follower',
+          body: `${actorName} ahora te sigue.`,
+          bodyEn: `${actorName} is now following you.`,
+          data: { actorId: followerId, actorName, actorAvatarUrl: actor?.avatarUrl ?? null },
+        })
+        .catch(() => {});
+    }
+
     return { ok: true, isFollowing: true };
   }
 
