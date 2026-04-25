@@ -272,8 +272,9 @@ model User {
   following    Follow[]        @relation("follower")
   threadsA     MessageThread[] @relation("threadUserA")
   threadsB     MessageThread[] @relation("threadUserB")
-  messagesSent Message[]       @relation("messageSender")
-  savedItems   SavedItem[]
+  messagesSent     Message[]         @relation("messageSender")
+  messageReactions MessageReaction[] @relation("messageReactor")
+  savedItems       SavedItem[]
 
   // Stories
   stories    Story[]     @relation("storyAuthor")
@@ -1183,21 +1184,42 @@ model MessageThread {
 }
 
 model Message {
-  id         String    @id @default(cuid())
-  threadId   String
-  senderId   String
-  content    String?   @db.Text
-  imageUrl   String?
-  stickerKey String?
-  isRead     Boolean   @default(false)
-  createdAt  DateTime  @default(now())
-  deletedAt  DateTime?
+  id               String    @id @default(cuid())
+  threadId         String
+  senderId         String
+  content          String?   @db.Text
+  imageUrl         String?
+  stickerKey       String?
+  audioUrl         String?
+  audioDurationSec Int?
+  replyToId        String?
+  isRead           Boolean   @default(false)
+  createdAt        DateTime  @default(now())
+  deletedAt        DateTime?
 
-  thread MessageThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
-  sender User          @relation("messageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  thread    MessageThread     @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  sender    User              @relation("messageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  replyTo   Message?          @relation("messageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies   Message[]         @relation("messageReplies")
+  reactions MessageReaction[]
 
   @@index([threadId, createdAt])
   @@index([senderId])
+  @@index([replyToId])
+}
+
+model MessageReaction {
+  id        String   @id @default(cuid())
+  messageId String
+  userId    String
+  emoji     String
+  createdAt DateTime @default(now())
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation("messageReactor", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId, emoji])
+  @@index([messageId])
 }
 
 enum SavedItemType {

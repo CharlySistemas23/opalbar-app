@@ -15,12 +15,14 @@ import {
   Modal,
   ScrollView,
   Alert,
+  Clipboard,
 } from 'react-native';
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import { Audio } from 'expo-av';
 import { messagesApi } from '@/api/client';
 import { useAuthStore } from '@/stores/auth.store';
 import { useAppStore } from '@/stores/app.store';
@@ -28,9 +30,8 @@ import { Colors, Radius, Shadows, Typography } from '@/constants/tokens';
 import { useThreadSocket } from '@/hooks/useThreadSocket';
 import { useFeedback } from '@/hooks/useFeedback';
 import { uploadImage } from '@/utils/uploadImage';
+import { uploadAudio } from '@/utils/uploadAudio';
 
-// Curated sticker palette — emoji-based, no asset bundling needed.
-// stickerKey is just the emoji, rendered large (80px) on a transparent bubble.
 const STICKER_PACK = [
   '🔥', '💖', '😂', '🥳', '😍', '😎',
   '🍻', '🥂', '🍷', '🎉', '✨', '⭐',
@@ -38,6 +39,10 @@ const STICKER_PACK = [
   '🕺', '🎶', '🎵', '🎁', '💋', '😘',
   '😭', '🤣', '😅', '🫶', '❤️‍🔥', '💕',
 ];
+const QUICK_REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏'];
+
+// Public Giphy beta key — fine for dev / preview channel.
+const GIPHY_KEY = process.env['EXPO_PUBLIC_GIPHY_KEY'] ?? 'dc6zaTOxFJmzC';
 
 const AVATAR_COLORS = ['#F4A340', '#60A5FA', '#A855F7', '#6FB892', '#E06868', '#EC4899'];
 function colorFor(id: string) {
@@ -45,7 +50,6 @@ function colorFor(id: string) {
   return AVATAR_COLORS[idx];
 }
 
-// ─── Helpers ─────────────────────────────────────────
 function isSameDay(a: Date, b: Date) {
   return (
     a.getFullYear() === b.getFullYear() &&
@@ -73,35 +77,28 @@ function dateLabel(d: Date, t: boolean) {
 function fmtTime(d: Date, lang: string) {
   return d.toLocaleTimeString(lang, { hour: '2-digit', minute: '2-digit' });
 }
+function fmtDuration(sec: number) {
+  const s = Math.max(0, Math.floor(sec));
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return `${m}:${r.toString().padStart(2, '0')}`;
+}
 
-// ─── Typing indicator (3 bouncing dots) ──────────────
 function TypingBubble() {
   const dots = [useRef(new Animated.Value(0.3)).current, useRef(new Animated.Value(0.3)).current, useRef(new Animated.Value(0.3)).current];
-
   useEffect(() => {
     const loops = dots.map((v, i) =>
       Animated.loop(
         Animated.sequence([
           Animated.delay(i * 180),
-          Animated.timing(v, {
-            toValue: 1,
-            duration: 380,
-            easing: Easing.inOut(Easing.ease),
-            useNativeDriver: true,
-          }),
-          Animated.timing(v, {
-            toValue: 0.3,
-            duration: 380,
-            easing: Easing.inOut(Easing.ease),
-            useNativeDriver: true,
-          }),
+          Animated.timing(v, { toValue: 1, duration: 380, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+          Animated.timing(v, { toValue: 0.3, duration: 380, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
         ]),
       ),
     );
     loops.forEach((l) => l.start());
     return () => loops.forEach((l) => l.stop());
   }, []);
-
   return (
     <View style={[styles.msgRow, styles.msgRowThem, { marginTop: 4 }]}>
       <View style={styles.themAvatarSpacer} />
@@ -109,13 +106,7 @@ function TypingBubble() {
         {dots.map((v, i) => (
           <Animated.View
             key={i}
-            style={[
-              styles.typingDot,
-              {
-                opacity: v,
-                transform: [{ scale: v.interpolate({ inputRange: [0.3, 1], outputRange: [0.7, 1] }) }],
-              },
-            ]}
+            style={[styles.typingDot, { opacity: v, transform: [{ scale: v.interpolate({ inputRange: [0.3, 1], outputRange: [0.7, 1] }) }] }]}
           />
         ))}
       </View>
@@ -123,12 +114,10 @@ function TypingBubble() {
   );
 }
 
-// ─── Animated message wrapper — soft fade + slide on mount ────
 function AnimatedMessage({ children, fromMe }: { children: React.ReactNode; fromMe: boolean }) {
   const opacity = useRef(new Animated.Value(0)).current;
   const translateY = useRef(new Animated.Value(8)).current;
   const translateX = useRef(new Animated.Value(fromMe ? 14 : -14)).current;
-
   useEffect(() => {
     Animated.parallel([
       Animated.timing(opacity, { toValue: 1, duration: 200, useNativeDriver: true }),
@@ -136,7 +125,6 @@ function AnimatedMessage({ children, fromMe }: { children: React.ReactNode; from
       Animated.spring(translateX, { toValue: 0, damping: 18, stiffness: 240, useNativeDriver: true }),
     ]).start();
   }, [opacity, translateY, translateX]);
-
   return (
     <Animated.View style={{ opacity, transform: [{ translateY }, { translateX }] }}>
       {children}
@@ -144,9 +132,7 @@ function AnimatedMessage({ children, fromMe }: { children: React.ReactNode; from
   );
 }
 
-// ─── Prepare grouped messages with date separators ───
 const GROUP_WINDOW_MS = 5 * 60 * 1000;
-
 function buildTimeline(messages: any[]) {
   const out: any[] = [];
   let lastDate: Date | null = null;
@@ -175,6 +161,64 @@ function buildTimeline(messages: any[]) {
   return out;
 }
 
+// Voice-note bubble — tap to play/pause, simple progress bar.
+function VoiceBubble({ url, durationSec, isMe }: { url: string; durationSec?: number | null; isMe: boolean }) {
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const soundRef = useRef<Audio.Sound | null>(null);
+
+  useEffect(() => {
+    return () => {
+      soundRef.current?.unloadAsync().catch(() => {});
+      soundRef.current = null;
+    };
+  }, []);
+
+  const toggle = useCallback(async () => {
+    try {
+      if (!soundRef.current) {
+        const { sound } = await Audio.Sound.createAsync({ uri: url }, { shouldPlay: true });
+        soundRef.current = sound;
+        setIsPlaying(true);
+        sound.setOnPlaybackStatusUpdate((status: any) => {
+          if (!status?.isLoaded) return;
+          if (status.durationMillis) setProgress(status.positionMillis / status.durationMillis);
+          if (status.didJustFinish) {
+            setIsPlaying(false);
+            setProgress(0);
+            sound.setPositionAsync(0).catch(() => {});
+          }
+        });
+        return;
+      }
+      const status: any = await soundRef.current.getStatusAsync();
+      if (status.isPlaying) {
+        await soundRef.current.pauseAsync();
+        setIsPlaying(false);
+      } else {
+        await soundRef.current.playAsync();
+        setIsPlaying(true);
+      }
+    } catch {}
+  }, [url]);
+
+  const fillColor = isMe ? 'rgba(15,13,12,0.85)' : Colors.accentPrimary;
+  const trackColor = isMe ? 'rgba(15,13,12,0.18)' : Colors.borderStrong;
+  return (
+    <View style={styles.voiceRow}>
+      <Pressable onPress={toggle} hitSlop={6} style={[styles.voicePlay, { borderColor: fillColor }]}>
+        <Feather name={isPlaying ? 'pause' : 'play'} size={14} color={fillColor} />
+      </Pressable>
+      <View style={[styles.voiceTrack, { backgroundColor: trackColor }]}>
+        <View style={[styles.voiceFill, { backgroundColor: fillColor, width: `${Math.round(progress * 100)}%` }]} />
+      </View>
+      <Text style={[styles.voiceTime, { color: isMe ? 'rgba(15,13,12,0.65)' : Colors.textMuted }]}>
+        {fmtDuration(durationSec ?? 0)}
+      </Text>
+    </View>
+  );
+}
+
 export default function MessageThread() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
@@ -192,25 +236,61 @@ export default function MessageThread() {
   const [stickerOpen, setStickerOpen] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  const [replyTo, setReplyTo] = useState<any>(null);
+  const [actionMsg, setActionMsg] = useState<any>(null);
+  const [gifOpen, setGifOpen] = useState(false);
+  const [gifQuery, setGifQuery] = useState('');
+  const [gifs, setGifs] = useState<any[]>([]);
+  const [gifLoading, setGifLoading] = useState(false);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [recording, setRecording] = useState<Audio.Recording | null>(null);
+  const [recordingDur, setRecordingDur] = useState(0);
+  const [uploadingAudio, setUploadingAudio] = useState(false);
+  const recTimerRef = useRef<any>(null);
+  const lastTapRef = useRef<{ id: string; at: number } | null>(null);
   const listRef = useRef<FlatList>(null);
   const fb = useFeedback();
-
-  // Send button bounce on tap
   const sendScale = useRef(new Animated.Value(1)).current;
 
   const load = useCallback(async () => {
     try {
       const [tRes, mRes] = await Promise.all([
         messagesApi.thread(id),
-        messagesApi.messages(id),
+        messagesApi.messages(id, { limit: 30 }),
       ]);
       setThread(tRes.data?.data);
-      setMessages(mRes.data?.data ?? []);
+      const msgs = mRes.data?.data ?? [];
+      setMessages(msgs);
+      // The first (oldest in returned slice) message id is our cursor for the next page.
+      if (msgs.length >= 30) {
+        setCursor(msgs[0]?.id ?? null);
+        setHasMore(true);
+      } else {
+        setHasMore(false);
+      }
     } catch {}
     finally { setLoading(false); }
   }, [id]);
 
   useEffect(() => { load(); }, [load]);
+
+  const loadMore = useCallback(async () => {
+    if (!cursor || loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    try {
+      const r = await messagesApi.messages(id, { cursor, limit: 30 });
+      const older = r.data?.data ?? [];
+      if (older.length === 0) {
+        setHasMore(false);
+      } else {
+        setMessages((prev) => [...older, ...prev]);
+        setCursor(older[0]?.id ?? null);
+        if (older.length < 30) setHasMore(false);
+      }
+    } catch {} finally { setLoadingMore(false); }
+  }, [cursor, loadingMore, hasMore, id]);
 
   const handleIncoming = useCallback((msg: any) => {
     if (!msg?.id) return;
@@ -224,10 +304,23 @@ export default function MessageThread() {
     setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 80);
   }, [fb, me?.id]);
 
+  const handleReaction = useCallback((payload: any) => {
+    const messageId = payload?.messageId ?? payload?.data?.messageId ?? payload?.id;
+    const reactions = payload?.reactions ?? payload?.data?.reactions;
+    if (!messageId || !Array.isArray(reactions)) return;
+    setMessages((prev) => prev.map((m) => (m.id === messageId ? { ...m, reactions } : m)));
+  }, []);
+
+  const handleDeleted = useCallback((payload: any) => {
+    const mid = payload?.id ?? payload?.messageId;
+    if (!mid) return;
+    setMessages((prev) => prev.filter((m) => m.id !== mid));
+  }, []);
+
   const { otherOnline, typingUserIds, emitTyping, markRead } = useThreadSocket(
     id,
     handleIncoming,
-    { otherUserId: thread?.otherUser?.id },
+    { otherUserId: thread?.otherUser?.id, onReaction: handleReaction, onDeleted: handleDeleted },
   );
 
   useEffect(() => {
@@ -236,44 +329,86 @@ export default function MessageThread() {
     }
   }, [loading, messages, me?.id, markRead]);
 
-  async function sendPayload(payload: { content?: string; imageUrl?: string; stickerKey?: string }) {
+  // Optimistic send: push a temp message immediately, then reconcile with the
+  // server response. On failure, mark as failed so the user can retry inline.
+  const sendPayload = useCallback(async (
+    payload: { content?: string; imageUrl?: string; stickerKey?: string; audioUrl?: string; audioDurationSec?: number; replyToId?: string },
+    opts: { tempId?: string } = {},
+  ) => {
     setSending(true);
     fb.send();
     Animated.sequence([
       Animated.timing(sendScale, { toValue: 0.85, duration: 90, useNativeDriver: true }),
       Animated.spring(sendScale, { toValue: 1, damping: 12, stiffness: 320, useNativeDriver: true }),
     ]).start();
+    const tempId = opts.tempId ?? `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    // Insert optimistic bubble
+    const optimistic = {
+      id: tempId,
+      senderId: me?.id,
+      content: payload.content ?? null,
+      imageUrl: payload.imageUrl ?? null,
+      stickerKey: payload.stickerKey ?? null,
+      audioUrl: payload.audioUrl ?? null,
+      audioDurationSec: payload.audioDurationSec ?? null,
+      replyToId: payload.replyToId ?? null,
+      replyTo: payload.replyToId ? messages.find((x) => x.id === payload.replyToId) ?? null : null,
+      reactions: [],
+      createdAt: new Date().toISOString(),
+      isRead: false,
+      _status: 'sending' as 'sending' | 'failed' | 'sent',
+      _payload: payload,
+    };
+    setMessages((m) => {
+      const without = m.filter((x) => x.id !== tempId);
+      return [...without, optimistic];
+    });
+    setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 50);
     try {
       const r = await messagesApi.send(id, payload);
-      const newMsg = r.data?.data;
-      if (newMsg) {
-        setMessages((m) => (m.some((x) => x.id === newMsg.id) ? m : [...m, newMsg]));
-      }
-      setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 80);
+      const real = r.data?.data;
+      setMessages((m) => {
+        const without = m.filter((x) => x.id !== tempId && x.id !== real?.id);
+        return real ? [...without, real] : without;
+      });
     } catch {
       fb.error();
+      setMessages((m) => m.map((x) => (x.id === tempId ? { ...x, _status: 'failed' } : x)));
       throw new Error('send failed');
     } finally {
       setSending(false);
     }
-  }
+  }, [fb, id, me?.id, messages, sendScale]);
 
   async function send() {
     const body = text.trim();
     if (!body) return;
     setText('');
     emitTyping(false);
+    const replyId = replyTo?.id;
+    setReplyTo(null);
     try {
-      await sendPayload({ content: body });
+      await sendPayload({ content: body, replyToId: replyId });
     } catch {
-      setText(body);
+      // optimistic bubble keeps body — composer is empty already
     }
+  }
+
+  async function retrySend(msg: any) {
+    if (!msg?._payload) return;
+    setMessages((m) => m.map((x) => (x.id === msg.id ? { ...x, _status: 'sending' } : x)));
+    try {
+      await sendPayload(msg._payload, { tempId: msg.id });
+    } catch {}
+  }
+
+  function discardFailed(msg: any) {
+    setMessages((m) => m.filter((x) => x.id !== msg.id));
   }
 
   async function pickAndSendImage(source: 'camera' | 'library') {
     setAttachOpen(false);
     try {
-      // Permission gating
       if (source === 'camera') {
         const perm = await ImagePicker.requestCameraPermissionsAsync();
         if (!perm.granted) {
@@ -287,15 +422,15 @@ export default function MessageThread() {
           return;
         }
       }
-
       const result = source === 'camera'
         ? await ImagePicker.launchCameraAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.9 })
         : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.9 });
       if (result.canceled || !result.assets?.[0]?.uri) return;
-
       setUploadingImage(true);
       const url = await uploadImage(result.assets[0].uri, { kind: 'post' });
-      await sendPayload({ imageUrl: url });
+      const replyId = replyTo?.id;
+      setReplyTo(null);
+      await sendPayload({ imageUrl: url, replyToId: replyId });
     } catch (err: any) {
       fb.error();
       Alert.alert('Error', err?.message ?? 'Upload failed');
@@ -306,10 +441,175 @@ export default function MessageThread() {
 
   async function sendSticker(emoji: string) {
     setStickerOpen(false);
-    try {
-      await sendPayload({ stickerKey: emoji });
-    } catch {}
+    const replyId = replyTo?.id;
+    setReplyTo(null);
+    try { await sendPayload({ stickerKey: emoji, replyToId: replyId }); } catch {}
   }
+
+  // ── Voice notes ───────────────────────────────
+  const startRecording = useCallback(async () => {
+    try {
+      const perm = await Audio.requestPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert(t ? 'Micrófono' : 'Microphone', t ? 'Necesitamos permiso para grabar audio.' : 'We need mic permission.');
+        return;
+      }
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+      } as any);
+      const rec = new Audio.Recording();
+      await rec.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+      await rec.startAsync();
+      setRecording(rec);
+      setRecordingDur(0);
+      fb.tap();
+      recTimerRef.current = setInterval(() => setRecordingDur((d) => d + 1), 1000);
+    } catch (err: any) {
+      Alert.alert('Error', err?.message ?? 'Recording failed');
+    }
+  }, [fb, t]);
+
+  const cancelRecording = useCallback(async () => {
+    if (recTimerRef.current) clearInterval(recTimerRef.current);
+    recTimerRef.current = null;
+    setRecordingDur(0);
+    try { await recording?.stopAndUnloadAsync(); } catch {}
+    setRecording(null);
+  }, [recording]);
+
+  const stopAndSendRecording = useCallback(async () => {
+    const rec = recording;
+    if (!rec) return;
+    if (recTimerRef.current) clearInterval(recTimerRef.current);
+    recTimerRef.current = null;
+    const duration = recordingDur;
+    setRecording(null);
+    setRecordingDur(0);
+    try {
+      await rec.stopAndUnloadAsync();
+      const uri = rec.getURI();
+      if (!uri) return;
+      if (duration < 1) return;
+      setUploadingAudio(true);
+      const url = await uploadAudio(uri);
+      const replyId = replyTo?.id;
+      setReplyTo(null);
+      await sendPayload({ audioUrl: url, audioDurationSec: duration, replyToId: replyId });
+    } catch (err: any) {
+      fb.error();
+      Alert.alert('Error', err?.message ?? 'Upload failed');
+    } finally {
+      setUploadingAudio(false);
+    }
+  }, [recording, recordingDur, replyTo?.id, sendPayload, fb]);
+
+  // ── Reactions ─────────────────────────────────
+  const reactToMessage = useCallback(async (msg: any, emoji: string) => {
+    if (!me?.id) return;
+    const existing = (msg.reactions ?? []).some((r: any) => r.userId === me.id && r.emoji === emoji);
+    // Optimistic
+    setMessages((prev) => prev.map((m) => {
+      if (m.id !== msg.id) return m;
+      const cur = m.reactions ?? [];
+      const next = existing
+        ? cur.filter((r: any) => !(r.userId === me.id && r.emoji === emoji))
+        : [...cur, { userId: me.id, emoji }];
+      return { ...m, reactions: next };
+    }));
+    fb.tap();
+    try {
+      if (existing) await messagesApi.unreact(msg.id, emoji);
+      else await messagesApi.react(msg.id, emoji);
+    } catch {
+      // Revert on failure
+      setMessages((prev) => prev.map((m) => (m.id === msg.id ? { ...m, reactions: msg.reactions ?? [] } : m)));
+    }
+  }, [me?.id, fb]);
+
+  // Double-tap heart
+  const handleBubbleTap = useCallback((msg: any) => {
+    const now = Date.now();
+    const last = lastTapRef.current;
+    if (last && last.id === msg.id && now - last.at < 280) {
+      reactToMessage(msg, '❤️');
+      lastTapRef.current = null;
+    } else {
+      lastTapRef.current = { id: msg.id, at: now };
+    }
+  }, [reactToMessage]);
+
+  // ── Long-press menu ────────────────────────────
+  const openMenu = useCallback((msg: any) => {
+    if (msg._status === 'sending' || msg._status === 'failed') return;
+    fb.tap();
+    setActionMsg(msg);
+  }, [fb]);
+
+  const menuCopy = useCallback(() => {
+    if (actionMsg?.content) Clipboard.setString(actionMsg.content);
+    setActionMsg(null);
+  }, [actionMsg]);
+
+  const menuReply = useCallback(() => {
+    setReplyTo(actionMsg);
+    setActionMsg(null);
+  }, [actionMsg]);
+
+  const menuDelete = useCallback(async () => {
+    if (!actionMsg) return;
+    const m = actionMsg;
+    setActionMsg(null);
+    if (m.senderId !== me?.id) return;
+    Alert.alert(
+      t ? 'Eliminar mensaje' : 'Delete message',
+      t ? '¿Eliminar este mensaje? No se podrá recuperar.' : 'Delete this message? It cannot be recovered.',
+      [
+        { text: t ? 'Cancelar' : 'Cancel', style: 'cancel' },
+        {
+          text: t ? 'Eliminar' : 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            setMessages((prev) => prev.filter((x) => x.id !== m.id));
+            try { await messagesApi.deleteMessage(m.id); } catch {}
+          },
+        },
+      ],
+    );
+  }, [actionMsg, me?.id, t]);
+
+  // ── GIF picker ────────────────────────────────
+  const searchGifs = useCallback(async (q: string) => {
+    setGifLoading(true);
+    try {
+      const url = q.trim().length > 0
+        ? `https://api.giphy.com/v1/gifs/search?api_key=${GIPHY_KEY}&q=${encodeURIComponent(q)}&limit=24&rating=pg-13`
+        : `https://api.giphy.com/v1/gifs/trending?api_key=${GIPHY_KEY}&limit=24&rating=pg-13`;
+      const r = await fetch(url);
+      const j = await r.json();
+      setGifs(j?.data ?? []);
+    } catch {
+      setGifs([]);
+    } finally {
+      setGifLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!gifOpen) return;
+    const handle = setTimeout(() => searchGifs(gifQuery), gifQuery ? 400 : 0);
+    return () => clearTimeout(handle);
+  }, [gifOpen, gifQuery, searchGifs]);
+
+  const sendGif = useCallback(async (gif: any) => {
+    const url = gif?.images?.original?.url ?? gif?.images?.fixed_height?.url;
+    if (!url) return;
+    setGifOpen(false);
+    setGifQuery('');
+    const replyId = replyTo?.id;
+    setReplyTo(null);
+    try { await sendPayload({ imageUrl: url, replyToId: replyId }); } catch {}
+  }, [replyTo?.id, sendPayload]);
 
   const other = thread?.otherUser;
   const isOtherTyping = !!other?.id && typingUserIds.has(other.id);
@@ -320,27 +620,24 @@ export default function MessageThread() {
 
   const timeline = useMemo(() => {
     const tl = buildTimeline(messages);
-    if (isOtherTyping) {
-      tl.push({ type: 'typing', id: '__typing__' });
-    }
+    if (isOtherTyping) tl.push({ type: 'typing', id: '__typing__' });
     return tl;
   }, [messages, isOtherTyping]);
 
   const lastReadMineId = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i];
-      if (m.senderId === me?.id && m.isRead) return m.id;
+      if (m.senderId === me?.id && m.isRead && !m._status) return m.id;
     }
     return null;
   }, [messages, me?.id]);
   const lastSentMineId = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].senderId === me?.id) return messages[i].id;
+      if (messages[i].senderId === me?.id && !messages[i]._status) return messages[i].id;
     }
     return null;
   }, [messages, me?.id]);
 
-  // Tiny avatar component used next to "them" bubbles on group end
   const ThemAvatar = ({ visible }: { visible: boolean }) => {
     if (!visible) return <View style={styles.themAvatarSpacer} />;
     return other?.profile?.avatarUrl ? (
@@ -352,6 +649,46 @@ export default function MessageThread() {
     );
   };
 
+  const ReplyQuote = ({ q, isMe }: { q: any; isMe: boolean }) => {
+    if (!q) return null;
+    const isMyQuote = q.senderId === me?.id;
+    const author = isMyQuote ? (t ? 'Tú' : 'You') : name;
+    const preview = q.content
+      ? q.content.slice(0, 80)
+      : q.imageUrl
+        ? (t ? '📷 Foto' : '📷 Photo')
+        : q.audioUrl
+          ? (t ? '🎤 Nota de voz' : '🎤 Voice note')
+          : q.stickerKey
+            ? `${q.stickerKey}`
+            : '…';
+    return (
+      <View style={[styles.replyQuote, isMe ? styles.replyQuoteMe : styles.replyQuoteThem]}>
+        <View style={[styles.replyBar, { backgroundColor: isMe ? 'rgba(15,13,12,0.55)' : Colors.accentPrimary }]} />
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.replyAuthor, { color: isMe ? 'rgba(15,13,12,0.85)' : Colors.accentPrimary }]} numberOfLines={1}>
+            {author}
+          </Text>
+          <Text style={[styles.replyPreview, { color: isMe ? 'rgba(15,13,12,0.75)' : Colors.textSecondary }]} numberOfLines={1}>
+            {preview}
+          </Text>
+        </View>
+      </View>
+    );
+  };
+
+  // Aggregate reactions {emoji -> { count, mine }} for chip render.
+  function aggReactions(reactions: any[]) {
+    const map = new Map<string, { count: number; mine: boolean }>();
+    for (const r of reactions || []) {
+      const cur = map.get(r.emoji) ?? { count: 0, mine: false };
+      cur.count += 1;
+      if (r.userId === me?.id) cur.mine = true;
+      map.set(r.emoji, cur);
+    }
+    return Array.from(map.entries()).map(([emoji, v]) => ({ emoji, ...v }));
+  }
+
   return (
     <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
       <KeyboardAvoidingView
@@ -359,7 +696,6 @@ export default function MessageThread() {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={0}
       >
-        {/* Header — premium with serif name */}
         <View style={styles.header}>
           <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn} hitSlop={10}>
             <Feather name="chevron-left" size={24} color={Colors.textPrimary} />
@@ -419,6 +755,15 @@ export default function MessageThread() {
             keyExtractor={(x) => x.id}
             contentContainerStyle={{ paddingHorizontal: 12, paddingVertical: 16, flexGrow: 1 }}
             onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
+            onScroll={(e) => {
+              if (e.nativeEvent.contentOffset.y < 80 && hasMore && !loadingMore) loadMore();
+            }}
+            scrollEventThrottle={300}
+            ListHeaderComponent={loadingMore ? (
+              <View style={{ paddingVertical: 12 }}>
+                <ActivityIndicator color={Colors.accentPrimary} size="small" />
+              </View>
+            ) : null}
             renderItem={({ item }) => {
               if (item.type === 'date') {
                 return (
@@ -429,16 +774,18 @@ export default function MessageThread() {
                   </View>
                 );
               }
-              if (item.type === 'typing') {
-                return <TypingBubble />;
-              }
+              if (item.type === 'typing') return <TypingBubble />;
+
               const m = item.msg;
               const isMe = m.senderId === me?.id;
               const { isFirstInGroup, isLastInGroup, at } = item;
               const isSticker = !!m.stickerKey;
               const isImage = !!m.imageUrl && !isSticker;
+              const isVoice = !!m.audioUrl && !isImage && !isSticker;
+              const isFailed = m._status === 'failed';
+              const isPending = m._status === 'sending';
+              const reactions = aggReactions(m.reactions ?? []);
 
-              // Tail radius — sharper corner on the speaker side at group end
               const bubbleStyle = [
                 styles.bubble,
                 isImage ? styles.bubbleImage : isMe ? styles.bubbleMe : styles.bubbleThem,
@@ -448,6 +795,7 @@ export default function MessageThread() {
                   borderBottomLeftRadius: !isMe && !isLastInGroup ? 8 : isMe ? 20 : 6,
                   borderBottomRightRadius: isMe && !isLastInGroup ? 8 : isMe ? 6 : 20,
                 },
+                isPending && { opacity: 0.7 },
               ];
 
               const showMeta = isLastInGroup;
@@ -465,71 +813,115 @@ export default function MessageThread() {
                   >
                     {!isMe && <ThemAvatar visible={isLastInGroup} />}
 
-                    {isSticker ? (
-                      // Sticker — no bubble, big emoji + meta row underneath
-                      <View style={[styles.stickerWrap, isMe ? { alignItems: 'flex-end' } : { alignItems: 'flex-start' }]}>
-                        <Text style={styles.stickerGlyph}>{m.stickerKey}</Text>
-                        {showMeta && (
-                          <View style={styles.stickerMetaRow}>
-                            <Text style={styles.bubbleTime}>{at ? fmtTime(at, language) : ''}</Text>
-                            {showReadTick && (
-                              <Feather
-                                name={isRead ? 'check-circle' : 'check'}
-                                size={11}
-                                color={isRead ? Colors.accentPrimary : Colors.textMuted}
-                                style={{ marginLeft: 4 }}
+                    <View style={{ maxWidth: '78%' }}>
+                      {isSticker ? (
+                        <Pressable
+                          onPress={() => handleBubbleTap(m)}
+                          onLongPress={() => openMenu(m)}
+                          delayLongPress={280}
+                          style={[styles.stickerWrap, isMe ? { alignItems: 'flex-end' } : { alignItems: 'flex-start' }]}
+                        >
+                          {m.replyTo && <ReplyQuote q={m.replyTo} isMe={isMe} />}
+                          <Text style={styles.stickerGlyph}>{m.stickerKey}</Text>
+                          {showMeta && (
+                            <View style={styles.stickerMetaRow}>
+                              <Text style={styles.bubbleTime}>{at ? fmtTime(at, language) : ''}</Text>
+                              {showReadTick && (
+                                <Feather
+                                  name={isRead ? 'check-circle' : 'check'}
+                                  size={11}
+                                  color={isRead ? Colors.accentPrimary : Colors.textMuted}
+                                  style={{ marginLeft: 4 }}
+                                />
+                              )}
+                            </View>
+                          )}
+                        </Pressable>
+                      ) : (
+                        <Pressable
+                          onPress={() => handleBubbleTap(m)}
+                          onLongPress={() => openMenu(m)}
+                          delayLongPress={280}
+                          style={bubbleStyle}
+                        >
+                          {m.replyTo && <ReplyQuote q={m.replyTo} isMe={isMe} />}
+                          {isImage ? (
+                            <Pressable onPress={() => setLightboxUrl(m.imageUrl)} onLongPress={() => openMenu(m)}>
+                              <Image
+                                source={{ uri: m.imageUrl }}
+                                style={styles.imageThumb}
+                                resizeMode="cover"
                               />
-                            )}
-                          </View>
-                        )}
-                      </View>
-                    ) : (
-                      <View style={bubbleStyle}>
-                        {isImage ? (
-                          <Pressable onPress={() => setLightboxUrl(m.imageUrl)}>
-                            <Image
-                              source={{ uri: m.imageUrl }}
-                              style={styles.imageThumb}
-                              resizeMode="cover"
-                            />
-                            {!!m.content && (
-                              <Text style={styles.imageCaption}>{m.content}</Text>
-                            )}
-                          </Pressable>
-                        ) : (
-                          <Text style={[styles.bubbleText, isMe ? styles.bubbleTextMe : styles.bubbleTextThem]}>
-                            {m.content}
-                          </Text>
-                        )}
-                        {showMeta && (
-                          <View style={[styles.metaRow, isImage && styles.metaRowOnImage]}>
-                            <Text
-                              style={[
-                                styles.bubbleTime,
-                                isMe && !isImage && styles.bubbleTimeMe,
-                                isImage && styles.bubbleTimeOnImage,
-                              ]}
-                            >
-                              {at ? fmtTime(at, language) : ''}
+                              {!!m.content && <Text style={styles.imageCaption}>{m.content}</Text>}
+                            </Pressable>
+                          ) : isVoice ? (
+                            <VoiceBubble url={m.audioUrl} durationSec={m.audioDurationSec} isMe={isMe} />
+                          ) : (
+                            <Text style={[styles.bubbleText, isMe ? styles.bubbleTextMe : styles.bubbleTextThem]}>
+                              {m.content}
                             </Text>
-                            {showReadTick && (
-                              <Feather
-                                name={isRead ? 'check-circle' : 'check'}
-                                size={11}
-                                color={
-                                  isImage
-                                    ? '#fff'
-                                    : isRead
-                                      ? 'rgba(15,13,12,0.85)'
-                                      : 'rgba(15,13,12,0.45)'
-                                }
-                                style={{ marginLeft: 4 }}
-                              />
-                            )}
-                          </View>
-                        )}
-                      </View>
-                    )}
+                          )}
+                          {showMeta && (
+                            <View style={[styles.metaRow, isImage && styles.metaRowOnImage]}>
+                              <Text
+                                style={[
+                                  styles.bubbleTime,
+                                  isMe && !isImage && styles.bubbleTimeMe,
+                                  isImage && styles.bubbleTimeOnImage,
+                                ]}
+                              >
+                                {at ? fmtTime(at, language) : ''}
+                              </Text>
+                              {isPending && (
+                                <Feather name="clock" size={10} color={isMe ? 'rgba(15,13,12,0.55)' : Colors.textMuted} style={{ marginLeft: 4 }} />
+                              )}
+                              {showReadTick && !isPending && (
+                                <Feather
+                                  name={isRead ? 'check-circle' : 'check'}
+                                  size={11}
+                                  color={
+                                    isImage ? '#fff'
+                                      : isRead ? 'rgba(15,13,12,0.85)'
+                                        : 'rgba(15,13,12,0.45)'
+                                  }
+                                  style={{ marginLeft: 4 }}
+                                />
+                              )}
+                            </View>
+                          )}
+                        </Pressable>
+                      )}
+
+                      {/* Failed banner with retry */}
+                      {isFailed && (
+                        <View style={[styles.failedRow, { alignSelf: isMe ? 'flex-end' : 'flex-start' }]}>
+                          <Feather name="alert-circle" size={12} color={Colors.accentDanger} />
+                          <Text style={styles.failedText}>{t ? 'No se envió' : 'Not sent'}</Text>
+                          <Pressable onPress={() => retrySend(m)} hitSlop={6}>
+                            <Text style={styles.failedAction}>{t ? 'Reintentar' : 'Retry'}</Text>
+                          </Pressable>
+                          <Pressable onPress={() => discardFailed(m)} hitSlop={6}>
+                            <Text style={[styles.failedAction, { color: Colors.textMuted }]}>{t ? 'Descartar' : 'Discard'}</Text>
+                          </Pressable>
+                        </View>
+                      )}
+
+                      {/* Reaction chips */}
+                      {reactions.length > 0 && (
+                        <View style={[styles.reactionRow, { alignSelf: isMe ? 'flex-end' : 'flex-start' }]}>
+                          {reactions.map((r) => (
+                            <Pressable
+                              key={r.emoji}
+                              onPress={() => reactToMessage(m, r.emoji)}
+                              style={[styles.reactionChip, r.mine && styles.reactionChipMine]}
+                            >
+                              <Text style={styles.reactionEmoji}>{r.emoji}</Text>
+                              {r.count > 1 && <Text style={styles.reactionCount}>{r.count}</Text>}
+                            </Pressable>
+                          ))}
+                        </View>
+                      )}
+                    </View>
                   </View>
                 </AnimatedMessage>
               );
@@ -565,57 +957,108 @@ export default function MessageThread() {
           />
         )}
 
-        {/* Composer — premium with focus ring + attachment slot */}
-        <View style={styles.compose}>
-          <Pressable
-            style={({ pressed }) => [styles.attachBtn, pressed && { opacity: 0.7 }]}
-            hitSlop={6}
-            onPress={() => { fb.tap(); setAttachOpen(true); }}
-            disabled={sending || uploadingImage}
-          >
-            {uploadingImage
-              ? <ActivityIndicator size="small" color={Colors.accentPrimary} />
-              : <Feather name="plus" size={20} color={Colors.textSecondary} />}
-          </Pressable>
-          <View style={[styles.composeInputWrap, composerFocused && styles.composeInputWrapFocus]}>
-            <TextInput
-              style={styles.composeInput}
-              value={text}
-              onChangeText={(v) => { setText(v); emitTyping(v.length > 0); }}
-              onFocus={() => setComposerFocused(true)}
-              onBlur={() => setComposerFocused(false)}
-              placeholder={t ? 'Mensaje…' : 'Message…'}
-              placeholderTextColor={Colors.textMuted}
-              multiline
-            />
-            <Pressable
-              style={({ pressed }) => [styles.stickerBtn, pressed && { opacity: 0.6 }]}
-              hitSlop={6}
-              onPress={() => { fb.tap(); setStickerOpen(true); }}
-            >
-              <Feather name="smile" size={20} color={Colors.textSecondary} />
+        {/* Reply chip above composer */}
+        {replyTo && (
+          <View style={styles.replyComposeChip}>
+            <View style={styles.replyComposeBar} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.replyComposeAuthor}>
+                {t ? 'Respondiendo a ' : 'Replying to '}
+                <Text style={{ fontFamily: Typography.fontFamily.sansBold }}>
+                  {replyTo.senderId === me?.id ? (t ? 'tu mensaje' : 'your message') : name}
+                </Text>
+              </Text>
+              <Text style={styles.replyComposePreview} numberOfLines={1}>
+                {replyTo.content
+                  ?? (replyTo.imageUrl ? (t ? '📷 Foto' : '📷 Photo')
+                    : replyTo.audioUrl ? (t ? '🎤 Nota de voz' : '🎤 Voice note')
+                      : replyTo.stickerKey ?? '…')}
+              </Text>
+            </View>
+            <Pressable onPress={() => setReplyTo(null)} hitSlop={10}>
+              <Feather name="x" size={18} color={Colors.textSecondary} />
             </Pressable>
           </View>
-          <Animated.View style={{ transform: [{ scale: sendScale }] }}>
-            <Pressable
-              style={({ pressed }) => [
-                styles.sendBtn,
-                (!text.trim() || sending) && styles.sendBtnDisabled,
-                pressed && text.trim() && !sending && { opacity: 0.85 },
-              ]}
-              onPress={send}
-              disabled={!text.trim() || sending}
-              hitSlop={8}
-            >
-              {sending
-                ? <ActivityIndicator color={Colors.textInverse} size="small" />
-                : <Feather name="send" size={17} color={text.trim() ? Colors.textInverse : Colors.textMuted} />}
+        )}
+
+        {/* Voice recording overlay (replaces composer while recording) */}
+        {recording ? (
+          <View style={styles.recordBar}>
+            <View style={styles.recordPulse} />
+            <Text style={styles.recordTime}>{fmtDuration(recordingDur)}</Text>
+            <Text style={styles.recordHint}>{t ? 'Grabando…' : 'Recording…'}</Text>
+            <View style={{ flex: 1 }} />
+            <Pressable onPress={cancelRecording} style={styles.recordCancel} hitSlop={8}>
+              <Feather name="x" size={18} color={Colors.textSecondary} />
             </Pressable>
-          </Animated.View>
-        </View>
+            <Pressable onPress={stopAndSendRecording} style={styles.recordSend} hitSlop={8}>
+              {uploadingAudio
+                ? <ActivityIndicator size="small" color={Colors.textInverse} />
+                : <Feather name="send" size={17} color={Colors.textInverse} />}
+            </Pressable>
+          </View>
+        ) : (
+          <View style={styles.compose}>
+            <Pressable
+              style={({ pressed }) => [styles.attachBtn, pressed && { opacity: 0.7 }]}
+              hitSlop={6}
+              onPress={() => { fb.tap(); setAttachOpen(true); }}
+              disabled={sending || uploadingImage || uploadingAudio}
+            >
+              {uploadingImage || uploadingAudio
+                ? <ActivityIndicator size="small" color={Colors.accentPrimary} />
+                : <Feather name="plus" size={20} color={Colors.textSecondary} />}
+            </Pressable>
+            <View style={[styles.composeInputWrap, composerFocused && styles.composeInputWrapFocus]}>
+              <TextInput
+                style={styles.composeInput}
+                value={text}
+                onChangeText={(v) => { setText(v); emitTyping(v.length > 0); }}
+                onFocus={() => setComposerFocused(true)}
+                onBlur={() => setComposerFocused(false)}
+                placeholder={t ? 'Mensaje…' : 'Message…'}
+                placeholderTextColor={Colors.textMuted}
+                multiline
+              />
+              <Pressable
+                style={({ pressed }) => [styles.stickerBtn, pressed && { opacity: 0.6 }]}
+                hitSlop={6}
+                onPress={() => { fb.tap(); setStickerOpen(true); }}
+              >
+                <Feather name="smile" size={20} color={Colors.textSecondary} />
+              </Pressable>
+            </View>
+            {text.trim().length === 0 ? (
+              <Pressable
+                onPress={startRecording}
+                style={({ pressed }) => [styles.micBtn, pressed && { opacity: 0.7 }]}
+                hitSlop={8}
+              >
+                <Feather name="mic" size={18} color={Colors.textPrimary} />
+              </Pressable>
+            ) : (
+              <Animated.View style={{ transform: [{ scale: sendScale }] }}>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.sendBtn,
+                    sending && styles.sendBtnDisabled,
+                    pressed && !sending && { opacity: 0.85 },
+                  ]}
+                  onPress={send}
+                  disabled={sending}
+                  hitSlop={8}
+                >
+                  {sending
+                    ? <ActivityIndicator color={Colors.textInverse} size="small" />
+                    : <Feather name="send" size={17} color={Colors.textInverse} />}
+                </Pressable>
+              </Animated.View>
+            )}
+          </View>
+        )}
       </KeyboardAvoidingView>
 
-      {/* Attach action sheet — camera / library */}
+      {/* Attach action sheet */}
       <Modal visible={attachOpen} transparent animationType="fade" onRequestClose={() => setAttachOpen(false)}>
         <Pressable style={styles.sheetBackdrop} onPress={() => setAttachOpen(false)}>
           <Pressable style={styles.sheet}>
@@ -648,6 +1091,15 @@ export default function MessageThread() {
               </View>
               <Text style={styles.sheetLabel}>{t ? 'Sticker' : 'Sticker'}</Text>
             </Pressable>
+            <Pressable
+              style={({ pressed }) => [styles.sheetRow, pressed && { opacity: 0.7 }]}
+              onPress={() => { setAttachOpen(false); setGifOpen(true); setGifQuery(''); }}
+            >
+              <View style={[styles.sheetIcon, { backgroundColor: '#A855F714', borderColor: '#A855F733' }]}>
+                <Text style={{ color: '#A855F7', fontSize: 12, fontFamily: Typography.fontFamily.sansBold, letterSpacing: 0.5 }}>GIF</Text>
+              </View>
+              <Text style={styles.sheetLabel}>GIF</Text>
+            </Pressable>
           </Pressable>
         </Pressable>
       </Modal>
@@ -675,6 +1127,47 @@ export default function MessageThread() {
         </Pressable>
       </Modal>
 
+      {/* GIF picker */}
+      <Modal visible={gifOpen} transparent animationType="fade" onRequestClose={() => setGifOpen(false)}>
+        <Pressable style={styles.sheetBackdrop} onPress={() => setGifOpen(false)}>
+          <Pressable style={[styles.sheet, { paddingBottom: 24, maxHeight: '80%' }]}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.sheetTitle}>GIFs</Text>
+            <View style={styles.gifSearchWrap}>
+              <Feather name="search" size={16} color={Colors.textMuted} />
+              <TextInput
+                style={styles.gifSearch}
+                value={gifQuery}
+                onChangeText={setGifQuery}
+                placeholder={t ? 'Busca GIFs…' : 'Search GIFs…'}
+                placeholderTextColor={Colors.textMuted}
+                autoFocus
+              />
+            </View>
+            {gifLoading ? (
+              <View style={{ padding: 32 }}><ActivityIndicator color={Colors.accentPrimary} /></View>
+            ) : (
+              <ScrollView style={{ maxHeight: 480 }} contentContainerStyle={styles.gifGrid}>
+                {gifs.map((g) => {
+                  const url = g?.images?.fixed_height_small?.url ?? g?.images?.fixed_height?.url;
+                  if (!url) return null;
+                  return (
+                    <Pressable key={g.id} onPress={() => sendGif(g)} style={styles.gifCell}>
+                      <Image source={{ uri: url }} style={styles.gifImage} />
+                    </Pressable>
+                  );
+                })}
+                {gifs.length === 0 && (
+                  <Text style={{ color: Colors.textMuted, padding: 24, textAlign: 'center', width: '100%' }}>
+                    {t ? 'Sin resultados' : 'No results'}
+                  </Text>
+                )}
+              </ScrollView>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
+
       {/* Image lightbox */}
       <Modal visible={!!lightboxUrl} transparent animationType="fade" onRequestClose={() => setLightboxUrl(null)}>
         <Pressable style={styles.lightboxBackdrop} onPress={() => setLightboxUrl(null)}>
@@ -686,6 +1179,48 @@ export default function MessageThread() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {/* Long-press action menu */}
+      <Modal visible={!!actionMsg} transparent animationType="fade" onRequestClose={() => setActionMsg(null)}>
+        <Pressable style={styles.sheetBackdrop} onPress={() => setActionMsg(null)}>
+          <Pressable style={[styles.sheet, { paddingBottom: 24 }]}>
+            <View style={styles.sheetHandle} />
+            <View style={styles.quickReactions}>
+              {QUICK_REACTIONS.map((emoji) => (
+                <Pressable
+                  key={emoji}
+                  onPress={() => { if (actionMsg) reactToMessage(actionMsg, emoji); setActionMsg(null); }}
+                  style={({ pressed }) => [styles.quickReactionBtn, pressed && { transform: [{ scale: 0.85 }] }]}
+                >
+                  <Text style={styles.quickReactionEmoji}>{emoji}</Text>
+                </Pressable>
+              ))}
+            </View>
+            <Pressable style={({ pressed }) => [styles.sheetRow, pressed && { opacity: 0.7 }]} onPress={menuReply}>
+              <View style={[styles.sheetIcon, { backgroundColor: Colors.accentPrimary + '14', borderColor: Colors.accentPrimary + '33' }]}>
+                <Feather name="corner-up-left" size={18} color={Colors.accentPrimary} />
+              </View>
+              <Text style={styles.sheetLabel}>{t ? 'Responder' : 'Reply'}</Text>
+            </Pressable>
+            {!!actionMsg?.content && (
+              <Pressable style={({ pressed }) => [styles.sheetRow, pressed && { opacity: 0.7 }]} onPress={menuCopy}>
+                <View style={[styles.sheetIcon, { backgroundColor: Colors.accentInfo + '14', borderColor: Colors.accentInfo + '33' }]}>
+                  <Feather name="copy" size={18} color={Colors.accentInfo} />
+                </View>
+                <Text style={styles.sheetLabel}>{t ? 'Copiar' : 'Copy'}</Text>
+              </Pressable>
+            )}
+            {actionMsg?.senderId === me?.id && (
+              <Pressable style={({ pressed }) => [styles.sheetRow, pressed && { opacity: 0.7 }]} onPress={menuDelete}>
+                <View style={[styles.sheetIcon, { backgroundColor: Colors.accentDanger + '14', borderColor: Colors.accentDanger + '33' }]}>
+                  <Feather name="trash-2" size={18} color={Colors.accentDanger} />
+                </View>
+                <Text style={[styles.sheetLabel, { color: Colors.accentDanger }]}>{t ? 'Eliminar' : 'Delete'}</Text>
+              </Pressable>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -694,7 +1229,6 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
-  // ── Header ────────────────────────────────────
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -706,16 +1240,12 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.bgPrimary,
     ...Shadows.sm,
   },
-  iconBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    alignItems: 'center', justifyContent: 'center',
-  },
+  iconBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   headerMid: { flexDirection: 'row', alignItems: 'center', flex: 1, marginHorizontal: 4 },
   headerAvatar: {
     width: 40, height: 40, borderRadius: 20,
     alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: Colors.border,
+    borderWidth: 1, borderColor: Colors.border,
   },
   headerAvatarText: { color: Colors.textInverse, fontSize: 14, fontFamily: Typography.fontFamily.sansBold },
   headerName: {
@@ -725,36 +1255,22 @@ const styles = StyleSheet.create({
     letterSpacing: Typography.letterSpacing.tight,
   },
   headerSubRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 },
-  statusDot: {
-    width: 6, height: 6, borderRadius: 3,
-  },
+  statusDot: { width: 6, height: 6, borderRadius: 3 },
   headerSub: {
     color: Colors.textSecondary,
     fontSize: Typography.fontSize.xs,
     fontFamily: Typography.fontFamily.sansMedium,
   },
   onlineDot: {
-    position: 'absolute',
-    right: -1,
-    bottom: -1,
-    width: 12,
-    height: 12,
-    borderRadius: 6,
+    position: 'absolute', right: -1, bottom: -1,
+    width: 12, height: 12, borderRadius: 6,
     backgroundColor: Colors.accentSuccess,
-    borderWidth: 2.5,
-    borderColor: Colors.bgPrimary,
+    borderWidth: 2.5, borderColor: Colors.bgPrimary,
   },
 
-  // ── Date separators (chip style) ────────────
-  dateRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginVertical: 16,
-  },
+  dateRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginVertical: 16 },
   dateChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 5,
+    paddingHorizontal: 12, paddingVertical: 5,
     borderRadius: Radius.full,
     backgroundColor: Colors.bgCard,
     borderWidth: StyleSheet.hairlineWidth,
@@ -768,79 +1284,82 @@ const styles = StyleSheet.create({
     textTransform: 'capitalize',
   },
 
-  // ── Message bubbles ─────────────────────────
   msgRow: { flexDirection: 'row', paddingHorizontal: 4, alignItems: 'flex-end', gap: 6 },
   msgRowMe: { justifyContent: 'flex-end' },
   msgRowThem: { justifyContent: 'flex-start' },
-  themAvatar: {
-    width: 26, height: 26, borderRadius: 13,
-    alignItems: 'center', justifyContent: 'center',
-    marginBottom: 2,
-  },
+  themAvatar: { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center', marginBottom: 2 },
   themAvatarSpacer: { width: 26, marginBottom: 2 },
-  themAvatarText: {
-    color: Colors.textInverse,
-    fontSize: 10,
-    fontFamily: Typography.fontFamily.sansBold,
-  },
-  bubble: {
-    maxWidth: '74%',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    ...Shadows.sm,
-  },
-  bubbleMe: {
-    backgroundColor: Colors.accentPrimary,
-  },
-  bubbleThem: {
-    backgroundColor: Colors.bgCard,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: Colors.borderStrong,
-  },
-  bubbleImage: {
-    backgroundColor: Colors.bgCard,
-    padding: 4,
-    overflow: 'hidden',
-  },
-  imageThumb: {
-    width: 220,
-    height: 220,
-    borderRadius: 14,
-    backgroundColor: Colors.bgElevated,
-  },
+  themAvatarText: { color: Colors.textInverse, fontSize: 10, fontFamily: Typography.fontFamily.sansBold },
+  bubble: { paddingHorizontal: 14, paddingVertical: 10, ...Shadows.sm },
+  bubbleMe: { backgroundColor: Colors.accentPrimary },
+  bubbleThem: { backgroundColor: Colors.bgCard, borderWidth: StyleSheet.hairlineWidth, borderColor: Colors.borderStrong },
+  bubbleImage: { backgroundColor: Colors.bgCard, padding: 4, overflow: 'hidden' },
+  imageThumb: { width: 220, height: 220, borderRadius: 14, backgroundColor: Colors.bgElevated },
   imageCaption: {
-    color: Colors.textPrimary,
-    fontFamily: Typography.fontFamily.sans,
-    fontSize: Typography.fontSize.base,
-    paddingHorizontal: 8,
-    paddingTop: 8,
-    paddingBottom: 4,
+    color: Colors.textPrimary, fontFamily: Typography.fontFamily.sans,
+    fontSize: Typography.fontSize.base, paddingHorizontal: 8, paddingTop: 8, paddingBottom: 4,
   },
   metaRowOnImage: {
-    position: 'absolute',
-    right: 10,
-    bottom: 10,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: Radius.full,
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    position: 'absolute', right: 10, bottom: 10,
+    paddingHorizontal: 8, paddingVertical: 3,
+    borderRadius: Radius.full, backgroundColor: 'rgba(0,0,0,0.55)',
   },
   bubbleTimeOnImage: { color: '#fff' },
 
-  // Sticker (no bubble)
-  stickerWrap: {
-    maxWidth: '74%',
-    paddingVertical: 4,
+  // Reply quote rendered inside a bubble
+  replyQuote: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingVertical: 6, paddingRight: 10, paddingLeft: 8,
+    borderRadius: 10, gap: 8, marginBottom: 6,
   },
-  stickerGlyph: {
-    fontSize: 78,
-    lineHeight: 92,
+  replyQuoteMe: { backgroundColor: 'rgba(15,13,12,0.10)' },
+  replyQuoteThem: { backgroundColor: Colors.bgElevated },
+  replyBar: { width: 3, alignSelf: 'stretch', borderRadius: 2 },
+  replyAuthor: {
+    fontSize: Typography.fontSize.xs,
+    fontFamily: Typography.fontFamily.sansBold,
+    letterSpacing: 0.2, marginBottom: 2,
   },
-  stickerMetaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 2,
+  replyPreview: {
+    fontSize: Typography.fontSize.xs,
+    fontFamily: Typography.fontFamily.sans,
   },
+
+  // Reaction chips
+  reactionRow: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 4, gap: 4 },
+  reactionChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: Colors.bgCard,
+    borderWidth: 1, borderColor: Colors.borderStrong,
+    paddingHorizontal: 8, paddingVertical: 3,
+    borderRadius: Radius.full,
+  },
+  reactionChipMine: {
+    backgroundColor: Colors.accentPrimary + '22',
+    borderColor: Colors.accentPrimary + '88',
+  },
+  reactionEmoji: { fontSize: 13 },
+  reactionCount: { fontSize: 11, fontFamily: Typography.fontFamily.sansMedium, color: Colors.textSecondary },
+
+  // Failed retry banner
+  failedRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 },
+  failedText: { fontSize: 11, color: Colors.accentDanger, fontFamily: Typography.fontFamily.sansMedium },
+  failedAction: { fontSize: 11, color: Colors.accentPrimary, fontFamily: Typography.fontFamily.sansBold, marginLeft: 4 },
+
+  // Voice
+  voiceRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4, minWidth: 180 },
+  voicePlay: {
+    width: 30, height: 30, borderRadius: 15,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1.5,
+  },
+  voiceTrack: { flex: 1, height: 4, borderRadius: 2, overflow: 'hidden' },
+  voiceFill: { height: '100%' },
+  voiceTime: { fontSize: 11, fontFamily: Typography.fontFamily.sansMedium, minWidth: 32, textAlign: 'right' },
+
+  stickerWrap: { paddingVertical: 4 },
+  stickerGlyph: { fontSize: 78, lineHeight: 92 },
+  stickerMetaRow: { flexDirection: 'row', alignItems: 'center', marginTop: 2 },
   bubbleText: {
     fontSize: Typography.fontSize.base,
     lineHeight: Typography.fontSize.base * Typography.lineHeight.snug,
@@ -848,55 +1367,26 @@ const styles = StyleSheet.create({
   },
   bubbleTextMe: { color: Colors.textInverse },
   bubbleTextThem: { color: Colors.textPrimary },
-  metaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 4,
-    alignSelf: 'flex-end',
-  },
+  metaRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4, alignSelf: 'flex-end' },
   bubbleTime: {
-    color: Colors.textMuted,
-    fontSize: 10,
-    fontFamily: Typography.fontFamily.sansMedium,
-    letterSpacing: 0.2,
+    color: Colors.textMuted, fontSize: 10,
+    fontFamily: Typography.fontFamily.sansMedium, letterSpacing: 0.2,
   },
   bubbleTimeMe: { color: 'rgba(15,13,12,0.65)' },
 
-  // ── Typing ─────────────────────────────────
   typingBubble: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 20,
-    borderBottomLeftRadius: 6,
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    paddingHorizontal: 16, paddingVertical: 12,
+    borderRadius: 20, borderBottomLeftRadius: 6,
   },
-  typingDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
-    backgroundColor: Colors.textSecondary,
-  },
+  typingDot: { width: 7, height: 7, borderRadius: 3.5, backgroundColor: Colors.textSecondary },
 
-  // ── Empty state ────────────────────────────
-  emptyWrap: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 32,
-    gap: 8,
-  },
+  emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32, gap: 8 },
   emptyIcon: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
+    width: 72, height: 72, borderRadius: 36,
     backgroundColor: Colors.accentPrimary + '14',
-    borderWidth: 1,
-    borderColor: Colors.accentPrimary + '33',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 8,
+    borderWidth: 1, borderColor: Colors.accentPrimary + '33',
+    alignItems: 'center', justifyContent: 'center', marginBottom: 8,
   },
   emptyTitle: {
     color: Colors.textPrimary,
@@ -911,39 +1401,40 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: Typography.fontSize.base * Typography.lineHeight.snug,
   },
-  emptyName: {
-    color: Colors.textPrimary,
-    fontFamily: Typography.fontFamily.sansSemiBold,
-  },
-  emptyHints: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    gap: 8,
-    marginTop: 20,
-  },
+  emptyName: { color: Colors.textPrimary, fontFamily: Typography.fontFamily.sansSemiBold },
+  emptyHints: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8, marginTop: 20 },
   hintChip: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingHorizontal: 14, paddingVertical: 8,
     borderRadius: Radius.full,
     backgroundColor: Colors.bgCard,
-    borderWidth: 1,
-    borderColor: Colors.borderStrong,
+    borderWidth: 1, borderColor: Colors.borderStrong,
   },
-  hintText: {
-    color: Colors.textPrimary,
-    fontSize: Typography.fontSize.sm,
-    fontFamily: Typography.fontFamily.sansMedium,
+  hintText: { color: Colors.textPrimary, fontSize: Typography.fontSize.sm, fontFamily: Typography.fontFamily.sansMedium },
+
+  // Reply-to chip above composer
+  replyComposeChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingHorizontal: 14, paddingVertical: 10,
+    backgroundColor: Colors.bgCard,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Colors.borderStrong,
+  },
+  replyComposeBar: { width: 3, height: 28, backgroundColor: Colors.accentPrimary, borderRadius: 2 },
+  replyComposeAuthor: {
+    fontSize: Typography.fontSize.xs,
+    color: Colors.textSecondary,
+    fontFamily: Typography.fontFamily.sans,
+  },
+  replyComposePreview: {
+    fontSize: Typography.fontSize.xs,
+    color: Colors.textMuted,
+    fontFamily: Typography.fontFamily.sans,
+    marginTop: 2,
   },
 
-  // ── Composer ───────────────────────────────
   compose: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: 8,
-    paddingHorizontal: 12,
-    paddingTop: 10,
-    paddingBottom: 10,
+    flexDirection: 'row', alignItems: 'flex-end', gap: 8,
+    paddingHorizontal: 12, paddingTop: 10, paddingBottom: 10,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: Colors.borderStrong,
     backgroundColor: Colors.bgPrimary,
@@ -956,26 +1447,19 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   composeInputWrap: {
-    flex: 1,
+    flex: 1, flexDirection: 'row', alignItems: 'flex-end',
     backgroundColor: Colors.bgCard,
     borderRadius: Radius.xl,
-    borderWidth: 1,
-    borderColor: Colors.borderStrong,
-    paddingHorizontal: 16,
-    paddingVertical: 4,
+    borderWidth: 1, borderColor: Colors.borderStrong,
+    paddingLeft: 16, paddingRight: 4, paddingVertical: 4,
     minHeight: 42,
-    justifyContent: 'center',
   },
-  composeInputWrapFocus: {
-    borderColor: Colors.accentPrimary + '88',
-    backgroundColor: Colors.bgElevated,
-  },
+  composeInputWrapFocus: { borderColor: Colors.accentPrimary + '88', backgroundColor: Colors.bgElevated },
   composeInput: {
-    color: Colors.textPrimary,
+    flex: 1, color: Colors.textPrimary,
     fontSize: Typography.fontSize.base,
     fontFamily: Typography.fontFamily.sans,
-    maxHeight: 120,
-    paddingVertical: 6,
+    maxHeight: 120, paddingVertical: 6,
   },
   sendBtn: {
     width: 42, height: 42, borderRadius: 21,
@@ -983,41 +1467,66 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
     ...Shadows.sm,
   },
-  sendBtnDisabled: {
+  sendBtnDisabled: { backgroundColor: Colors.bgCard, borderWidth: 1, borderColor: Colors.border },
+  micBtn: {
+    width: 42, height: 42, borderRadius: 21,
     backgroundColor: Colors.bgCard,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    borderWidth: 1, borderColor: Colors.borderStrong,
+    alignItems: 'center', justifyContent: 'center',
   },
   stickerBtn: {
-    width: 32, height: 32, borderRadius: 16,
+    width: 34, height: 34, borderRadius: 17,
     alignItems: 'center', justifyContent: 'center',
-    marginLeft: 4,
+    marginLeft: 6, marginBottom: 2,
   },
 
-  // ── Attach action sheet ─────────────────────
-  sheetBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    justifyContent: 'flex-end',
+  // Recording bar
+  recordBar: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingHorizontal: 14, paddingTop: 12, paddingBottom: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Colors.borderStrong,
+    backgroundColor: Colors.bgPrimary,
   },
+  recordPulse: {
+    width: 10, height: 10, borderRadius: 5,
+    backgroundColor: Colors.accentDanger,
+  },
+  recordTime: {
+    color: Colors.textPrimary,
+    fontSize: Typography.fontSize.base,
+    fontFamily: Typography.fontFamily.sansBold,
+    minWidth: 50,
+  },
+  recordHint: {
+    color: Colors.textSecondary,
+    fontSize: Typography.fontSize.sm,
+    fontFamily: Typography.fontFamily.sansMedium,
+  },
+  recordCancel: {
+    width: 38, height: 38, borderRadius: 19,
+    backgroundColor: Colors.bgCard,
+    borderWidth: 1, borderColor: Colors.borderStrong,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  recordSend: {
+    width: 42, height: 42, borderRadius: 21,
+    backgroundColor: Colors.accentPrimary,
+    alignItems: 'center', justifyContent: 'center',
+    ...Shadows.sm,
+  },
+
+  sheetBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
   sheet: {
     backgroundColor: Colors.bgCard,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    paddingTop: 8,
-    paddingBottom: 32,
-    paddingHorizontal: 20,
-    borderTopWidth: 1,
-    borderTopColor: Colors.borderStrong,
+    borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    paddingTop: 8, paddingBottom: 32, paddingHorizontal: 20,
+    borderTopWidth: 1, borderTopColor: Colors.borderStrong,
     ...Shadows.lg,
   },
   sheetHandle: {
-    alignSelf: 'center',
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: Colors.border,
-    marginBottom: 16,
+    alignSelf: 'center', width: 40, height: 4, borderRadius: 2,
+    backgroundColor: Colors.border, marginBottom: 16,
   },
   sheetTitle: {
     color: Colors.textPrimary,
@@ -1026,58 +1535,55 @@ const styles = StyleSheet.create({
     letterSpacing: Typography.letterSpacing.tight,
     marginBottom: 8,
   },
-  sheetRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    paddingVertical: 14,
-  },
+  sheetRow: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 14 },
   sheetIcon: {
     width: 44, height: 44, borderRadius: 22,
     alignItems: 'center', justifyContent: 'center',
     borderWidth: 1,
   },
-  sheetLabel: {
-    color: Colors.textPrimary,
-    fontFamily: Typography.fontFamily.sansSemiBold,
+  sheetLabel: { color: Colors.textPrimary, fontFamily: Typography.fontFamily.sansSemiBold, fontSize: Typography.fontSize.base },
+
+  // Quick reactions row in long-press menu
+  quickReactions: {
+    flexDirection: 'row', justifyContent: 'space-around',
+    paddingVertical: 12, paddingBottom: 16,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.borderStrong,
+    marginBottom: 4,
+  },
+  quickReactionBtn: {
+    width: 44, height: 44, borderRadius: 22,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  quickReactionEmoji: { fontSize: 28 },
+
+  stickerGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', paddingTop: 8 },
+  stickerCell: { width: '16.66%', aspectRatio: 1, alignItems: 'center', justifyContent: 'center', borderRadius: 12, marginBottom: 6 },
+  stickerCellGlyph: { fontSize: 36, lineHeight: 44 },
+
+  // GIF picker
+  gifSearchWrap: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: Colors.bgElevated,
+    borderRadius: Radius.full,
+    paddingHorizontal: 14, paddingVertical: 8,
+    borderWidth: 1, borderColor: Colors.borderStrong,
+    marginBottom: 12, marginTop: 4,
+  },
+  gifSearch: {
+    flex: 1, color: Colors.textPrimary,
+    fontFamily: Typography.fontFamily.sans,
     fontSize: Typography.fontSize.base,
+    paddingVertical: 0,
   },
+  gifGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingBottom: 16 },
+  gifCell: { width: '32%', aspectRatio: 1, borderRadius: 10, overflow: 'hidden', backgroundColor: Colors.bgElevated },
+  gifImage: { width: '100%', height: '100%' },
 
-  // ── Sticker grid ────────────────────────────
-  stickerGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    paddingTop: 8,
-  },
-  stickerCell: {
-    width: '16.66%',
-    aspectRatio: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 12,
-    marginBottom: 6,
-  },
-  stickerCellGlyph: {
-    fontSize: 36,
-    lineHeight: 44,
-  },
-
-  // ── Lightbox ────────────────────────────────
-  lightboxBackdrop: {
-    flex: 1,
-    backgroundColor: '#000',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  lightboxImage: {
-    width: '100%',
-    height: '100%',
-  },
+  lightboxBackdrop: { flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' },
+  lightboxImage: { width: '100%', height: '100%' },
   lightboxClose: {
-    position: 'absolute',
-    top: 50,
-    right: 20,
+    position: 'absolute', top: 50, right: 20,
     width: 40, height: 40, borderRadius: 20,
     backgroundColor: 'rgba(0,0,0,0.6)',
     alignItems: 'center', justifyContent: 'center',

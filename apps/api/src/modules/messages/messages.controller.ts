@@ -74,16 +74,26 @@ export class MessagesController {
 
   @Post('threads/:id/messages')
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Send a message (text, image, or sticker)' })
+  @ApiOperation({ summary: 'Send a message (text, image, sticker, voice, or reply)' })
   sendMessage(
     @CurrentUser() me: User,
     @Param('id') id: string,
-    @Body() body: { content?: string; imageUrl?: string; stickerKey?: string },
+    @Body() body: {
+      content?: string;
+      imageUrl?: string;
+      stickerKey?: string;
+      audioUrl?: string;
+      audioDurationSec?: number;
+      replyToId?: string;
+    },
   ) {
     return this.messagesService.sendMessage(me.id, id, {
       content: body.content,
       imageUrl: body.imageUrl,
       stickerKey: body.stickerKey,
+      audioUrl: body.audioUrl,
+      audioDurationSec: body.audioDurationSec,
+      replyToId: body.replyToId,
     });
   }
 
@@ -92,5 +102,27 @@ export class MessagesController {
   @ApiOperation({ summary: 'Soft-delete a message I sent' })
   deleteMessage(@CurrentUser() me: User, @Param('messageId') messageId: string) {
     return this.messagesService.deleteMessage(me.id, messageId);
+  }
+
+  @Post(':messageId/react')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Add an emoji reaction to a message' })
+  reactToMessage(
+    @CurrentUser() me: User,
+    @Param('messageId') messageId: string,
+    @Body('emoji') emoji: string,
+  ) {
+    return this.messagesService.reactToMessage(me.id, messageId, emoji);
+  }
+
+  @Delete(':messageId/react/:emoji')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Remove my emoji reaction from a message' })
+  unreactMessage(
+    @CurrentUser() me: User,
+    @Param('messageId') messageId: string,
+    @Param('emoji') emoji: string,
+  ) {
+    return this.messagesService.unreactMessage(me.id, messageId, decodeURIComponent(emoji));
   }
 }

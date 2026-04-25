@@ -165,6 +165,12 @@ export class MessagesService {
       orderBy: { createdAt: 'desc' },
       take: Math.min(limit, 100),
       ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      include: {
+        replyTo: {
+          select: { id: true, content: true, imageUrl: true, stickerKey: true, audioUrl: true, senderId: true },
+        },
+        reactions: { select: { emoji: true, userId: true } },
+      },
     });
 
     // Mark incoming ones as read
@@ -179,12 +185,22 @@ export class MessagesService {
   async sendMessage(
     meId: string,
     threadOrUserId: string,
-    payload: { content?: string | null; imageUrl?: string | null; stickerKey?: string | null },
+    payload: {
+      content?: string | null;
+      imageUrl?: string | null;
+      stickerKey?: string | null;
+      audioUrl?: string | null;
+      audioDurationSec?: number | null;
+      replyToId?: string | null;
+    },
   ) {
     const trimmed = payload.content?.trim() || null;
     const imageUrl = payload.imageUrl?.trim() || null;
     const stickerKey = payload.stickerKey?.trim() || null;
-    if (!trimmed && !imageUrl && !stickerKey) {
+    const audioUrl = payload.audioUrl?.trim() || null;
+    const audioDurationSec = typeof payload.audioDurationSec === 'number' ? Math.max(0, Math.round(payload.audioDurationSec)) : null;
+    const replyToId = payload.replyToId?.trim() || null;
+    if (!trimmed && !imageUrl && !stickerKey && !audioUrl) {
       throw new ForbiddenException('Empty message');
     }
 
@@ -211,16 +227,44 @@ export class MessagesService {
     const recipientId = thread.userAId === meId ? thread.userBId : thread.userAId;
     const isFirstMessage = (await this.prisma.message.count({ where: { threadId } })) === 0;
 
+    // If a replyToId was supplied, validate that the quoted message actually
+    // belongs to this same thread (avoid leaking content across conversations).
+    let validReplyToId: string | null = null;
+    if (replyToId) {
+      const quoted = await this.prisma.message.findFirst({
+        where: { id: replyToId, threadId, deletedAt: null },
+        select: { id: true },
+      });
+      if (quoted) validReplyToId = quoted.id;
+    }
+
     const msg = await this.prisma.message.create({
-      data: { threadId, senderId: meId, content: trimmed, imageUrl, stickerKey },
+      data: {
+        threadId,
+        senderId: meId,
+        content: trimmed,
+        imageUrl,
+        stickerKey,
+        audioUrl,
+        audioDurationSec,
+        replyToId: validReplyToId,
+      },
+      include: {
+        replyTo: {
+          select: { id: true, content: true, imageUrl: true, stickerKey: true, audioUrl: true, senderId: true },
+        },
+        reactions: { select: { emoji: true, userId: true } },
+      },
     });
 
-    // Build a short preview for notifications. Sticker → 🎟️ Sticker, image → 📷 Foto.
+    // Build a short preview for notifications.
     const preview = trimmed
       ? trimmed.slice(0, 120)
       : imageUrl
         ? '📷 Foto'
-        : '🎟️ Sticker';
+        : audioUrl
+          ? '🎤 Nota de voz'
+          : '🎟️ Sticker';
     await this.prisma.messageThread.update({
       where: { id: threadId },
       data: { lastMessageAt: new Date() },
@@ -379,8 +423,78 @@ export class MessagesService {
       where: { id: messageId },
       data: { deletedAt: new Date() },
     });
+    const thread = await this.prisma.messageThread.findUnique({
+      where: { id: msg.threadId },
+      select: { userAId: true, userBId: true },
+    });
+    if (thread) {
+      this.realtime.toUsers([thread.userAId, thread.userBId], 'message', 'deleted', {
+        id: messageId,
+        data: { threadId: msg.threadId },
+      });
+    }
     this.realtime.toStaff('message', 'deleted', { id: messageId });
     return r;
+  }
+
+  // ─────────────────────────────────────────
+  //  REACTIONS
+  // ─────────────────────────────────────────
+  private async assertMessageMembership(meId: string, messageId: string) {
+    const msg = await this.prisma.message.findUnique({
+      where: { id: messageId },
+      include: {
+        thread: { select: { id: true, userAId: true, userBId: true, status: true } },
+      },
+    });
+    if (!msg || !msg.thread) throw new NotFoundException('Message not found');
+    const { thread } = msg;
+    if (thread.userAId !== meId && thread.userBId !== meId) {
+      throw new ForbiddenException('Not a member of this thread');
+    }
+    return msg;
+  }
+
+  async reactToMessage(meId: string, messageId: string, emoji: string) {
+    const trimmed = (emoji || '').trim();
+    if (!trimmed || trimmed.length > 16) {
+      throw new ForbiddenException('Invalid emoji');
+    }
+    const msg = await this.assertMessageMembership(meId, messageId);
+    await this.prisma.messageReaction.upsert({
+      where: { messageId_userId_emoji: { messageId, userId: meId, emoji: trimmed } },
+      update: {},
+      create: { messageId, userId: meId, emoji: trimmed },
+    });
+    const reactions = await this.prisma.messageReaction.findMany({
+      where: { messageId },
+      select: { emoji: true, userId: true },
+    });
+    this.realtime.toUsers([msg.thread!.userAId, msg.thread!.userBId], 'message', 'reacted', {
+      id: messageId,
+      data: { messageId, threadId: msg.threadId, reactions },
+    });
+    return { messageId, reactions };
+  }
+
+  async unreactMessage(meId: string, messageId: string, emoji: string) {
+    const trimmed = (emoji || '').trim();
+    if (!trimmed) throw new ForbiddenException('Invalid emoji');
+    const msg = await this.assertMessageMembership(meId, messageId);
+    await this.prisma.messageReaction
+      .delete({
+        where: { messageId_userId_emoji: { messageId, userId: meId, emoji: trimmed } },
+      })
+      .catch(() => null);
+    const reactions = await this.prisma.messageReaction.findMany({
+      where: { messageId },
+      select: { emoji: true, userId: true },
+    });
+    this.realtime.toUsers([msg.thread!.userAId, msg.thread!.userBId], 'message', 'reacted', {
+      id: messageId,
+      data: { messageId, threadId: msg.threadId, reactions },
+    });
+    return { messageId, reactions };
   }
 
   // ─────────────────────────────────────────

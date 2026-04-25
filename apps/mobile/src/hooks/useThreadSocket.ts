@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Socket } from 'socket.io-client';
 import { getSocket } from '../api/socket';
+import { getRtSocket } from '../api/rt-socket';
 
 export interface ThreadSocketHandle {
   connected: boolean;
@@ -19,7 +20,11 @@ export interface ThreadSocketHandle {
 export function useThreadSocket(
   threadId: string | undefined,
   onNewMessage: (message: any) => void,
-  opts?: { otherUserId?: string },
+  opts?: {
+    otherUserId?: string;
+    onReaction?: (payload: any) => void;
+    onDeleted?: (payload: any) => void;
+  },
 ): ThreadSocketHandle {
   const [connected, setConnected] = useState(false);
   const [otherOnline, setOtherOnline] = useState(false);
@@ -31,6 +36,10 @@ export function useThreadSocket(
   // Keep a ref to the latest onNewMessage so we don't reattach listeners
   const onNewMessageRef = useRef(onNewMessage);
   useEffect(() => { onNewMessageRef.current = onNewMessage; }, [onNewMessage]);
+  const onReactionRef = useRef(opts?.onReaction);
+  useEffect(() => { onReactionRef.current = opts?.onReaction; }, [opts?.onReaction]);
+  const onDeletedRef = useRef(opts?.onDeleted);
+  useEffect(() => { onDeletedRef.current = opts?.onDeleted; }, [opts?.onDeleted]);
 
   useEffect(() => {
     if (!threadId) return;
@@ -98,6 +107,27 @@ export function useThreadSocket(
       if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
     };
   }, [threadId, opts?.otherUserId]);
+
+  // Listen on the /rt envelope channel for reactions and deletions targeted
+  // at the current user. The realtime service emits these as
+  // { resource: 'message', action: 'reaction'|'deleted', id, data }.
+  useEffect(() => {
+    if (!threadId) return;
+    const rt = getRtSocket();
+    const handle = (env: any) => {
+      if (!env || env.resource !== 'message') return;
+      const tid = env.data?.threadId ?? env.data?.data?.threadId;
+      if (tid && tid !== threadId) return;
+      if (env.action === 'reacted') {
+        // env.data shape: { messageId, threadId, reactions }
+        onReactionRef.current?.({ ...(env.data ?? {}), id: env.id });
+      } else if (env.action === 'deleted') {
+        onDeletedRef.current?.({ id: env.id, ...(env.data ?? {}) });
+      }
+    };
+    rt.on('rt:event', handle);
+    return () => { rt.off('rt:event', handle); };
+  }, [threadId]);
 
   const emitTyping = useCallback(
     (isTyping: boolean) => {
