@@ -1,8 +1,9 @@
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
-import { useEffect, useState } from 'react';
-import { useRouter } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { Colors } from '@/constants/tokens';
 import { communityApi } from '@/api/client';
+import { useRealtime } from '@/hooks/useRealtime';
 
 // ─────────────────────────────────────────────
 //  StoryRing — wraps an avatar with Instagram-style ring
@@ -34,8 +35,9 @@ export function useUserStoryState(userId?: string | null, preload?: StoryRingSta
   const [state, setState] = useState<StoryRingState>(
     preload ?? { hasStories: false, hasUnseen: false },
   );
-  useEffect(() => {
-    if (preload || !userId) return;
+
+  const fetchState = useCallback(() => {
+    if (preload || !userId) return () => {};
     let alive = true;
     communityApi
       .userStories(userId)
@@ -56,6 +58,19 @@ export function useUserStoryState(userId?: string | null, preload?: StoryRingSta
       alive = false;
     };
   }, [userId, preload]);
+
+  useEffect(() => fetchState(), [fetchState]);
+
+  // Tab screens stay mounted, so a story uploaded from the new-story screen
+  // wouldn't refresh the ring on its own. Refetch when the host screen
+  // regains focus and on any 'story' realtime event.
+  useFocusEffect(useCallback(() => {
+    const cleanup = fetchState();
+    return cleanup;
+  }, [fetchState]));
+
+  useRealtime('story', () => { fetchState(); });
+
   return state;
 }
 

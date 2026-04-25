@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { communityApi } from '@/api/client';
 import { useAuthStore } from '@/stores/auth.store';
@@ -64,6 +65,7 @@ const VENUE_AUTHOR_ID = '__venue__';
 
 export default function StoryViewer() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const {
     userId: startUserId,
     single,
@@ -78,6 +80,10 @@ export default function StoryViewer() {
   const [groupIdx, setGroupIdx] = useState(0);
   const [storyIdx, setStoryIdx] = useState(0);
   const [paused, setPaused] = useState(false);
+  // Don't start the auto-advance timer until the foreground image loads —
+  // otherwise users on slow networks see the bar fill while the story is
+  // still a black screen.
+  const [imageReady, setImageReady] = useState(false);
   // Progress 0-100 for the active bar. Simple setInterval-based to avoid
   // RN Animated edge cases with string-interpolated percent widths.
   const [progressPct, setProgressPct] = useState(0);
@@ -137,6 +143,7 @@ export default function StoryViewer() {
     setProgressPct(0);
     elapsedAtPauseRef.current = 0;
     startedAtRef.current = Date.now();
+    setImageReady(false);
     // Mark viewed in background
     if (currentStory.id && !currentStory.seen) {
       communityApi.viewStory(currentStory.id).catch(() => {});
@@ -147,6 +154,7 @@ export default function StoryViewer() {
   // Drive the progress bar (setInterval-based — reliable across platforms)
   useEffect(() => {
     if (!currentStory) return;
+    if (!imageReady) return;
     if (paused) {
       // Preserve elapsed time so resume continues from current progress
       elapsedAtPauseRef.current = Date.now() - startedAtRef.current;
@@ -168,7 +176,7 @@ export default function StoryViewer() {
       if (tickRef.current) clearInterval(tickRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [groupIdx, storyIdx, paused]);
+  }, [groupIdx, storyIdx, paused, imageReady]);
 
   function advance() {
     if (!currentGroup) return;
@@ -238,7 +246,18 @@ export default function StoryViewer() {
       <View style={styles.backdropDim} />
 
       {/* Foreground — full photo, no stretch, no crop */}
-      <Image source={{ uri: currentStory.mediaUrl }} style={styles.img} resizeMode="contain" />
+      <Image
+        source={{ uri: currentStory.mediaUrl }}
+        style={styles.img}
+        resizeMode="contain"
+        onLoadEnd={() => setImageReady(true)}
+        onError={() => setImageReady(true)}
+      />
+      {!imageReady ? (
+        <View style={styles.loadingOverlay} pointerEvents="none">
+          <ActivityIndicator color="#fff" />
+        </View>
+      ) : null}
       <View style={styles.vignetteTop} />
       <View style={styles.vignetteBottom} />
 
@@ -259,7 +278,10 @@ export default function StoryViewer() {
       />
 
       {/* Progress bars */}
-      <View style={styles.progressRow} pointerEvents="none">
+      <View
+        style={[styles.progressRow, { top: Math.max(insets.top, 12) + 6 }]}
+        pointerEvents="none"
+      >
         {currentGroup.stories.map((s, i) => {
           const pct = i < storyIdx ? 100 : i === storyIdx ? progressPct : 0;
           return (
@@ -271,7 +293,10 @@ export default function StoryViewer() {
       </View>
 
       {/* Top bar */}
-      <View style={styles.topBar} pointerEvents="box-none">
+      <View
+        style={[styles.topBar, { top: Math.max(insets.top, 12) + 22 }]}
+        pointerEvents="box-none"
+      >
         <Pressable
           onPress={() => {
             if (isVenueGroup) return;
@@ -356,6 +381,11 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.55)',
   },
   img: { width: SCREEN_W, height: SCREEN_H, position: 'absolute' },
+  loadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   vignetteTop: {
     position: 'absolute',
     left: 0,
@@ -381,32 +411,38 @@ const styles = StyleSheet.create({
 
   progressRow: {
     position: 'absolute',
-    top: 50,
     left: 8,
     right: 8,
     flexDirection: 'row',
-    gap: 3,
+    gap: 4,
+    zIndex: 5,
   },
   progressBg: {
     flex: 1,
-    height: 2.5,
-    backgroundColor: 'rgba(255,255,255,0.25)',
+    height: 4,
+    backgroundColor: 'rgba(0,0,0,0.45)',
     borderRadius: 2,
     overflow: 'hidden',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.18)',
   },
   progressFg: {
     height: '100%',
     backgroundColor: '#fff',
+    shadowColor: '#fff',
+    shadowOpacity: 0.7,
+    shadowRadius: 3,
+    shadowOffset: { width: 0, height: 0 },
   },
 
   topBar: {
     position: 'absolute',
-    top: 62,
     left: 12,
     right: 12,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    zIndex: 5,
   },
   userBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 },
   avatar: {
