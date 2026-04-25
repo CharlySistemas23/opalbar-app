@@ -8,7 +8,7 @@
 //  actualizaciones" button.
 // ─────────────────────────────────────────────
 import { useEffect, useRef, useState } from 'react';
-import { Modal, View, Text, StyleSheet, Animated, Easing, Platform } from 'react-native';
+import { Modal, View, Text, StyleSheet, Animated, Easing, Platform, Pressable } from 'react-native';
 import * as Updates from 'expo-updates';
 import { Feather } from '@expo/vector-icons';
 import { Colors, Radius, Shadows, Spacing, Typography } from '@/constants/tokens';
@@ -86,23 +86,43 @@ export function UpdateOverlay() {
     return () => loop.stop();
   }, [isDownloading, isUpdatePending, pulse]);
 
-  // Auto-reload once the bundle is committed.
-  // NOTE: don't put `reloading` in deps — calling setReloading(true) inside
-  // would re-run the effect and the cleanup would cancel the timer before it
-  // fires. Use a ref to make sure we only schedule the reload once.
+  // Auto-reload once the bundle is committed. We listen via TWO paths:
+  // (a) useUpdates().isUpdatePending and (b) the imperative Updates listener,
+  // because in some setups the hook's flag doesn't flip until next render and
+  // we want the reload to fire as soon as the bundle is actually ready.
   const reloadScheduledRef = useRef(false);
-  useEffect(() => {
-    if (!isUpdatePending || reloadScheduledRef.current) return;
+  const [reloadError, setReloadError] = useState<string | null>(null);
+
+  const triggerReload = (delayMs = 900) => {
+    if (reloadScheduledRef.current) return;
     reloadScheduledRef.current = true;
     setReloading(true);
-    // Brief pause so users see the "Listo" state and the bar at 100%.
+    setReloadError(null);
     setTimeout(() => {
-      Updates.reloadAsync().catch(() => {
+      Updates.reloadAsync().catch((err: any) => {
         reloadScheduledRef.current = false;
         setReloading(false);
+        setReloadError(err?.message ?? 'reload failed');
       });
-    }, 900);
+    }, delayMs);
+  };
+
+  useEffect(() => {
+    if (isUpdatePending) triggerReload(900);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isUpdatePending]);
+
+  useEffect(() => {
+    const sub = Updates.addListener((event) => {
+      // Available in expo-updates: 'updateAvailable' fires once a fetched
+      // bundle is ready to be loaded. Belt-and-braces with isUpdatePending.
+      if (event.type === Updates.UpdateEventType.UPDATE_AVAILABLE) {
+        triggerReload(900);
+      }
+    });
+    return () => sub.remove();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   if (Platform.OS === 'web') return null;
   if (!visible) return null;
@@ -156,6 +176,23 @@ export function UpdateOverlay() {
             <Text style={styles.meta}>
               {t ? 'Versión' : 'Version'} {formatCreatedAt(availableUpdate.createdAt)}
             </Text>
+          ) : null}
+
+          {ready ? (
+            <Pressable
+              onPress={() => {
+                reloadScheduledRef.current = false;
+                triggerReload(0);
+              }}
+              style={({ pressed }) => [styles.reloadBtn, pressed && { opacity: 0.85 }]}
+            >
+              <Feather name="refresh-cw" size={14} color={Colors.textInverse} />
+              <Text style={styles.reloadBtnText}>{t ? 'Reiniciar ahora' : 'Restart now'}</Text>
+            </Pressable>
+          ) : null}
+
+          {reloadError ? (
+            <Text style={styles.errText}>{reloadError}</Text>
           ) : null}
         </Animated.View>
       </View>
@@ -281,5 +318,27 @@ const styles = StyleSheet.create({
     fontFamily: Typography.fontFamily.sans,
     fontSize: Typography.fontSize.xs,
     marginTop: Spacing[3],
+  },
+  reloadBtn: {
+    marginTop: Spacing[4],
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing[2],
+    paddingHorizontal: Spacing[5],
+    paddingVertical: Spacing[3],
+    borderRadius: Radius.full,
+    backgroundColor: Colors.accentPrimary,
+  },
+  reloadBtnText: {
+    color: Colors.textInverse,
+    fontFamily: Typography.fontFamily.sansSemiBold,
+    fontSize: Typography.fontSize.sm,
+  },
+  errText: {
+    marginTop: Spacing[3],
+    color: Colors.accentDanger,
+    fontFamily: Typography.fontFamily.sans,
+    fontSize: Typography.fontSize.xs,
+    textAlign: 'center',
   },
 });
