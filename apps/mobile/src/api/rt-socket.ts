@@ -5,10 +5,14 @@
 import { io, type Socket } from 'socket.io-client';
 import { tokenStore } from './client';
 
-const BASE_URL =
-  (process.env['EXPO_PUBLIC_API_URL'] || 'http://localhost:3000/api/v1')
-    .replace(/\/api\/v1\/?$/, '')
-    .replace(/\/$/, '');
+// Mirror of api/client.ts logic: in release/OTA bundles a LAN URL leaked from
+// the local .env will reach the device, where it cannot resolve. Fall back to
+// the production Railway host whenever we detect a LAN IP in a non-dev build.
+const PROD_HOST = 'https://opalbar-app-production.up.railway.app';
+const ENV_URL = process.env['EXPO_PUBLIC_API_URL'];
+const isLanUrl = typeof ENV_URL === 'string' && /^https?:\/\/(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?/.test(ENV_URL);
+const RAW = ENV_URL && !(!__DEV__ && isLanUrl) ? ENV_URL : (__DEV__ ? 'http://localhost:3000/api/v1' : PROD_HOST);
+const BASE_URL = RAW.replace(/\/api\/v1\/?$/, '').replace(/\/$/, '');
 
 export type RealtimeResource =
   | 'user' | 'post' | 'comment' | 'message' | 'notification'
@@ -40,13 +44,15 @@ export function getRtSocket(): Socket {
   }
 
   _socket = io(`${BASE_URL}/rt`, {
-    transports: ['websocket'],
+    // Polling first — Railway's edge / some WiFi routers refuse WSS upgrades.
+    // Polling works over plain HTTPS and socket.io will upgrade to ws if it can.
+    transports: ['polling', 'websocket'],
     autoConnect: true,
     reconnection: true,
     reconnectionAttempts: Infinity,
     reconnectionDelay: 1000,
     reconnectionDelayMax: 5000,
-    timeout: 10000,
+    timeout: 20000,
     auth: { token: tokenStore.getAccessToken() ?? '' },
   });
 
@@ -54,6 +60,9 @@ export function getRtSocket(): Socket {
     _socket.on('connect', () => console.log('[rt] connected', _socket?.id));
     _socket.on('disconnect', (reason) => console.log('[rt] disconnect', reason));
     _socket.on('connect_error', (err) => console.log('[rt] connect_error', err.message));
+  }
+
+  if (__DEV__) {
     _socket.on('rt:event', (env: RealtimeEnvelope) =>
       console.log('[rt] event', env.resource, env.action, env.id ?? ''),
     );

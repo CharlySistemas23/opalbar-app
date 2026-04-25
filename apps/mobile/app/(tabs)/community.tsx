@@ -25,6 +25,7 @@ import { ErrorState } from '@/components/ErrorState';
 import { Heart } from '@/components/Heart';
 import { useFeedback } from '@/hooks/useFeedback';
 import { useCommunityRealtime } from '@/hooks/useCommunityRealtime';
+import { useRealtime } from '@/hooks/useRealtime';
 import { sharePost } from '@/utils/share';
 
 // ─────────────────────────────────────────────
@@ -185,6 +186,12 @@ export default function Community() {
   );
 
   useCommunityRealtime(() => {
+    load();
+  });
+
+  // Also listen on the unified /rt socket — covers post approvals/rejections
+  // and gives us a redundant channel in case /community is flaky.
+  useRealtime(['post', 'comment'], () => {
     load();
   });
 
@@ -458,7 +465,7 @@ export default function Community() {
               activeOpacity={0.75}
               onPress={() => {
                 setShowCreateSheet(false);
-                router.push('/(app)/community/new-post?autoPick=gallery' as never);
+                router.push('/(app)/community/new-post' as never);
               }}
             >
               <View style={[styles.sheetIconBox, { backgroundColor: 'rgba(96,165,250,0.15)' }]}>
@@ -466,7 +473,7 @@ export default function Community() {
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.sheetRowLabel}>{t ? 'Foto' : 'Photo'}</Text>
-                <Text style={styles.sheetRowSub}>{t ? 'Sube una imagen desde tu galería' : 'Upload an image from your gallery'}</Text>
+                <Text style={styles.sheetRowSub}>{t ? 'Toma una foto o sube de tu galería' : 'Take a photo or upload from gallery'}</Text>
               </View>
               <Feather name="chevron-right" size={18} color={Colors.textMuted} />
             </TouchableOpacity>
