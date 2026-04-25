@@ -114,21 +114,24 @@ export default function Community() {
   // Real stories fetched from backend — shape: { venue, personal }
   const [venueGroup, setVenueGroup] = useState<any | null>(null);
   const [personalGroups, setPersonalGroups] = useState<any[]>([]);
+  const loadStories = useCallback(() => {
+    const scope = activeTab === 'following' ? 'following' : undefined;
+    communityApi
+      .stories(scope)
+      .then((r) => {
+        const payload = r.data?.data ?? r.data ?? {};
+        setVenueGroup(payload.venue ?? null);
+        setPersonalGroups(payload.personal ?? []);
+      })
+      .catch(() => {
+        setVenueGroup(null);
+        setPersonalGroups([]);
+      });
+  }, [activeTab]);
   useFocusEffect(
     useCallback(() => {
-      const scope = activeTab === 'following' ? 'following' : undefined;
-      communityApi
-        .stories(scope)
-        .then((r) => {
-          const payload = r.data?.data ?? r.data ?? {};
-          setVenueGroup(payload.venue ?? null);
-          setPersonalGroups(payload.personal ?? []);
-        })
-        .catch(() => {
-          setVenueGroup(null);
-          setPersonalGroups([]);
-        });
-    }, [activeTab]),
+      loadStories();
+    }, [loadStories]),
   );
   const stories = useMemo(() => {
     const personal = personalGroups.map((g: any) => {
@@ -193,6 +196,12 @@ export default function Community() {
   // and gives us a redundant channel in case /community is flaky.
   useRealtime(['post', 'comment'], () => {
     load();
+  });
+
+  // Stories don't go through /community — refresh the carousel when the
+  // unified /rt socket reports a new or deleted story.
+  useRealtime(['story'], () => {
+    loadStories();
   });
 
   async function toggleLike(post: CommunityPost) {

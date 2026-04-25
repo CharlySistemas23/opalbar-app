@@ -15,7 +15,7 @@ const RAW = ENV_URL && !(!__DEV__ && isLanUrl) ? ENV_URL : (__DEV__ ? 'http://lo
 const BASE_URL = RAW.replace(/\/api\/v1\/?$/, '').replace(/\/$/, '');
 
 export type RealtimeResource =
-  | 'user' | 'post' | 'comment' | 'message' | 'notification'
+  | 'user' | 'post' | 'story' | 'comment' | 'message' | 'notification'
   | 'report' | 'reservation' | 'ticket' | 'event' | 'offer'
   | 'review' | 'checkin' | 'venue' | 'flag' | 'loyalty' | 'gdpr';
 
