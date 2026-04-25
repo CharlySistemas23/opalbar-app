@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, HttpCode, HttpStatus, Post } from '@nestjs/common';
+import { Body, Controller, Delete, HttpCode, HttpStatus, Logger, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { IsIn, IsString } from 'class-validator';
 import { User } from '@prisma/client';
@@ -14,10 +14,15 @@ class UnregisterTokenDto {
   @IsString() token: string;
 }
 
+class RegisterFailedDto {
+  @IsString() reason: string;
+}
+
 @ApiTags('Push')
 @ApiBearerAuth()
 @Controller('push')
 export class PushController {
+  private readonly logger = new Logger(PushController.name);
   constructor(private readonly pushService: PushService) {}
 
   @Post('register')
@@ -25,6 +30,14 @@ export class PushController {
   @ApiOperation({ summary: 'Register this device for push notifications' })
   register(@CurrentUser() user: User, @Body() dto: RegisterTokenDto) {
     return this.pushService.register(user.id, dto.token, dto.platform);
+  }
+
+  @Post('register-failed')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Mobile-side diagnostic: why push registration was skipped' })
+  registerFailed(@CurrentUser() user: User, @Body() dto: RegisterFailedDto) {
+    this.logger.warn(`📵 Push registration skipped for user=${user.id}: ${dto.reason}`);
+    return { ok: true };
   }
 
   @Delete('unregister')

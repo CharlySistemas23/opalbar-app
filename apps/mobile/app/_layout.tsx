@@ -21,6 +21,7 @@ import { useAuthStore } from '@/stores/auth.store';
 import { usePushRegistration } from '@/hooks/usePushRegistration';
 import { useRealtimeConnection } from '@/hooks/useRealtime';
 import { ToastHost } from '@/components/Toast';
+import { NotificationListener } from '@/components/NotificationListener';
 import { OfflineBanner } from '@/components/OfflineBanner';
 import { UpdateOverlay } from '@/components/UpdateOverlay';
 
@@ -185,6 +186,7 @@ export default function RootLayout() {
         <SessionGuard />
         <PushGuard />
         <RealtimeBridge />
+        <NotificationListener />
         <Stack screenOptions={{ headerShown: false }}>
           <Stack.Screen name="index" />
           <Stack.Screen name="(auth)" />
