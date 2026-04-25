@@ -86,10 +86,8 @@ export function UpdateOverlay() {
     return () => loop.stop();
   }, [isDownloading, isUpdatePending, pulse]);
 
-  // Auto-reload once the bundle is committed. We listen via TWO paths:
-  // (a) useUpdates().isUpdatePending and (b) the imperative Updates listener,
-  // because in some setups the hook's flag doesn't flip until next render and
-  // we want the reload to fire as soon as the bundle is actually ready.
+  // Auto-reload once the bundle is committed. The ref guard makes sure we
+  // schedule the reload exactly once even when isUpdatePending re-emits.
   const reloadScheduledRef = useRef(false);
   const [reloadError, setReloadError] = useState<string | null>(null);
 
@@ -111,18 +109,6 @@ export function UpdateOverlay() {
     if (isUpdatePending) triggerReload(900);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isUpdatePending]);
-
-  useEffect(() => {
-    const sub = Updates.addListener((event) => {
-      // Available in expo-updates: 'updateAvailable' fires once a fetched
-      // bundle is ready to be loaded. Belt-and-braces with isUpdatePending.
-      if (event.type === Updates.UpdateEventType.UPDATE_AVAILABLE) {
-        triggerReload(900);
-      }
-    });
-    return () => sub.remove();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   if (Platform.OS === 'web') return null;
   if (!visible) return null;
