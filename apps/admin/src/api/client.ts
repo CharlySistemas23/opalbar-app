@@ -176,6 +176,14 @@ export const offersApi = {
   delete: (id: string) => apiClient.delete(`/offers/${id}`),
 };
 
+export const messagesApi = {
+  listThreads: (search?: string, limit = 100) =>
+    apiClient.get('/admin/messages/threads', { params: { search: search || undefined, limit } }),
+  getThread: (id: string) => apiClient.get(`/admin/messages/threads/${id}`),
+  listMessages: (id: string) => apiClient.get(`/admin/messages/threads/${id}/messages`),
+  deleteMessage: (id: string) => apiClient.delete(`/admin/messages/${id}`),
+};
+
 export const venuesApi = {
   list: (params?: any) => apiClient.get('/venues', { params }),
   get: (id: string) => apiClient.get(`/venues/${id}`),

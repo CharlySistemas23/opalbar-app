@@ -15,6 +15,7 @@ import { UserDetailRoute } from '@/pages/UserDetailRoute';
 import { Reservations } from '@/pages/Reservations';
 import { Reports } from '@/pages/Reports';
 import { Support } from '@/pages/Support';
+import { Messages } from '@/pages/Messages';
 import { PushBroadcast } from '@/pages/PushBroadcast';
 import { Analytics } from '@/pages/Analytics';
 import { Venues } from '@/pages/Venues';
@@ -60,6 +61,7 @@ export function App() {
             <Route path="admin/community" element={<Community />} />
             <Route path="admin/reports" element={<Reports />} />
             <Route path="admin/support" element={<Support />} />
+            <Route path="admin/messages" element={<Messages />} />
             <Route path="admin/notifications" element={<PushBroadcast />} />
             <Route path="admin/analytics" element={<Analytics />} />
             <Route path="admin/venues" element={<Venues />} />
