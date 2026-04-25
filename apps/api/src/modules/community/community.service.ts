@@ -635,6 +635,10 @@ export class CommunityService {
         scope,
       },
     });
+    this.realtime.broadcast('story', 'created', {
+      id: story.id,
+      data: { userId, scope },
+    });
     return story;
   }
 
@@ -649,6 +653,10 @@ export class CommunityService {
     const isAdmin = ADMIN_ROLES.includes(requester.role);
     if (!isOwner && !isAdmin) throw new ForbiddenException('Not your story');
     await this.prisma.story.delete({ where: { id: storyId } });
+    this.realtime.broadcast('story', 'deleted', {
+      id: storyId,
+      data: { userId: story.userId, scope: story.scope },
+    });
     return { success: true };
   }
 

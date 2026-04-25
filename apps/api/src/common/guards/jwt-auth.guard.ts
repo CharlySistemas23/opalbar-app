@@ -23,7 +23,7 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
     ]);
   }
 
-  async canActivate(context: ExecutionContext) {
+  override async canActivate(context: ExecutionContext) {
     // For @Public() routes, still attempt JWT validation so @CurrentUser()
     // is populated when a token is present (needed for per-user data like
     // hasReacted on community posts). Never throw: if no/invalid token,
@@ -40,7 +40,7 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
     return super.canActivate(context) as boolean | Promise<boolean>;
   }
 
-  handleRequest<TUser = unknown>(err: Error, user: TUser, _info: unknown, context: ExecutionContext): TUser {
+  override handleRequest<TUser = unknown>(err: Error, user: TUser, _info: unknown, context: ExecutionContext): TUser {
     if (this.isPublic(context)) {
       // On public routes, return whatever passport produced (may be falsy).
       // Do not throw — anonymous access is allowed.

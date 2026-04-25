@@ -10,6 +10,7 @@ import { RealtimeGateway } from './realtime.gateway';
 export type RealtimeResource =
   | 'user'
   | 'post'
+  | 'story'
   | 'comment'
   | 'message'
   | 'notification'
