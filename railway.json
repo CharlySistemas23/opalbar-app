@@ -5,7 +5,7 @@
     "buildCommand": "npx prisma generate && npx nx build api"
   },
   "deploy": {
-    "startCommand": "npx prisma migrate deploy && node apps/api/dist/main.js",
+    "startCommand": "sh -c \"case $RAILWAY_SERVICE_NAME in Postgres) exec docker-entrypoint.sh postgres ;; *) npx prisma migrate deploy && node apps/api/dist/main.js ;; esac\"",
     "healthcheckPath": "/api/v1/health",
     "healthcheckTimeout": 120,
     "restartPolicyType": "ON_FAILURE",
