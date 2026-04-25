@@ -66,6 +66,12 @@ apps/mobile/.expo/
 *.ipa
 *.aab
 
+# Firebase / FCM — service account keys SÍ son secretos
+# (google-services.json y GoogleService-Info.plist NO son secretos:
+#  contienen un API key público restringido por package name + SHA-1.
+#  EAS los necesita en el build, así que se commitean.)
+*-firebase-adminsdk-*.json
+
 # Logs
 *.log
 apps/admin/tsconfig.tsbuildinfo

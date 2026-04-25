@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "938722997440",
+    "project_id": "opalbar-a0a5e",
+    "storage_bucket": "opalbar-a0a5e.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:938722997440:android:ba5140abc0e5cc10d22925",
+        "android_client_info": {
+          "package_name": "com.opalbar.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDmoDB9SE1TBMfvBrlKLg10GrY1YseTqOw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
