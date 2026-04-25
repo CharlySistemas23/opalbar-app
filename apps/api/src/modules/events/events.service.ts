@@ -3,12 +3,11 @@ import {
   Injectable, NotFoundException,
 } from '@nestjs/common';
 import { createHash } from 'crypto';
-import { AttendanceStatus, EventStatus, NotificationType, UserRole } from '@prisma/client';
+import { AttendanceStatus, EventStatus, UserRole } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { RedisService } from '../../database/redis.service';
 import { paginate, getPaginationOffset } from '../../common/dto/pagination.dto';
 import { RealtimeService } from '../realtime/realtime.service';
-import { NotificationsService } from '../notifications/notifications.service';
 import { CreateEventDto, UpdateEventDto, EventFilterDto } from './dto/event.dto';
 
 // Cache TTLs in seconds — public reads only. Tune per hotness.
@@ -22,7 +21,6 @@ export class EventsService {
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
     private readonly realtime: RealtimeService,
-    private readonly notifications: NotificationsService,
   ) {}
 
   private static hashFilter(obj: unknown): string {
@@ -142,22 +140,6 @@ export class EventsService {
     });
     await this.invalidate();
     this.realtime.broadcast('event', 'created', { id: created.id, data: created });
-
-    // Push to every active user with a registered device — only for events
-    // that are actually visible. Drafts/scheduled don't broadcast.
-    if (created.status === EventStatus.PUBLISHED) {
-      this.notifications
-        .broadcastToAllActiveUsers({
-          type: NotificationType.EVENT_NEW,
-          title: 'Nuevo evento en OPAL BAR',
-          titleEn: 'New event at OPAL BAR',
-          body: created.title,
-          bodyEn: created.titleEn ?? created.title,
-          data: { eventId: created.id },
-          imageUrl: created.imageUrl ?? undefined,
-        })
-        .catch(() => {});
-    }
     return created;
   }
 

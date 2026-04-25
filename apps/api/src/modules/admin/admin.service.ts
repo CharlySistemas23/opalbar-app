@@ -2,7 +2,6 @@ import { BadRequestException, Injectable, Logger, NotFoundException } from '@nes
 import {
   AdminActionType,
   ModerationAction,
-  NotificationType,
   Prisma,
   PostStatus,
   ReportStatus,
@@ -15,7 +14,6 @@ import { PushService } from '../push/push.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { CommunityGateway } from '../community/community.gateway';
 import { CommunityService } from '../community/community.service';
-import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class AdminService {
@@ -27,7 +25,6 @@ export class AdminService {
     private readonly realtime: RealtimeService,
     private readonly communityGateway: CommunityGateway,
     private readonly community: CommunityService,
-    private readonly notifications: NotificationsService,
   ) {}
 
   async broadcastPush(title: string, body: string, audience: 'ALL' | 'ADMINS' = 'ALL') {
@@ -683,61 +680,8 @@ export class AdminService {
     // useCommunityRealtime) reload and surface the newly published post.
     if (action === 'approve' && post.status === PostStatus.PENDING_REVIEW) {
       this.communityGateway.emitChanged({ type: 'post_created', postId });
-
-      // Push to the author: their post is now live.
-      this.notifications
-        .createNotification({
-          userId: post.userId,
-          type: NotificationType.POST_APPROVED,
-          title: 'Tu publicación fue aprobada',
-          titleEn: 'Your post was approved',
-          body: 'Ya está visible para la comunidad.',
-          bodyEn: 'It is now visible to the community.',
-          data: { postId },
-        })
-        .catch(() => {});
-
-      // Fan-out to the author's followers — same trigger Instagram uses for
-      // "X posted something new". We do this only on first approval so reposts
-      // (re-approving an edited post) don't re-spam followers.
-      this.prisma.follow
-        .findMany({ where: { followingId: post.userId }, select: { followerId: true } })
-        .then(async (rows) => {
-          if (rows.length === 0) return;
-          const profile = await this.prisma.userProfile.findUnique({
-            where: { userId: post.userId },
-            select: { firstName: true, lastName: true, avatarUrl: true },
-          });
-          const authorName =
-            `${profile?.firstName ?? ''} ${profile?.lastName ?? ''}`.trim() || 'Alguien';
-          await this.notifications.createForUsers(
-            rows.map((r) => r.followerId),
-            {
-              type: NotificationType.COMMUNITY_NEW_POST,
-              title: 'Nueva publicación',
-              titleEn: 'New post',
-              body: `${authorName} publicó algo nuevo.`,
-              bodyEn: `${authorName} just posted.`,
-              data: { postId, authorId: post.userId, authorName, authorAvatarUrl: profile?.avatarUrl ?? null },
-            },
-          );
-        })
-        .catch((err) => this.logger.warn(`follower fan-out failed: ${err?.message}`));
     } else if (action === 'reject') {
       this.communityGateway.emitChanged({ type: 'post_deleted', postId });
-
-      // Tell the author *why* it was rejected so they can fix it.
-      this.notifications
-        .createNotification({
-          userId: post.userId,
-          type: NotificationType.POST_REJECTED,
-          title: 'Tu publicación fue rechazada',
-          titleEn: 'Your post was rejected',
-          body: reason ? `Motivo: ${reason}` : 'Revisa las normas de la comunidad.',
-          bodyEn: reason ? `Reason: ${reason}` : 'Please review community guidelines.',
-          data: { postId, reason: reason ?? null },
-        })
-        .catch(() => {});
     }
   }
 

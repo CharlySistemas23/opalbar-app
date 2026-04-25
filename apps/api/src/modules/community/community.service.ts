@@ -639,22 +639,6 @@ export class CommunityService {
       id: story.id,
       data: { userId, scope },
     });
-
-    // Venue stories are house announcements — push to every active user.
-    // Personal stories don't push (would be spammy at scale; only realtime).
-    if (scope === StoryScope.VENUE) {
-      this.notifications
-        .broadcastToAllActiveUsers({
-          type: NotificationType.VENUE_STORY_NEW,
-          title: 'Nueva historia de OPAL BAR',
-          titleEn: 'New OPAL BAR story',
-          body: dto.caption ?? 'Mira lo que está pasando en el bar.',
-          bodyEn: dto.caption ?? 'See what\'s happening at the bar.',
-          data: { storyId: story.id },
-          imageUrl: dto.mediaUrl,
-        })
-        .catch(() => {});
-    }
     return story;
   }
 
