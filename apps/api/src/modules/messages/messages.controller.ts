@@ -16,6 +16,39 @@ export class MessagesController {
     return this.messagesService.listThreads(me.id);
   }
 
+  @Get('requests')
+  @ApiOperation({ summary: 'List pending message requests sent to me' })
+  listRequests(@CurrentUser() me: User) {
+    return this.messagesService.listRequests(me.id);
+  }
+
+  @Get('requests/count')
+  @ApiOperation({ summary: 'Count of pending requests (for inbox badge)' })
+  requestsCount(@CurrentUser() me: User) {
+    return this.messagesService.requestsCount(me.id);
+  }
+
+  @Post('requests/:id/accept')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Accept a pending request' })
+  acceptRequest(@CurrentUser() me: User, @Param('id') id: string) {
+    return this.messagesService.acceptRequest(me.id, id);
+  }
+
+  @Post('requests/:id/decline')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Decline a request (removes the thread)' })
+  declineRequest(@CurrentUser() me: User, @Param('id') id: string) {
+    return this.messagesService.declineRequest(me.id, id);
+  }
+
+  @Post('requests/:id/block')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Block sender (thread stays as BLOCKED)' })
+  blockRequest(@CurrentUser() me: User, @Param('id') id: string) {
+    return this.messagesService.blockRequest(me.id, id);
+  }
+
   @Post('threads')
   @ApiOperation({ summary: 'Create or fetch thread with another user' })
   createThread(@CurrentUser() me: User, @Body('userId') userId: string) {

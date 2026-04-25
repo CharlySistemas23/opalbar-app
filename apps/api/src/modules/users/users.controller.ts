@@ -1,6 +1,6 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Patch, Post, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { User } from '@prisma/client';
+import { DmPolicy, User } from '@prisma/client';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { UsersService } from './users.service';
@@ -34,6 +34,16 @@ export class UsersController {
   @ApiOperation({ summary: 'Update notification settings' })
   updateNotifications(@CurrentUser() user: User, @Body() settings: Record<string, boolean>) {
     return this.usersService.updateNotificationSettings(user.id, settings);
+  }
+
+  @Patch('me/dm-policy')
+  @ApiOperation({ summary: 'Update who can send me DMs (EVERYONE | FOLLOWING | NONE)' })
+  updateDmPolicy(@CurrentUser() user: User, @Body('policy') policy: DmPolicy) {
+    const allowed = Object.values(DmPolicy);
+    if (!policy || !allowed.includes(policy)) {
+      throw new BadRequestException('policy must be EVERYONE | FOLLOWING | NONE');
+    }
+    return this.usersService.updateDmPolicy(user.id, policy);
   }
 
   @Patch('me/consent')

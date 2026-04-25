@@ -60,7 +60,10 @@ export class NotificationsService {
     data?: Record<string, unknown>;
     imageUrl?: string;
   }) {
-    const notification = await this.prisma.notification.create({ data });
+    // The inner `data` field is Prisma JSON. Record<string, unknown> isn't
+    // structurally identical to InputJsonValue (Prisma forbids `undefined`),
+    // so we cast at the boundary.
+    const notification = await this.prisma.notification.create({ data: data as any });
 
     // Send push notification (placeholder — integrate FCM/APNs)
     await this.sendPush(data.userId, data.title, data.body, data.data);

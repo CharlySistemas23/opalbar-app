@@ -34,6 +34,7 @@ export default function MessagesList() {
   const t = language === 'es';
 
   const [threads, setThreads] = useState<any[]>([]);
+  const [requestsCount, setRequestsCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -42,8 +43,12 @@ export default function MessagesList() {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const r = await messagesApi.threads();
-      setThreads(r.data?.data ?? []);
+      const [threadsRes, reqRes] = await Promise.all([
+        messagesApi.threads(),
+        messagesApi.requestsCount().catch(() => null),
+      ]);
+      setThreads(threadsRes.data?.data ?? []);
+      setRequestsCount(reqRes?.data?.data?.count ?? 0);
     } catch (err) {
       setError(apiError(err));
     } finally {
@@ -126,6 +131,32 @@ export default function MessagesList() {
           onRefresh={() => { setRefreshing(true); load(); }}
           contentContainerStyle={{ paddingBottom: 24, paddingTop: 4 }}
           ItemSeparatorComponent={() => <View style={styles.sep} />}
+          ListHeaderComponent={
+            requestsCount > 0 && query.length === 0 ? (
+              <TouchableOpacity
+                style={styles.requestsRow}
+                onPress={() => router.push('/(app)/messages/requests' as never)}
+                activeOpacity={0.85}
+              >
+                <View style={styles.requestsIcon}>
+                  <Feather name="user-plus" size={18} color={Colors.accentPrimary} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.requestsTitle}>{t ? 'Solicitudes' : 'Requests'}</Text>
+                  <Text style={styles.requestsBody}>
+                    {requestsCount}{' '}
+                    {t
+                      ? requestsCount === 1 ? 'persona quiere chatear contigo' : 'personas quieren chatear contigo'
+                      : requestsCount === 1 ? 'person wants to chat' : 'people want to chat'}
+                  </Text>
+                </View>
+                <View style={styles.requestsBadge}>
+                  <Text style={styles.requestsBadgeText}>{requestsCount > 99 ? '99+' : requestsCount}</Text>
+                </View>
+                <Feather name="chevron-right" size={18} color={Colors.textMuted} />
+              </TouchableOpacity>
+            ) : null
+          }
           renderItem={({ item }) => {
             const other = item.otherUser;
             const first = other?.profile?.firstName ?? '';
@@ -331,4 +362,33 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   emptySearchText: { color: Colors.textSecondary, fontSize: 13 },
+
+  // Requests entry row
+  requestsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: 'rgba(244, 163, 64, 0.05)',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.border,
+    marginBottom: 4,
+  },
+  requestsIcon: {
+    width: 44, height: 44, borderRadius: 22,
+    backgroundColor: 'rgba(244, 163, 64, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(244, 163, 64, 0.22)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  requestsTitle: { color: Colors.textPrimary, fontSize: 15, fontWeight: '700' },
+  requestsBody: { color: Colors.textSecondary, fontSize: 12, marginTop: 2 },
+  requestsBadge: {
+    minWidth: 22, height: 22, borderRadius: 11,
+    paddingHorizontal: 7,
+    backgroundColor: Colors.accentPrimary,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  requestsBadgeText: { color: Colors.textInverse, fontSize: 11, fontWeight: '800' },
 });

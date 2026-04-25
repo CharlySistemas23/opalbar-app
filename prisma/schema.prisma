@@ -154,7 +154,21 @@ enum NotificationType {
   POINTS_REDEEMED
   LEVEL_UP
   ACCOUNT_ALERT
+  MESSAGE_NEW
+  MESSAGE_REQUEST
   SYSTEM
+}
+
+enum DmPolicy {
+  EVERYONE
+  FOLLOWING
+  NONE
+}
+
+enum MessageThreadStatus {
+  ACCEPTED
+  PENDING
+  BLOCKED
 }
 
 enum DataRequestStatus {
@@ -218,6 +232,7 @@ model User {
   status       UserStatus @default(PENDING_VERIFICATION)
   isVerified   Boolean    @default(false)
   points       Int        @default(0)
+  dmPolicy     DmPolicy   @default(EVERYONE)
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
   deletedAt    DateTime?
@@ -1148,11 +1163,13 @@ model Follow {
 }
 
 model MessageThread {
-  id            String   @id @default(cuid())
-  userAId       String
-  userBId       String
-  lastMessageAt DateTime @default(now())
-  createdAt     DateTime @default(now())
+  id             String              @id @default(cuid())
+  userAId        String
+  userBId        String
+  lastMessageAt  DateTime            @default(now())
+  createdAt      DateTime            @default(now())
+  status         MessageThreadStatus @default(ACCEPTED)
+  requestedById  String?             // who initiated the conversation (for PENDING threads)
 
   userA    User      @relation("threadUserA", fields: [userAId], references: [id], onDelete: Cascade)
   userB    User      @relation("threadUserB", fields: [userBId], references: [id], onDelete: Cascade)
@@ -1162,6 +1179,7 @@ model MessageThread {
   @@index([userAId])
   @@index([userBId])
   @@index([lastMessageAt])
+  @@index([status])
 }
 
 model Message {

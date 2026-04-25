@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { NotificationType } from '@prisma/client';
+import { DmPolicy, NotificationType } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -86,6 +86,14 @@ export class UsersService {
     return this.prisma.userInterest.findMany({
       where: { userId },
       include: { category: true },
+    });
+  }
+
+  async updateDmPolicy(userId: string, policy: DmPolicy) {
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: { dmPolicy: policy },
+      select: { id: true, dmPolicy: true },
     });
   }
 

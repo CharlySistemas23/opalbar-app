@@ -1,7 +1,15 @@
 import { ForbiddenException, Inject, Injectable, NotFoundException, forwardRef } from '@nestjs/common';
+import { DmPolicy, MessageThreadStatus, NotificationType, UserRole } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { MessagesGateway } from './messages.gateway';
 import { RealtimeService } from '../realtime/realtime.service';
+import { NotificationsService } from '../notifications/notifications.service';
+
+const STAFF_ROLES: UserRole[] = [
+  UserRole.ADMIN,
+  UserRole.SUPER_ADMIN,
+  UserRole.MODERATOR,
+];
 
 @Injectable()
 export class MessagesService {
@@ -10,11 +18,62 @@ export class MessagesService {
     @Inject(forwardRef(() => MessagesGateway))
     private readonly gateway: MessagesGateway,
     private readonly realtime: RealtimeService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   // Deterministic thread key: sort user IDs so pair (a,b) == (b,a)
   private pair(a: string, b: string): [string, string] {
     return a < b ? [a, b] : [b, a];
+  }
+
+  /**
+   * Decide initial thread status based on recipient's DM policy. Implements
+   * the "IG/FB hybrid" gating:
+   *   EVERYONE  → ACCEPTED
+   *   FOLLOWING → ACCEPTED only if recipient already follows the sender,
+   *               otherwise PENDING (lands in their requests inbox)
+   *   NONE      → ACCEPTED only if recipient already follows the sender,
+   *               otherwise hard-rejected (Forbidden)
+   * Staff (admin/moderator) can bypass any filter — both as sender (their
+   * messages always go through) and as recipient (we don't gate inbound
+   * messages to staff accounts).
+   */
+  private async resolveInitialStatus(
+    senderId: string,
+    recipientId: string,
+  ): Promise<MessageThreadStatus> {
+    const [sender, recipient] = await Promise.all([
+      this.prisma.user.findUnique({
+        where: { id: senderId },
+        select: { id: true, role: true },
+      }),
+      this.prisma.user.findUnique({
+        where: { id: recipientId },
+        select: { id: true, role: true, dmPolicy: true },
+      }),
+    ]);
+
+    if (!recipient) throw new NotFoundException('User not found');
+
+    const senderIsStaff = !!sender && STAFF_ROLES.includes(sender.role);
+    const recipientIsStaff = STAFF_ROLES.includes(recipient.role);
+    if (senderIsStaff || recipientIsStaff) return MessageThreadStatus.ACCEPTED;
+
+    if (recipient.dmPolicy === DmPolicy.EVERYONE) return MessageThreadStatus.ACCEPTED;
+
+    // FOLLOWING / NONE both require recipient → sender follow to auto-accept
+    const recipientFollowsSender = await this.prisma.follow.findUnique({
+      where: { followerId_followingId: { followerId: recipientId, followingId: senderId } },
+      select: { id: true },
+    });
+
+    if (recipientFollowsSender) return MessageThreadStatus.ACCEPTED;
+
+    if (recipient.dmPolicy === DmPolicy.NONE) {
+      throw new ForbiddenException('This user is not accepting messages');
+    }
+
+    return MessageThreadStatus.PENDING;
   }
 
   async getOrCreateThread(meId: string, otherId: string) {
@@ -24,14 +83,28 @@ export class MessagesService {
       where: { userAId_userBId: { userAId: uA, userBId: uB } },
     });
     if (existing) return existing;
+
+    const status = await this.resolveInitialStatus(meId, otherId);
     return this.prisma.messageThread.create({
-      data: { userAId: uA, userBId: uB },
+      data: { userAId: uA, userBId: uB, status, requestedById: meId },
     });
   }
 
   async listThreads(meId: string) {
+    // Inbox shows ACCEPTED threads + PENDING threads I started myself.
+    // PENDING threads where I'm the recipient go to /messages/requests.
     const threads = await this.prisma.messageThread.findMany({
-      where: { OR: [{ userAId: meId }, { userBId: meId }] },
+      where: {
+        OR: [{ userAId: meId }, { userBId: meId }],
+        AND: [
+          {
+            OR: [
+              { status: MessageThreadStatus.ACCEPTED },
+              { status: MessageThreadStatus.PENDING, requestedById: meId },
+            ],
+          },
+        ],
+      },
       orderBy: { lastMessageAt: 'desc' },
       include: {
         userA: { select: { id: true, profile: { select: { firstName: true, lastName: true, avatarUrl: true } } } },
@@ -108,42 +181,179 @@ export class MessagesService {
     if (!trimmed) throw new ForbiddenException('Empty message');
 
     // threadOrUserId can be either a threadId or a targetUserId
-    let threadId: string | null = null;
-    const maybeThread = await this.prisma.messageThread.findUnique({
+    let thread = await this.prisma.messageThread.findUnique({
       where: { id: threadOrUserId },
     });
-    if (maybeThread) {
-      if (maybeThread.userAId !== meId && maybeThread.userBId !== meId) {
+
+    if (thread) {
+      if (thread.userAId !== meId && thread.userBId !== meId) {
         throw new ForbiddenException('Not a member of this thread');
       }
-      threadId = maybeThread.id;
+      if (thread.status === MessageThreadStatus.BLOCKED) {
+        throw new ForbiddenException('This conversation is blocked');
+      }
     } else {
-      // treat as userId
+      // treat as userId — getOrCreateThread will run gating
       const targetUser = await this.prisma.user.findUnique({ where: { id: threadOrUserId } });
       if (!targetUser) throw new NotFoundException('User not found');
-      const thread = await this.getOrCreateThread(meId, threadOrUserId);
-      threadId = thread.id;
+      thread = await this.getOrCreateThread(meId, threadOrUserId);
     }
 
+    const threadId = thread.id;
+    const recipientId = thread.userAId === meId ? thread.userBId : thread.userAId;
+    const isFirstMessage = (await this.prisma.message.count({ where: { threadId } })) === 0;
+
     const msg = await this.prisma.message.create({
-      data: { threadId: threadId!, senderId: meId, content: trimmed },
+      data: { threadId, senderId: meId, content: trimmed },
     });
     await this.prisma.messageThread.update({
-      where: { id: threadId! },
+      where: { id: threadId },
       data: { lastMessageAt: new Date() },
     });
 
     // Real-time push to anyone in the thread room (existing DM gateway)
-    this.gateway.emitNewMessage(threadId!, msg);
+    this.gateway.emitNewMessage(threadId, msg);
 
     // Real-time fan-out: both participants + admin moderation feed
-    const thread = maybeThread ?? (await this.prisma.messageThread.findUnique({ where: { id: threadId! } }));
-    if (thread) {
-      this.realtime.toUsers([thread.userAId, thread.userBId], 'message', 'sent', { id: msg.id, data: msg });
-    }
+    this.realtime.toUsers([thread.userAId, thread.userBId], 'message', 'sent', { id: msg.id, data: msg });
     this.realtime.toStaff('message', 'sent', { id: msg.id, data: { threadId, senderId: meId } });
 
+    // Inbox notifications. PENDING threads notify the recipient as a
+    // request only on the first message; ACCEPTED threads send a normal
+    // message notification (per-message). We never notify the sender.
+    if (thread.status === MessageThreadStatus.PENDING && isFirstMessage) {
+      const senderProfile = await this.prisma.userProfile.findUnique({ where: { userId: meId } });
+      const senderName = senderProfile
+        ? `${senderProfile.firstName ?? ''} ${senderProfile.lastName ?? ''}`.trim() || 'Alguien'
+        : 'Alguien';
+      await this.notifications
+        .createNotification({
+          userId: recipientId,
+          type: NotificationType.MESSAGE_REQUEST,
+          title: `${senderName} quiere enviarte un mensaje`,
+          body: trimmed.slice(0, 120),
+          data: {
+            threadId,
+            actorId: meId,
+            actorName: senderName,
+            actorAvatarUrl: senderProfile?.avatarUrl ?? null,
+            isRequest: true,
+          },
+        })
+        .catch(() => {});
+    } else if (thread.status === MessageThreadStatus.ACCEPTED) {
+      const senderProfile = await this.prisma.userProfile.findUnique({ where: { userId: meId } });
+      const senderName = senderProfile
+        ? `${senderProfile.firstName ?? ''} ${senderProfile.lastName ?? ''}`.trim() || 'Alguien'
+        : 'Alguien';
+      await this.notifications
+        .createNotification({
+          userId: recipientId,
+          type: NotificationType.MESSAGE_NEW,
+          title: senderName,
+          body: trimmed.slice(0, 120),
+          data: {
+            threadId,
+            actorId: meId,
+            actorName: senderName,
+            actorAvatarUrl: senderProfile?.avatarUrl ?? null,
+          },
+        })
+        .catch(() => {});
+    }
+
     return msg;
+  }
+
+  // ─────────────────────────────────────────
+  //  MESSAGE REQUESTS (IG/FB hybrid)
+  // ─────────────────────────────────────────
+
+  async listRequests(meId: string) {
+    const threads = await this.prisma.messageThread.findMany({
+      where: {
+        status: MessageThreadStatus.PENDING,
+        OR: [{ userAId: meId }, { userBId: meId }],
+        // I'm the RECIPIENT, not the requester
+        NOT: { requestedById: meId },
+      },
+      orderBy: { lastMessageAt: 'desc' },
+      include: {
+        userA: { select: { id: true, profile: { select: { firstName: true, lastName: true, avatarUrl: true } } } },
+        userB: { select: { id: true, profile: { select: { firstName: true, lastName: true, avatarUrl: true } } } },
+        messages: {
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          select: { id: true, content: true, createdAt: true, senderId: true },
+        },
+      },
+      take: 100,
+    });
+
+    return threads.map((t) => {
+      const other = t.userAId === meId ? t.userB : t.userA;
+      return {
+        id: t.id,
+        lastMessageAt: t.lastMessageAt,
+        otherUser: other,
+        lastMessage: t.messages[0] ?? null,
+      };
+    });
+  }
+
+  async requestsCount(meId: string) {
+    const count = await this.prisma.messageThread.count({
+      where: {
+        status: MessageThreadStatus.PENDING,
+        OR: [{ userAId: meId }, { userBId: meId }],
+        NOT: { requestedById: meId },
+      },
+    });
+    return { count };
+  }
+
+  private async assertRecipientOf(meId: string, threadId: string) {
+    const t = await this.prisma.messageThread.findUnique({ where: { id: threadId } });
+    if (!t) throw new NotFoundException('Thread not found');
+    if (t.userAId !== meId && t.userBId !== meId) throw new ForbiddenException('Not a member');
+    if (t.requestedById === meId) {
+      throw new ForbiddenException('Only the recipient can act on a request');
+    }
+    return t;
+  }
+
+  async acceptRequest(meId: string, threadId: string) {
+    await this.assertRecipientOf(meId, threadId);
+    const updated = await this.prisma.messageThread.update({
+      where: { id: threadId },
+      data: { status: MessageThreadStatus.ACCEPTED },
+    });
+    this.realtime.toUsers([updated.userAId, updated.userBId], 'message', 'updated', {
+      id: updated.id,
+      data: updated,
+    });
+    return updated;
+  }
+
+  async declineRequest(meId: string, threadId: string) {
+    const t = await this.assertRecipientOf(meId, threadId);
+    // Hard-delete: declined requests should disappear, not linger as BLOCKED.
+    await this.prisma.messageThread.delete({ where: { id: threadId } });
+    this.realtime.toUsers([t.userAId, t.userBId], 'message', 'deleted', { id: threadId });
+    return { ok: true };
+  }
+
+  async blockRequest(meId: string, threadId: string) {
+    const t = await this.assertRecipientOf(meId, threadId);
+    const updated = await this.prisma.messageThread.update({
+      where: { id: threadId },
+      data: { status: MessageThreadStatus.BLOCKED },
+    });
+    this.realtime.toUsers([t.userAId, t.userBId], 'message', 'updated', {
+      id: updated.id,
+      data: updated,
+    });
+    return updated;
   }
 
   async deleteMessage(meId: string, messageId: string) {

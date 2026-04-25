@@ -174,6 +174,8 @@ export const usersApi = {
   updateInterests: (data: unknown) => apiClient.patch('/users/me/interests', data),
   updatePrivacy: (data: unknown) => apiClient.patch('/users/me/consent', data),
   updateNotifications: (data: unknown) => apiClient.patch('/users/me/notifications', data),
+  updateDmPolicy: (policy: 'EVERYONE' | 'FOLLOWING' | 'NONE') =>
+    apiClient.patch('/users/me/dm-policy', { policy }),
   updateConsent: (data: unknown) => apiClient.patch('/users/me/consent', data),
   exportData: () => apiClient.post('/users/me/export'),
   deleteAccount: (reason?: string) => apiClient.delete('/users/me', { data: { reason } }),
@@ -204,6 +206,12 @@ export const messagesApi = {
   send: (id: string, content: string) =>
     apiClient.post(`/messages/threads/${id}/messages`, { content }),
   deleteMessage: (messageId: string) => apiClient.delete(`/messages/${messageId}`),
+  // Message requests (IG/FB hybrid)
+  requests: () => apiClient.get('/messages/requests'),
+  requestsCount: () => apiClient.get('/messages/requests/count'),
+  acceptRequest: (id: string) => apiClient.post(`/messages/requests/${id}/accept`),
+  declineRequest: (id: string) => apiClient.post(`/messages/requests/${id}/decline`),
+  blockRequest: (id: string) => apiClient.post(`/messages/requests/${id}/block`),
 };
 
 export const eventsApi = {

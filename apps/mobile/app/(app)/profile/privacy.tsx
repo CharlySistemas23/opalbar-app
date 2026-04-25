@@ -1,5 +1,5 @@
-import { View, Text, StyleSheet, Switch, ScrollView, Alert, TouchableOpacity } from 'react-native';
-import { useState } from 'react';
+import { View, Text, StyleSheet, Switch, ScrollView, Alert, TouchableOpacity, Pressable } from 'react-native';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
@@ -8,11 +8,28 @@ import { apiError } from '@/api/errors';
 import { useAppStore } from '@/stores/app.store';
 import { Colors, Typography, Spacing, Radius } from '@/constants/tokens';
 
+type DmPolicy = 'EVERYONE' | 'FOLLOWING' | 'NONE';
+
 export default function Privacy() {
   const router = useRouter();
   const { language } = useAppStore();
   const t = language === 'es';
   const [settings, setSettings] = useState({ showProfile: true, showActivity: false, allowMessages: true });
+  const [dmPolicy, setDmPolicy] = useState<DmPolicy>('EVERYONE');
+  const [loadingPolicy, setLoadingPolicy] = useState(true);
+
+  useEffect(() => {
+    let mounted = true;
+    usersApi.me()
+      .then((res: any) => {
+        if (!mounted) return;
+        const policy = res?.data?.dmPolicy as DmPolicy | undefined;
+        if (policy) setDmPolicy(policy);
+      })
+      .catch(() => {})
+      .finally(() => mounted && setLoadingPolicy(false));
+    return () => { mounted = false; };
+  }, []);
 
   // Optimistic auto-save — toggling sends immediately, reverts on error.
   async function toggle(key: keyof typeof settings) {
@@ -27,10 +44,40 @@ export default function Privacy() {
     }
   }
 
+  async function selectPolicy(next: DmPolicy) {
+    if (next === dmPolicy) return;
+    const prev = dmPolicy;
+    setDmPolicy(next);
+    try {
+      await usersApi.updateDmPolicy(next);
+    } catch (err: any) {
+      setDmPolicy(prev);
+      Alert.alert(t ? 'Error' : 'Error', apiError(err));
+    }
+  }
+
   const items = [
     { key: 'showProfile' as const, label: t ? 'Perfil público' : 'Public profile', desc: t ? 'Otros usuarios pueden ver tu perfil' : 'Other users can see your profile' },
     { key: 'showActivity' as const, label: t ? 'Mostrar actividad' : 'Show activity', desc: t ? 'Tu actividad reciente es visible' : 'Your recent activity is visible' },
     { key: 'allowMessages' as const, label: t ? 'Recibir mensajes' : 'Receive messages', desc: t ? 'Otros pueden enviarte mensajes' : 'Others can send you messages' },
+  ];
+
+  const dmOptions: { value: DmPolicy; label: string; desc: string }[] = [
+    {
+      value: 'EVERYONE',
+      label: t ? 'Todos' : 'Everyone',
+      desc: t ? 'Cualquiera puede enviarte mensajes (irán a Solicitudes si no lo sigues)' : 'Anyone can message you (filtered to Requests if you don\'t follow them)',
+    },
+    {
+      value: 'FOLLOWING',
+      label: t ? 'Solo a quienes sigo' : 'People I follow',
+      desc: t ? 'Solo gente que sigues puede iniciarte una conversación' : 'Only people you follow can start a conversation',
+    },
+    {
+      value: 'NONE',
+      label: t ? 'Nadie' : 'No one',
+      desc: t ? 'Nadie nuevo puede enviarte mensajes' : 'No one new can message you',
+    },
   ];
 
   return (
@@ -60,6 +107,35 @@ export default function Privacy() {
             </View>
           ))}
         </View>
+
+        <Text style={styles.sectionTitle}>
+          {t ? 'Quién puede enviarme mensajes' : 'Who can message me'}
+        </Text>
+        <View style={styles.card}>
+          {dmOptions.map((opt, i) => {
+            const selected = dmPolicy === opt.value;
+            return (
+              <Pressable
+                key={opt.value}
+                onPress={() => selectPolicy(opt.value)}
+                disabled={loadingPolicy}
+                style={({ pressed }) => [
+                  styles.row,
+                  i > 0 && styles.rowBorder,
+                  pressed && { opacity: 0.7 },
+                ]}
+              >
+                <View style={styles.rowInfo}>
+                  <Text style={styles.rowLabel}>{opt.label}</Text>
+                  <Text style={styles.rowDesc}>{opt.desc}</Text>
+                </View>
+                <View style={[styles.radio, selected && styles.radioOn]}>
+                  {selected && <View style={styles.radioDot} />}
+                </View>
+              </Pressable>
+            );
+          })}
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -75,11 +151,26 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: Colors.border,
   },
   title: { fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.bold, color: Colors.textPrimary },
-  content: { paddingHorizontal: Spacing[5], gap: Spacing[4], paddingVertical: Spacing[4] },
+  content: { paddingHorizontal: Spacing[5], gap: Spacing[4], paddingVertical: Spacing[4], paddingBottom: Spacing[8] },
   card: { backgroundColor: Colors.bgCard, borderRadius: Radius.xl, borderWidth: 1, borderColor: Colors.border, overflow: 'hidden' },
   row: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: Spacing[4], paddingVertical: Spacing[4] },
   rowBorder: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: Colors.border },
-  rowInfo: { flex: 1 },
+  rowInfo: { flex: 1, paddingRight: Spacing[3] },
   rowLabel: { fontSize: Typography.fontSize.base, color: Colors.textPrimary },
   rowDesc: { fontSize: Typography.fontSize.xs, color: Colors.textSecondary, marginTop: 2 },
+  sectionTitle: {
+    fontSize: Typography.fontSize.xs,
+    color: Colors.textTertiary,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginTop: Spacing[2],
+    marginLeft: Spacing[2],
+  },
+  radio: {
+    width: 22, height: 22, borderRadius: 11,
+    borderWidth: 2, borderColor: Colors.border,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  radioOn: { borderColor: Colors.accentPrimary },
+  radioDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: Colors.accentPrimary },
 });
