@@ -5,10 +5,15 @@
 import { io, type Socket } from 'socket.io-client';
 import { tokenStore } from './client';
 
-const BASE_URL =
-  (import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1')
-    .replace(/\/api\/v1\/?$/, '')
-    .replace(/\/$/, '');
+// socket.io needs an ABSOLUTE host. Vercel rewrites in vercel.json only
+// affect HTTP, not WebSockets — if VITE_API_URL is a relative path
+// (e.g. "/api/v1"), the socket would otherwise try to reach Vercel itself.
+// Fall back to the Railway public host so production always works.
+const RAW_API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1';
+const PROD_API_HOST = 'https://opalbar-app-production.up.railway.app';
+const BASE_URL = RAW_API_URL.startsWith('http')
+  ? RAW_API_URL.replace(/\/api\/v1\/?$/, '').replace(/\/$/, '')
+  : PROD_API_HOST;
 
 export type RealtimeResource =
   | 'user' | 'post' | 'comment' | 'message' | 'notification'
