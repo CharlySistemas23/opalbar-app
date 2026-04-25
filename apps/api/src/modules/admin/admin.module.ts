@@ -6,9 +6,10 @@ import { SupportService } from '../support/support.service';
 import { ReviewsService } from '../reviews/reviews.service';
 import { PushModule } from '../push/push.module';
 import { CommunityModule } from '../community/community.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
-  imports: [ReservationsModule, PushModule, CommunityModule],
+  imports: [ReservationsModule, PushModule, CommunityModule, NotificationsModule],
   controllers: [AdminController],
   providers: [AdminService, SupportService, ReviewsService],
 })
