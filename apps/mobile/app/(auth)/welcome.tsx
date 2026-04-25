@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Image } from 'react-native';
 import { useState } from 'react';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -17,9 +17,11 @@ export default function Welcome() {
   return (
     <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
       <View style={styles.hero}>
-        <View style={styles.logo}>
-          <Text style={styles.logoText}>O</Text>
-        </View>
+        <Image
+          source={require('../../assets/icon.png')}
+          style={styles.logo}
+          resizeMode="contain"
+        />
         <Text style={styles.brand}>OPALBAR</Text>
         <Text style={styles.tagline}>
           {t
@@ -86,12 +88,9 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   logo: {
-    width: 96, height: 96, borderRadius: 26,
-    backgroundColor: Colors.accentPrimary,
-    alignItems: 'center', justifyContent: 'center',
+    width: 128, height: 128, borderRadius: 28,
     marginBottom: 12,
   },
-  logoText: { color: Colors.textInverse, fontSize: 52, fontWeight: '800', lineHeight: 60 },
   brand: {
     color: Colors.textPrimary,
     fontSize: 28,

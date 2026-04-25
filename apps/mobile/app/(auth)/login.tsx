@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, ActivityIndicator, KeyboardAvoidingView, Platform, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, ActivityIndicator, KeyboardAvoidingView, Platform, Alert, Image } from 'react-native';
 import { useState } from 'react';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -67,9 +67,11 @@ export default function Login() {
 
         {/* Hero */}
         <View style={styles.hero}>
-          <View style={styles.logo}>
-            <Text style={styles.logoText}>O</Text>
-          </View>
+          <Image
+            source={require('../../assets/icon.png')}
+            style={styles.logo}
+            resizeMode="contain"
+          />
           <Text style={styles.brand}>OPALBAR</Text>
           <Text style={styles.tagline}>
             {t
@@ -181,12 +183,9 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   logo: {
-    width: 72, height: 72, borderRadius: 20,
-    backgroundColor: Colors.accentPrimary,
-    alignItems: 'center', justifyContent: 'center',
+    width: 96, height: 96, borderRadius: 22,
     marginBottom: 8,
   },
-  logoText: { color: Colors.textInverse, fontSize: 40, fontWeight: '800', lineHeight: 48 },
   brand: { color: Colors.textPrimary, fontSize: 24, fontWeight: '800', letterSpacing: 3 },
   tagline: {
     color: Colors.textSecondary, fontSize: 14, lineHeight: 20, textAlign: 'center', marginTop: 4,
