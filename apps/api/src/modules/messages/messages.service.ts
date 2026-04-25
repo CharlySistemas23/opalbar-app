@@ -112,7 +112,7 @@ export class MessagesService {
         messages: {
           orderBy: { createdAt: 'desc' },
           take: 1,
-          select: { id: true, content: true, createdAt: true, senderId: true, isRead: true },
+          select: { id: true, content: true, imageUrl: true, stickerKey: true, createdAt: true, senderId: true, isRead: true },
         },
       },
       take: 100,
@@ -176,9 +176,17 @@ export class MessagesService {
     return messages.reverse();
   }
 
-  async sendMessage(meId: string, threadOrUserId: string, content: string) {
-    const trimmed = content?.trim();
-    if (!trimmed) throw new ForbiddenException('Empty message');
+  async sendMessage(
+    meId: string,
+    threadOrUserId: string,
+    payload: { content?: string | null; imageUrl?: string | null; stickerKey?: string | null },
+  ) {
+    const trimmed = payload.content?.trim() || null;
+    const imageUrl = payload.imageUrl?.trim() || null;
+    const stickerKey = payload.stickerKey?.trim() || null;
+    if (!trimmed && !imageUrl && !stickerKey) {
+      throw new ForbiddenException('Empty message');
+    }
 
     // threadOrUserId can be either a threadId or a targetUserId
     let thread = await this.prisma.messageThread.findUnique({
@@ -204,8 +212,15 @@ export class MessagesService {
     const isFirstMessage = (await this.prisma.message.count({ where: { threadId } })) === 0;
 
     const msg = await this.prisma.message.create({
-      data: { threadId, senderId: meId, content: trimmed },
+      data: { threadId, senderId: meId, content: trimmed, imageUrl, stickerKey },
     });
+
+    // Build a short preview for notifications. Sticker → 🎟️ Sticker, image → 📷 Foto.
+    const preview = trimmed
+      ? trimmed.slice(0, 120)
+      : imageUrl
+        ? '📷 Foto'
+        : '🎟️ Sticker';
     await this.prisma.messageThread.update({
       where: { id: threadId },
       data: { lastMessageAt: new Date() },
@@ -231,7 +246,7 @@ export class MessagesService {
           userId: recipientId,
           type: NotificationType.MESSAGE_REQUEST,
           title: `${senderName} quiere enviarte un mensaje`,
-          body: trimmed.slice(0, 120),
+          body: preview,
           data: {
             threadId,
             actorId: meId,
@@ -251,7 +266,7 @@ export class MessagesService {
           userId: recipientId,
           type: NotificationType.MESSAGE_NEW,
           title: senderName,
-          body: trimmed.slice(0, 120),
+          body: preview,
           data: {
             threadId,
             actorId: meId,
@@ -284,7 +299,7 @@ export class MessagesService {
         messages: {
           orderBy: { createdAt: 'desc' },
           take: 1,
-          select: { id: true, content: true, createdAt: true, senderId: true },
+          select: { id: true, content: true, imageUrl: true, stickerKey: true, createdAt: true, senderId: true },
         },
       },
       take: 100,

@@ -74,13 +74,17 @@ export class MessagesController {
 
   @Post('threads/:id/messages')
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Send a message' })
+  @ApiOperation({ summary: 'Send a message (text, image, or sticker)' })
   sendMessage(
     @CurrentUser() me: User,
     @Param('id') id: string,
-    @Body('content') content: string,
+    @Body() body: { content?: string; imageUrl?: string; stickerKey?: string },
   ) {
-    return this.messagesService.sendMessage(me.id, id, content);
+    return this.messagesService.sendMessage(me.id, id, {
+      content: body.content,
+      imageUrl: body.imageUrl,
+      stickerKey: body.stickerKey,
+    });
   }
 
   @Delete(':messageId')

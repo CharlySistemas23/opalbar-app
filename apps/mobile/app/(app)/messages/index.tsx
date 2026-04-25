@@ -7,7 +7,7 @@ import { messagesApi } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { useAppStore } from '@/stores/app.store';
 import { useAuthStore } from '@/stores/auth.store';
-import { Colors } from '@/constants/tokens';
+import { Colors, Radius, Shadows, Typography } from '@/constants/tokens';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 
@@ -166,8 +166,12 @@ export default function MessagesList() {
             const lastMsg = item.lastMessage;
             const isMine = !!lastMsg && lastMsg.senderId === me?.id;
             const hasUnread = item.unreadCount > 0;
-            const previewBody = lastMsg?.content ?? '';
-            const preview = isMine
+            const previewBody = lastMsg?.stickerKey
+              ? `${lastMsg.stickerKey}  ${t ? 'Sticker' : 'Sticker'}`
+              : lastMsg?.imageUrl
+                ? (t ? '📷 Foto' : '📷 Photo')
+                : (lastMsg?.content ?? '');
+            const preview = isMine && previewBody
               ? `${t ? 'Tú' : 'You'}: ${previewBody}`
               : previewBody;
             return (
@@ -260,18 +264,26 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingTop: 4,
-    paddingBottom: 8,
+    paddingBottom: 10,
   },
   iconBtn: {
     width: 40, height: 40, borderRadius: 20,
     alignItems: 'center', justifyContent: 'center',
+    backgroundColor: Colors.bgCard,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.borderStrong,
   },
   titleBox: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
   },
-  title: { color: Colors.textPrimary, fontSize: 18, fontWeight: '700' },
+  title: {
+    color: Colors.textPrimary,
+    fontSize: Typography.fontSize['2xl'],
+    fontFamily: Typography.fontFamily.serifSemiBold,
+    letterSpacing: Typography.letterSpacing.tighter,
+  },
   titleBadge: {
     minWidth: 22,
     height: 22,
@@ -281,19 +293,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  titleBadgeText: { color: Colors.textInverse, fontSize: 11, fontWeight: '800' },
+  titleBadgeText: {
+    color: Colors.textInverse,
+    fontSize: Typography.fontSize.xs,
+    fontFamily: Typography.fontFamily.sansBold,
+  },
 
   // Search bar
   searchWrap: {
     marginHorizontal: 16,
-    marginTop: 4,
-    marginBottom: 10,
-    paddingHorizontal: 12,
-    height: 38,
-    borderRadius: 19,
+    marginTop: 6,
+    marginBottom: 12,
+    paddingHorizontal: 14,
+    height: 42,
+    borderRadius: Radius.full,
     backgroundColor: Colors.bgCard,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: Colors.border,
+    borderColor: Colors.borderStrong,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
@@ -301,7 +317,8 @@ const styles = StyleSheet.create({
   searchInput: {
     flex: 1,
     color: Colors.textPrimary,
-    fontSize: 14,
+    fontSize: Typography.fontSize.base,
+    fontFamily: Typography.fontFamily.sans,
     padding: 0,
   },
 
@@ -326,7 +343,11 @@ const styles = StyleSheet.create({
     width: 54, height: 54, borderRadius: 27,
     alignItems: 'center', justifyContent: 'center',
   },
-  avatarText: { color: Colors.textInverse, fontSize: 18, fontWeight: '800' },
+  avatarText: {
+    color: Colors.textInverse,
+    fontSize: 18,
+    fontFamily: Typography.fontFamily.sansBold,
+  },
   unreadRing: {
     position: 'absolute',
     top: 0,
@@ -338,12 +359,32 @@ const styles = StyleSheet.create({
     borderColor: Colors.accentPrimary,
   },
   rowTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  rowBottom: { flexDirection: 'row', alignItems: 'center', marginTop: 3 },
-  name: { color: Colors.textPrimary, fontSize: 15, fontWeight: '600', flex: 1 },
-  nameUnread: { fontWeight: '800' },
-  time: { color: Colors.textMuted, fontSize: 11, fontWeight: '500', marginLeft: 8 },
-  preview: { flex: 1, color: Colors.textSecondary, fontSize: 13 },
-  previewUnread: { color: Colors.textPrimary, fontWeight: '600' },
+  rowBottom: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
+  name: {
+    color: Colors.textPrimary,
+    fontSize: Typography.fontSize.md,
+    fontFamily: Typography.fontFamily.sansSemiBold,
+    flex: 1,
+    letterSpacing: Typography.letterSpacing.tight,
+  },
+  nameUnread: { fontFamily: Typography.fontFamily.sansBold },
+  time: {
+    color: Colors.textMuted,
+    fontSize: Typography.fontSize.xs,
+    fontFamily: Typography.fontFamily.sansMedium,
+    marginLeft: 8,
+  },
+  preview: {
+    flex: 1,
+    color: Colors.textSecondary,
+    fontSize: Typography.fontSize.sm,
+    fontFamily: Typography.fontFamily.sans,
+    lineHeight: Typography.fontSize.sm * Typography.lineHeight.snug,
+  },
+  previewUnread: {
+    color: Colors.textPrimary,
+    fontFamily: Typography.fontFamily.sansSemiBold,
+  },
   badge: {
     minWidth: 20,
     height: 20,
@@ -354,41 +395,66 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  badgeText: { color: Colors.textInverse, fontSize: 11, fontWeight: '800' },
+  badgeText: {
+    color: Colors.textInverse,
+    fontSize: Typography.fontSize.xs,
+    fontFamily: Typography.fontFamily.sansBold,
+  },
 
   emptySearch: {
     alignItems: 'center',
     paddingTop: 60,
     gap: 10,
   },
-  emptySearchText: { color: Colors.textSecondary, fontSize: 13 },
+  emptySearchText: {
+    color: Colors.textSecondary,
+    fontSize: Typography.fontSize.sm,
+    fontFamily: Typography.fontFamily.sans,
+  },
 
   // Requests entry row
   requestsRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 14,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: 'rgba(244, 163, 64, 0.05)',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: Colors.border,
-    marginBottom: 4,
+    marginHorizontal: 16,
+    marginBottom: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    backgroundColor: 'rgba(244, 163, 64, 0.07)',
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: 'rgba(244, 163, 64, 0.18)',
+    ...Shadows.sm,
   },
   requestsIcon: {
     width: 44, height: 44, borderRadius: 22,
-    backgroundColor: 'rgba(244, 163, 64, 0.12)',
+    backgroundColor: 'rgba(244, 163, 64, 0.14)',
     borderWidth: 1,
-    borderColor: 'rgba(244, 163, 64, 0.22)',
+    borderColor: 'rgba(244, 163, 64, 0.28)',
     alignItems: 'center', justifyContent: 'center',
   },
-  requestsTitle: { color: Colors.textPrimary, fontSize: 15, fontWeight: '700' },
-  requestsBody: { color: Colors.textSecondary, fontSize: 12, marginTop: 2 },
+  requestsTitle: {
+    color: Colors.textPrimary,
+    fontSize: Typography.fontSize.md,
+    fontFamily: Typography.fontFamily.serifSemiBold,
+    letterSpacing: Typography.letterSpacing.tight,
+  },
+  requestsBody: {
+    color: Colors.textSecondary,
+    fontSize: Typography.fontSize.sm,
+    fontFamily: Typography.fontFamily.sans,
+    marginTop: 2,
+  },
   requestsBadge: {
     minWidth: 22, height: 22, borderRadius: 11,
     paddingHorizontal: 7,
     backgroundColor: Colors.accentPrimary,
     alignItems: 'center', justifyContent: 'center',
   },
-  requestsBadgeText: { color: Colors.textInverse, fontSize: 11, fontWeight: '800' },
+  requestsBadgeText: {
+    color: Colors.textInverse,
+    fontSize: Typography.fontSize.xs,
+    fontFamily: Typography.fontFamily.sansBold,
+  },
 });

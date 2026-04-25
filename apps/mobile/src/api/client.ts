@@ -203,8 +203,14 @@ export const messagesApi = {
   thread: (id: string) => apiClient.get(`/messages/threads/${id}`),
   messages: (id: string, params?: { cursor?: string; limit?: number }) =>
     apiClient.get(`/messages/threads/${id}/messages`, { params }),
-  send: (id: string, content: string) =>
-    apiClient.post(`/messages/threads/${id}/messages`, { content }),
+  send: (
+    id: string,
+    payload: { content?: string; imageUrl?: string; stickerKey?: string } | string,
+  ) =>
+    apiClient.post(
+      `/messages/threads/${id}/messages`,
+      typeof payload === 'string' ? { content: payload } : payload,
+    ),
   deleteMessage: (messageId: string) => apiClient.delete(`/messages/${messageId}`),
   // Message requests (IG/FB hybrid)
   requests: () => apiClient.get('/messages/requests'),

@@ -12,17 +12,32 @@ import {
   Animated,
   Easing,
   Pressable,
+  Modal,
+  ScrollView,
+  Alert,
 } from 'react-native';
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { messagesApi } from '@/api/client';
 import { useAuthStore } from '@/stores/auth.store';
 import { useAppStore } from '@/stores/app.store';
-import { Colors, Radius } from '@/constants/tokens';
+import { Colors, Radius, Shadows, Typography } from '@/constants/tokens';
 import { useThreadSocket } from '@/hooks/useThreadSocket';
 import { useFeedback } from '@/hooks/useFeedback';
+import { uploadImage } from '@/utils/uploadImage';
+
+// Curated sticker palette — emoji-based, no asset bundling needed.
+// stickerKey is just the emoji, rendered large (80px) on a transparent bubble.
+const STICKER_PACK = [
+  '🔥', '💖', '😂', '🥳', '😍', '😎',
+  '🍻', '🥂', '🍷', '🎉', '✨', '⭐',
+  '👀', '👋', '🙌', '👏', '💯', '💃',
+  '🕺', '🎶', '🎵', '🎁', '💋', '😘',
+  '😭', '🤣', '😅', '🫶', '❤️‍🔥', '💕',
+];
 
 const AVATAR_COLORS = ['#F4A340', '#60A5FA', '#A855F7', '#6FB892', '#E06868', '#EC4899'];
 function colorFor(id: string) {
@@ -88,7 +103,8 @@ function TypingBubble() {
   }, []);
 
   return (
-    <View style={[styles.msgRow, styles.msgRowThem]}>
+    <View style={[styles.msgRow, styles.msgRowThem, { marginTop: 4 }]}>
+      <View style={styles.themAvatarSpacer} />
       <View style={[styles.bubble, styles.bubbleThem, styles.typingBubble]}>
         {dots.map((v, i) => (
           <Animated.View
@@ -107,9 +123,28 @@ function TypingBubble() {
   );
 }
 
+// ─── Animated message wrapper — soft fade + slide on mount ────
+function AnimatedMessage({ children, fromMe }: { children: React.ReactNode; fromMe: boolean }) {
+  const opacity = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(8)).current;
+  const translateX = useRef(new Animated.Value(fromMe ? 14 : -14)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(opacity, { toValue: 1, duration: 200, useNativeDriver: true }),
+      Animated.spring(translateY, { toValue: 0, damping: 16, stiffness: 220, useNativeDriver: true }),
+      Animated.spring(translateX, { toValue: 0, damping: 18, stiffness: 240, useNativeDriver: true }),
+    ]).start();
+  }, [opacity, translateY, translateX]);
+
+  return (
+    <Animated.View style={{ opacity, transform: [{ translateY }, { translateX }] }}>
+      {children}
+    </Animated.View>
+  );
+}
+
 // ─── Prepare grouped messages with date separators ───
-// Groups consecutive messages from same sender within 5 min.
-// Inserts a synthetic { type: 'date' } row whenever the day changes.
 const GROUP_WINDOW_MS = 5 * 60 * 1000;
 
 function buildTimeline(messages: any[]) {
@@ -152,8 +187,16 @@ export default function MessageThread() {
   const [loading, setLoading] = useState(true);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
+  const [composerFocused, setComposerFocused] = useState(false);
+  const [attachOpen, setAttachOpen] = useState(false);
+  const [stickerOpen, setStickerOpen] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const listRef = useRef<FlatList>(null);
   const fb = useFeedback();
+
+  // Send button bounce on tap
+  const sendScale = useRef(new Animated.Value(1)).current;
 
   const load = useCallback(async () => {
     try {
@@ -193,15 +236,15 @@ export default function MessageThread() {
     }
   }, [loading, messages, me?.id, markRead]);
 
-  async function send() {
-    const body = text.trim();
-    if (!body) return;
+  async function sendPayload(payload: { content?: string; imageUrl?: string; stickerKey?: string }) {
     setSending(true);
-    setText('');
-    emitTyping(false);
     fb.send();
+    Animated.sequence([
+      Animated.timing(sendScale, { toValue: 0.85, duration: 90, useNativeDriver: true }),
+      Animated.spring(sendScale, { toValue: 1, damping: 12, stiffness: 320, useNativeDriver: true }),
+    ]).start();
     try {
-      const r = await messagesApi.send(id, body);
+      const r = await messagesApi.send(id, payload);
       const newMsg = r.data?.data;
       if (newMsg) {
         setMessages((m) => (m.some((x) => x.id === newMsg.id) ? m : [...m, newMsg]));
@@ -209,10 +252,63 @@ export default function MessageThread() {
       setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 80);
     } catch {
       fb.error();
-      setText(body);
+      throw new Error('send failed');
     } finally {
       setSending(false);
     }
+  }
+
+  async function send() {
+    const body = text.trim();
+    if (!body) return;
+    setText('');
+    emitTyping(false);
+    try {
+      await sendPayload({ content: body });
+    } catch {
+      setText(body);
+    }
+  }
+
+  async function pickAndSendImage(source: 'camera' | 'library') {
+    setAttachOpen(false);
+    try {
+      // Permission gating
+      if (source === 'camera') {
+        const perm = await ImagePicker.requestCameraPermissionsAsync();
+        if (!perm.granted) {
+          Alert.alert(t ? 'Cámara' : 'Camera', t ? 'Necesitamos permiso para usar la cámara.' : 'We need camera permission.');
+          return;
+        }
+      } else {
+        const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (!perm.granted) {
+          Alert.alert(t ? 'Galería' : 'Library', t ? 'Necesitamos permiso para acceder a tus fotos.' : 'We need photo library permission.');
+          return;
+        }
+      }
+
+      const result = source === 'camera'
+        ? await ImagePicker.launchCameraAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.9 })
+        : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.9 });
+      if (result.canceled || !result.assets?.[0]?.uri) return;
+
+      setUploadingImage(true);
+      const url = await uploadImage(result.assets[0].uri, { kind: 'post' });
+      await sendPayload({ imageUrl: url });
+    } catch (err: any) {
+      fb.error();
+      Alert.alert('Error', err?.message ?? 'Upload failed');
+    } finally {
+      setUploadingImage(false);
+    }
+  }
+
+  async function sendSticker(emoji: string) {
+    setStickerOpen(false);
+    try {
+      await sendPayload({ stickerKey: emoji });
+    } catch {}
   }
 
   const other = thread?.otherUser;
@@ -230,7 +326,6 @@ export default function MessageThread() {
     return tl;
   }, [messages, isOtherTyping]);
 
-  // Find last "read" msg index (mine) — only show ✓✓ on that one, IG-style.
   const lastReadMineId = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i];
@@ -245,6 +340,18 @@ export default function MessageThread() {
     return null;
   }, [messages, me?.id]);
 
+  // Tiny avatar component used next to "them" bubbles on group end
+  const ThemAvatar = ({ visible }: { visible: boolean }) => {
+    if (!visible) return <View style={styles.themAvatarSpacer} />;
+    return other?.profile?.avatarUrl ? (
+      <Image source={{ uri: other.profile.avatarUrl }} style={styles.themAvatar} />
+    ) : (
+      <View style={[styles.themAvatar, { backgroundColor: colorFor(other?.id || id) }]}>
+        <Text style={styles.themAvatarText}>{initials}</Text>
+      </View>
+    );
+  };
+
   return (
     <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
       <KeyboardAvoidingView
@@ -252,10 +359,10 @@ export default function MessageThread() {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={0}
       >
-        {/* Header */}
+        {/* Header — premium with serif name */}
         <View style={styles.header}>
           <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn} hitSlop={10}>
-            <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
+            <Feather name="chevron-left" size={24} color={Colors.textPrimary} />
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.headerMid}
@@ -264,24 +371,43 @@ export default function MessageThread() {
           >
             <View style={{ position: 'relative' }}>
               {other?.profile?.avatarUrl
-                ? <Image source={{ uri: other.profile.avatarUrl }} style={styles.avatar36} />
-                : <View style={[styles.avatar36, { backgroundColor: colorFor(other?.id || id) }]}>
-                    <Text style={styles.avatar36Text}>{initials}</Text>
+                ? <Image source={{ uri: other.profile.avatarUrl }} style={styles.headerAvatar} />
+                : <View style={[styles.headerAvatar, { backgroundColor: colorFor(other?.id || id) }]}>
+                    <Text style={styles.headerAvatarText}>{initials}</Text>
                   </View>}
               {otherOnline ? <View style={styles.onlineDot} /> : null}
             </View>
-            <View style={{ flex: 1, marginLeft: 10 }}>
+            <View style={{ flex: 1, marginLeft: 12 }}>
               <Text style={styles.headerName} numberOfLines={1}>{name}</Text>
-              <Text style={styles.headerSub} numberOfLines={1}>
-                {isOtherTyping
-                  ? (t ? 'Escribiendo…' : 'Typing…')
-                  : otherOnline
-                    ? (t ? 'En línea' : 'Online')
-                    : (t ? 'Desconectado' : 'Offline')}
-              </Text>
+              <View style={styles.headerSubRow}>
+                {isOtherTyping ? (
+                  <>
+                    <View style={[styles.statusDot, { backgroundColor: Colors.accentPrimary }]} />
+                    <Text style={[styles.headerSub, { color: Colors.accentPrimary }]}>
+                      {t ? 'Escribiendo…' : 'Typing…'}
+                    </Text>
+                  </>
+                ) : otherOnline ? (
+                  <>
+                    <View style={[styles.statusDot, { backgroundColor: Colors.accentSuccess }]} />
+                    <Text style={styles.headerSub}>{t ? 'En línea' : 'Online'}</Text>
+                  </>
+                ) : (
+                  <>
+                    <View style={[styles.statusDot, { backgroundColor: Colors.textMuted }]} />
+                    <Text style={styles.headerSub}>{t ? 'Desconectado' : 'Offline'}</Text>
+                  </>
+                )}
+              </View>
             </View>
           </TouchableOpacity>
-          <View style={{ width: 40 }} />
+          <TouchableOpacity
+            style={styles.iconBtn}
+            hitSlop={10}
+            onPress={() => other?.id && router.push(`/(app)/users/${other.id}` as never)}
+          >
+            <Feather name="more-vertical" size={20} color={Colors.textSecondary} />
+          </TouchableOpacity>
         </View>
 
         {loading ? (
@@ -291,37 +417,36 @@ export default function MessageThread() {
             ref={listRef}
             data={timeline}
             keyExtractor={(x) => x.id}
-            contentContainerStyle={{ paddingHorizontal: 12, paddingVertical: 12 }}
+            contentContainerStyle={{ paddingHorizontal: 12, paddingVertical: 16, flexGrow: 1 }}
             onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
             renderItem={({ item }) => {
-              // Date separator
               if (item.type === 'date') {
                 return (
                   <View style={styles.dateRow}>
-                    <View style={styles.dateHairline} />
-                    <Text style={styles.dateText}>{dateLabel(item.at, t)}</Text>
-                    <View style={styles.dateHairline} />
+                    <View style={styles.dateChip}>
+                      <Text style={styles.dateText}>{dateLabel(item.at, t)}</Text>
+                    </View>
                   </View>
                 );
               }
-              // Typing
               if (item.type === 'typing') {
                 return <TypingBubble />;
               }
-              // Regular message
               const m = item.msg;
               const isMe = m.senderId === me?.id;
               const { isFirstInGroup, isLastInGroup, at } = item;
+              const isSticker = !!m.stickerKey;
+              const isImage = !!m.imageUrl && !isSticker;
 
-              // Corner radii based on group position — IG style stacking
+              // Tail radius — sharper corner on the speaker side at group end
               const bubbleStyle = [
                 styles.bubble,
-                isMe ? styles.bubbleMe : styles.bubbleThem,
+                isImage ? styles.bubbleImage : isMe ? styles.bubbleMe : styles.bubbleThem,
                 {
-                  borderTopLeftRadius: !isMe && !isFirstInGroup ? 6 : 18,
-                  borderTopRightRadius: isMe && !isFirstInGroup ? 6 : 18,
-                  borderBottomLeftRadius: !isMe && !isLastInGroup ? 6 : isMe ? 18 : 4,
-                  borderBottomRightRadius: isMe && !isLastInGroup ? 6 : isMe ? 4 : 18,
+                  borderTopLeftRadius: !isMe && !isFirstInGroup ? 8 : 20,
+                  borderTopRightRadius: isMe && !isFirstInGroup ? 8 : 20,
+                  borderBottomLeftRadius: !isMe && !isLastInGroup ? 8 : isMe ? 20 : 6,
+                  borderBottomRightRadius: isMe && !isLastInGroup ? 8 : isMe ? 6 : 20,
                 },
               ];
 
@@ -330,80 +455,237 @@ export default function MessageThread() {
               const isRead = isMe && m.id === lastReadMineId;
 
               return (
-                <View
-                  style={[
-                    styles.msgRow,
-                    isMe ? styles.msgRowMe : styles.msgRowThem,
-                    { marginTop: isFirstInGroup ? 8 : 2 },
-                  ]}
-                >
-                  <View style={bubbleStyle}>
-                    <Text style={[styles.bubbleText, isMe && { color: Colors.textInverse }]}>
-                      {m.content}
-                    </Text>
-                    {showMeta && (
-                      <View style={styles.metaRow}>
-                        <Text style={[styles.bubbleTime, isMe && { color: 'rgba(0,0,0,0.55)' }]}>
-                          {at ? fmtTime(at, language) : ''}
-                        </Text>
-                        {showReadTick && (
-                          <Feather
-                            name={isRead ? 'check-circle' : 'check'}
-                            size={11}
-                            color={isRead ? 'rgba(0,0,0,0.75)' : 'rgba(0,0,0,0.45)'}
-                            style={{ marginLeft: 4 }}
-                          />
+                <AnimatedMessage fromMe={isMe}>
+                  <View
+                    style={[
+                      styles.msgRow,
+                      isMe ? styles.msgRowMe : styles.msgRowThem,
+                      { marginTop: isFirstInGroup ? 10 : 2 },
+                    ]}
+                  >
+                    {!isMe && <ThemAvatar visible={isLastInGroup} />}
+
+                    {isSticker ? (
+                      // Sticker — no bubble, big emoji + meta row underneath
+                      <View style={[styles.stickerWrap, isMe ? { alignItems: 'flex-end' } : { alignItems: 'flex-start' }]}>
+                        <Text style={styles.stickerGlyph}>{m.stickerKey}</Text>
+                        {showMeta && (
+                          <View style={styles.stickerMetaRow}>
+                            <Text style={styles.bubbleTime}>{at ? fmtTime(at, language) : ''}</Text>
+                            {showReadTick && (
+                              <Feather
+                                name={isRead ? 'check-circle' : 'check'}
+                                size={11}
+                                color={isRead ? Colors.accentPrimary : Colors.textMuted}
+                                style={{ marginLeft: 4 }}
+                              />
+                            )}
+                          </View>
+                        )}
+                      </View>
+                    ) : (
+                      <View style={bubbleStyle}>
+                        {isImage ? (
+                          <Pressable onPress={() => setLightboxUrl(m.imageUrl)}>
+                            <Image
+                              source={{ uri: m.imageUrl }}
+                              style={styles.imageThumb}
+                              resizeMode="cover"
+                            />
+                            {!!m.content && (
+                              <Text style={styles.imageCaption}>{m.content}</Text>
+                            )}
+                          </Pressable>
+                        ) : (
+                          <Text style={[styles.bubbleText, isMe ? styles.bubbleTextMe : styles.bubbleTextThem]}>
+                            {m.content}
+                          </Text>
+                        )}
+                        {showMeta && (
+                          <View style={[styles.metaRow, isImage && styles.metaRowOnImage]}>
+                            <Text
+                              style={[
+                                styles.bubbleTime,
+                                isMe && !isImage && styles.bubbleTimeMe,
+                                isImage && styles.bubbleTimeOnImage,
+                              ]}
+                            >
+                              {at ? fmtTime(at, language) : ''}
+                            </Text>
+                            {showReadTick && (
+                              <Feather
+                                name={isRead ? 'check-circle' : 'check'}
+                                size={11}
+                                color={
+                                  isImage
+                                    ? '#fff'
+                                    : isRead
+                                      ? 'rgba(15,13,12,0.85)'
+                                      : 'rgba(15,13,12,0.45)'
+                                }
+                                style={{ marginLeft: 4 }}
+                              />
+                            )}
+                          </View>
                         )}
                       </View>
                     )}
                   </View>
-                </View>
+                </AnimatedMessage>
               );
             }}
             ListEmptyComponent={
               <View style={styles.emptyWrap}>
                 <View style={styles.emptyIcon}>
-                  <Feather name="message-circle" size={28} color={Colors.textMuted} />
+                  <Feather name="message-circle" size={28} color={Colors.accentPrimary} />
                 </View>
                 <Text style={styles.emptyTitle}>
                   {t ? 'Rompe el hielo' : 'Break the ice'}
                 </Text>
                 <Text style={styles.emptySub}>
                   {t ? 'Envía el primer mensaje a ' : 'Send the first message to '}
-                  <Text style={{ color: Colors.textPrimary, fontWeight: '700' }}>{name}</Text>
+                  <Text style={styles.emptyName}>{name}</Text>
                 </Text>
+                <View style={styles.emptyHints}>
+                  {(t
+                    ? ['Hola 👋', '¿Qué tal?', '¡Nos vemos pronto!']
+                    : ['Hi 👋', "What's up?", 'See you soon!']
+                  ).map((s) => (
+                    <Pressable
+                      key={s}
+                      style={({ pressed }) => [styles.hintChip, pressed && { opacity: 0.7 }]}
+                      onPress={() => setText(s)}
+                    >
+                      <Text style={styles.hintText}>{s}</Text>
+                    </Pressable>
+                  ))}
+                </View>
               </View>
             }
           />
         )}
 
+        {/* Composer — premium with focus ring + attachment slot */}
         <View style={styles.compose}>
-          <View style={styles.composeInputWrap}>
+          <Pressable
+            style={({ pressed }) => [styles.attachBtn, pressed && { opacity: 0.7 }]}
+            hitSlop={6}
+            onPress={() => { fb.tap(); setAttachOpen(true); }}
+            disabled={sending || uploadingImage}
+          >
+            {uploadingImage
+              ? <ActivityIndicator size="small" color={Colors.accentPrimary} />
+              : <Feather name="plus" size={20} color={Colors.textSecondary} />}
+          </Pressable>
+          <View style={[styles.composeInputWrap, composerFocused && styles.composeInputWrapFocus]}>
             <TextInput
               style={styles.composeInput}
               value={text}
               onChangeText={(v) => { setText(v); emitTyping(v.length > 0); }}
+              onFocus={() => setComposerFocused(true)}
+              onBlur={() => setComposerFocused(false)}
               placeholder={t ? 'Mensaje…' : 'Message…'}
               placeholderTextColor={Colors.textMuted}
               multiline
             />
+            <Pressable
+              style={({ pressed }) => [styles.stickerBtn, pressed && { opacity: 0.6 }]}
+              hitSlop={6}
+              onPress={() => { fb.tap(); setStickerOpen(true); }}
+            >
+              <Feather name="smile" size={20} color={Colors.textSecondary} />
+            </Pressable>
           </View>
-          <Pressable
-            style={({ pressed }) => [
-              styles.sendBtn,
-              (!text.trim() || sending) && { opacity: 0.35 },
-              pressed && text.trim() && !sending && { transform: [{ scale: 0.92 }] },
-            ]}
-            onPress={send}
-            disabled={!text.trim() || sending}
-            hitSlop={8}
-          >
-            {sending
-              ? <ActivityIndicator color={Colors.textInverse} size="small" />
-              : <Feather name="send" size={17} color={Colors.textInverse} />}
-          </Pressable>
+          <Animated.View style={{ transform: [{ scale: sendScale }] }}>
+            <Pressable
+              style={({ pressed }) => [
+                styles.sendBtn,
+                (!text.trim() || sending) && styles.sendBtnDisabled,
+                pressed && text.trim() && !sending && { opacity: 0.85 },
+              ]}
+              onPress={send}
+              disabled={!text.trim() || sending}
+              hitSlop={8}
+            >
+              {sending
+                ? <ActivityIndicator color={Colors.textInverse} size="small" />
+                : <Feather name="send" size={17} color={text.trim() ? Colors.textInverse : Colors.textMuted} />}
+            </Pressable>
+          </Animated.View>
         </View>
       </KeyboardAvoidingView>
+
+      {/* Attach action sheet — camera / library */}
+      <Modal visible={attachOpen} transparent animationType="fade" onRequestClose={() => setAttachOpen(false)}>
+        <Pressable style={styles.sheetBackdrop} onPress={() => setAttachOpen(false)}>
+          <Pressable style={styles.sheet}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.sheetTitle}>{t ? 'Adjuntar' : 'Attach'}</Text>
+            <Pressable
+              style={({ pressed }) => [styles.sheetRow, pressed && { opacity: 0.7 }]}
+              onPress={() => pickAndSendImage('camera')}
+            >
+              <View style={[styles.sheetIcon, { backgroundColor: Colors.accentPrimary + '14', borderColor: Colors.accentPrimary + '33' }]}>
+                <Feather name="camera" size={20} color={Colors.accentPrimary} />
+              </View>
+              <Text style={styles.sheetLabel}>{t ? 'Cámara' : 'Camera'}</Text>
+            </Pressable>
+            <Pressable
+              style={({ pressed }) => [styles.sheetRow, pressed && { opacity: 0.7 }]}
+              onPress={() => pickAndSendImage('library')}
+            >
+              <View style={[styles.sheetIcon, { backgroundColor: Colors.accentInfo + '14', borderColor: Colors.accentInfo + '33' }]}>
+                <Feather name="image" size={20} color={Colors.accentInfo} />
+              </View>
+              <Text style={styles.sheetLabel}>{t ? 'Galería' : 'Photo library'}</Text>
+            </Pressable>
+            <Pressable
+              style={({ pressed }) => [styles.sheetRow, pressed && { opacity: 0.7 }]}
+              onPress={() => { setAttachOpen(false); setStickerOpen(true); }}
+            >
+              <View style={[styles.sheetIcon, { backgroundColor: Colors.accentChampagne + '14', borderColor: Colors.accentChampagne + '33' }]}>
+                <Feather name="smile" size={20} color={Colors.accentChampagne} />
+              </View>
+              <Text style={styles.sheetLabel}>{t ? 'Sticker' : 'Sticker'}</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Sticker palette */}
+      <Modal visible={stickerOpen} transparent animationType="fade" onRequestClose={() => setStickerOpen(false)}>
+        <Pressable style={styles.sheetBackdrop} onPress={() => setStickerOpen(false)}>
+          <Pressable style={[styles.sheet, { paddingBottom: 24 }]}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.sheetTitle}>{t ? 'Stickers' : 'Stickers'}</Text>
+            <ScrollView style={{ maxHeight: 360 }}>
+              <View style={styles.stickerGrid}>
+                {STICKER_PACK.map((s) => (
+                  <Pressable
+                    key={s}
+                    style={({ pressed }) => [styles.stickerCell, pressed && { opacity: 0.6, transform: [{ scale: 0.92 }] }]}
+                    onPress={() => sendSticker(s)}
+                  >
+                    <Text style={styles.stickerCellGlyph}>{s}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Image lightbox */}
+      <Modal visible={!!lightboxUrl} transparent animationType="fade" onRequestClose={() => setLightboxUrl(null)}>
+        <Pressable style={styles.lightboxBackdrop} onPress={() => setLightboxUrl(null)}>
+          {lightboxUrl ? (
+            <Image source={{ uri: lightboxUrl }} style={styles.lightboxImage} resizeMode="contain" />
+          ) : null}
+          <Pressable style={styles.lightboxClose} onPress={() => setLightboxUrl(null)} hitSlop={12}>
+            <Feather name="x" size={22} color={Colors.white} />
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -412,155 +694,392 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
+  // ── Header ────────────────────────────────────
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 14,
+    paddingHorizontal: 8,
     paddingTop: 4,
-    paddingBottom: 10,
+    paddingBottom: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: Colors.border,
+    borderBottomColor: Colors.borderStrong,
+    backgroundColor: Colors.bgPrimary,
+    ...Shadows.sm,
   },
   iconBtn: {
     width: 40, height: 40, borderRadius: 20,
     alignItems: 'center', justifyContent: 'center',
   },
-  headerMid: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, marginHorizontal: 6 },
-  avatar36: {
-    width: 38, height: 38, borderRadius: 19,
+  headerMid: { flexDirection: 'row', alignItems: 'center', flex: 1, marginHorizontal: 4 },
+  headerAvatar: {
+    width: 40, height: 40, borderRadius: 20,
     alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: Colors.border,
   },
-  avatar36Text: { color: Colors.textInverse, fontSize: 13, fontWeight: '800' },
-  headerName: { color: Colors.textPrimary, fontSize: 15, fontWeight: '700' },
-  headerSub: { color: Colors.textSecondary, fontSize: 11, marginTop: 1 },
+  headerAvatarText: { color: Colors.textInverse, fontSize: 14, fontFamily: Typography.fontFamily.sansBold },
+  headerName: {
+    color: Colors.textPrimary,
+    fontSize: Typography.fontSize.lg,
+    fontFamily: Typography.fontFamily.serifSemiBold,
+    letterSpacing: Typography.letterSpacing.tight,
+  },
+  headerSubRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 },
+  statusDot: {
+    width: 6, height: 6, borderRadius: 3,
+  },
+  headerSub: {
+    color: Colors.textSecondary,
+    fontSize: Typography.fontSize.xs,
+    fontFamily: Typography.fontFamily.sansMedium,
+  },
   onlineDot: {
     position: 'absolute',
     right: -1,
     bottom: -1,
-    width: 11,
-    height: 11,
-    borderRadius: 5.5,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
     backgroundColor: Colors.accentSuccess,
-    borderWidth: 2,
+    borderWidth: 2.5,
     borderColor: Colors.bgPrimary,
   },
 
-  // Date separators
+  // ── Date separators (chip style) ────────────
   dateRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    marginVertical: 14,
-    paddingHorizontal: 8,
+    justifyContent: 'center',
+    marginVertical: 16,
   },
-  dateHairline: {
-    flex: 1,
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: Colors.border,
+  dateChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: Radius.full,
+    backgroundColor: Colors.bgCard,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
   },
   dateText: {
-    color: Colors.textMuted,
-    fontSize: 11,
-    fontWeight: '600',
-    letterSpacing: 0.3,
+    color: Colors.textSecondary,
+    fontSize: Typography.fontSize.xs,
+    fontFamily: Typography.fontFamily.sansMedium,
+    letterSpacing: 0.4,
     textTransform: 'capitalize',
   },
 
-  // Message bubbles
-  msgRow: { flexDirection: 'row', paddingHorizontal: 4 },
+  // ── Message bubbles ─────────────────────────
+  msgRow: { flexDirection: 'row', paddingHorizontal: 4, alignItems: 'flex-end', gap: 6 },
   msgRowMe: { justifyContent: 'flex-end' },
   msgRowThem: { justifyContent: 'flex-start' },
-  bubble: {
-    maxWidth: '78%',
-    paddingHorizontal: 13,
-    paddingVertical: 9,
+  themAvatar: {
+    width: 26, height: 26, borderRadius: 13,
+    alignItems: 'center', justifyContent: 'center',
+    marginBottom: 2,
   },
-  bubbleMe: { backgroundColor: Colors.accentPrimary },
-  bubbleThem: { backgroundColor: Colors.bgCard },
-  bubbleText: { color: Colors.textPrimary, fontSize: 14.5, lineHeight: 20 },
+  themAvatarSpacer: { width: 26, marginBottom: 2 },
+  themAvatarText: {
+    color: Colors.textInverse,
+    fontSize: 10,
+    fontFamily: Typography.fontFamily.sansBold,
+  },
+  bubble: {
+    maxWidth: '74%',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    ...Shadows.sm,
+  },
+  bubbleMe: {
+    backgroundColor: Colors.accentPrimary,
+  },
+  bubbleThem: {
+    backgroundColor: Colors.bgCard,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.borderStrong,
+  },
+  bubbleImage: {
+    backgroundColor: Colors.bgCard,
+    padding: 4,
+    overflow: 'hidden',
+  },
+  imageThumb: {
+    width: 220,
+    height: 220,
+    borderRadius: 14,
+    backgroundColor: Colors.bgElevated,
+  },
+  imageCaption: {
+    color: Colors.textPrimary,
+    fontFamily: Typography.fontFamily.sans,
+    fontSize: Typography.fontSize.base,
+    paddingHorizontal: 8,
+    paddingTop: 8,
+    paddingBottom: 4,
+  },
+  metaRowOnImage: {
+    position: 'absolute',
+    right: 10,
+    bottom: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: Radius.full,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+  bubbleTimeOnImage: { color: '#fff' },
+
+  // Sticker (no bubble)
+  stickerWrap: {
+    maxWidth: '74%',
+    paddingVertical: 4,
+  },
+  stickerGlyph: {
+    fontSize: 78,
+    lineHeight: 92,
+  },
+  stickerMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 2,
+  },
+  bubbleText: {
+    fontSize: Typography.fontSize.base,
+    lineHeight: Typography.fontSize.base * Typography.lineHeight.snug,
+    fontFamily: Typography.fontFamily.sans,
+  },
+  bubbleTextMe: { color: Colors.textInverse },
+  bubbleTextThem: { color: Colors.textPrimary },
   metaRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 3,
+    marginTop: 4,
     alignSelf: 'flex-end',
   },
-  bubbleTime: { color: Colors.textMuted, fontSize: 10, fontWeight: '500' },
+  bubbleTime: {
+    color: Colors.textMuted,
+    fontSize: 10,
+    fontFamily: Typography.fontFamily.sansMedium,
+    letterSpacing: 0.2,
+  },
+  bubbleTimeMe: { color: 'rgba(15,13,12,0.65)' },
 
-  // Typing
+  // ── Typing ─────────────────────────────────
   typingBubble: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 14,
-    paddingVertical: 11,
+    gap: 5,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 20,
+    borderBottomLeftRadius: 6,
   },
   typingDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
     backgroundColor: Colors.textSecondary,
   },
 
-  // Empty state
+  // ── Empty state ────────────────────────────
   emptyWrap: {
+    flex: 1,
     alignItems: 'center',
-    paddingTop: 60,
-    paddingHorizontal: 40,
+    justifyContent: 'center',
+    paddingHorizontal: 32,
     gap: 8,
   },
   emptyIcon: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: Colors.bgCard,
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: Colors.accentPrimary + '14',
+    borderWidth: 1,
+    borderColor: Colors.accentPrimary + '33',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 8,
   },
   emptyTitle: {
     color: Colors.textPrimary,
-    fontSize: 17,
-    fontWeight: '700',
+    fontSize: Typography.fontSize.xl,
+    fontFamily: Typography.fontFamily.serifSemiBold,
+    letterSpacing: Typography.letterSpacing.tight,
   },
   emptySub: {
     color: Colors.textSecondary,
-    fontSize: 13,
+    fontSize: Typography.fontSize.base,
+    fontFamily: Typography.fontFamily.sans,
     textAlign: 'center',
-    lineHeight: 19,
+    lineHeight: Typography.fontSize.base * Typography.lineHeight.snug,
+  },
+  emptyName: {
+    color: Colors.textPrimary,
+    fontFamily: Typography.fontFamily.sansSemiBold,
+  },
+  emptyHints: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 20,
+  },
+  hintChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: Radius.full,
+    backgroundColor: Colors.bgCard,
+    borderWidth: 1,
+    borderColor: Colors.borderStrong,
+  },
+  hintText: {
+    color: Colors.textPrimary,
+    fontSize: Typography.fontSize.sm,
+    fontFamily: Typography.fontFamily.sansMedium,
   },
 
-  // Composer
+  // ── Composer ───────────────────────────────
   compose: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     gap: 8,
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingTop: 10,
+    paddingBottom: 10,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: Colors.border,
+    borderTopColor: Colors.borderStrong,
     backgroundColor: Colors.bgPrimary,
+  },
+  attachBtn: {
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: Colors.bgCard,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.borderStrong,
+    alignItems: 'center', justifyContent: 'center',
   },
   composeInputWrap: {
     flex: 1,
     backgroundColor: Colors.bgCard,
-    borderRadius: 22,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: Colors.border,
-    paddingHorizontal: 14,
+    borderRadius: Radius.xl,
+    borderWidth: 1,
+    borderColor: Colors.borderStrong,
+    paddingHorizontal: 16,
     paddingVertical: 4,
     minHeight: 42,
     justifyContent: 'center',
   },
+  composeInputWrapFocus: {
+    borderColor: Colors.accentPrimary + '88',
+    backgroundColor: Colors.bgElevated,
+  },
   composeInput: {
     color: Colors.textPrimary,
-    fontSize: 14.5,
+    fontSize: Typography.fontSize.base,
+    fontFamily: Typography.fontFamily.sans,
     maxHeight: 120,
     paddingVertical: 6,
   },
   sendBtn: {
     width: 42, height: 42, borderRadius: 21,
     backgroundColor: Colors.accentPrimary,
+    alignItems: 'center', justifyContent: 'center',
+    ...Shadows.sm,
+  },
+  sendBtnDisabled: {
+    backgroundColor: Colors.bgCard,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  stickerBtn: {
+    width: 32, height: 32, borderRadius: 16,
+    alignItems: 'center', justifyContent: 'center',
+    marginLeft: 4,
+  },
+
+  // ── Attach action sheet ─────────────────────
+  sheetBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'flex-end',
+  },
+  sheet: {
+    backgroundColor: Colors.bgCard,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingTop: 8,
+    paddingBottom: 32,
+    paddingHorizontal: 20,
+    borderTopWidth: 1,
+    borderTopColor: Colors.borderStrong,
+    ...Shadows.lg,
+  },
+  sheetHandle: {
+    alignSelf: 'center',
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: Colors.border,
+    marginBottom: 16,
+  },
+  sheetTitle: {
+    color: Colors.textPrimary,
+    fontFamily: Typography.fontFamily.serifSemiBold,
+    fontSize: Typography.fontSize.lg,
+    letterSpacing: Typography.letterSpacing.tight,
+    marginBottom: 8,
+  },
+  sheetRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingVertical: 14,
+  },
+  sheetIcon: {
+    width: 44, height: 44, borderRadius: 22,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1,
+  },
+  sheetLabel: {
+    color: Colors.textPrimary,
+    fontFamily: Typography.fontFamily.sansSemiBold,
+    fontSize: Typography.fontSize.base,
+  },
+
+  // ── Sticker grid ────────────────────────────
+  stickerGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    paddingTop: 8,
+  },
+  stickerCell: {
+    width: '16.66%',
+    aspectRatio: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 12,
+    marginBottom: 6,
+  },
+  stickerCellGlyph: {
+    fontSize: 36,
+    lineHeight: 44,
+  },
+
+  // ── Lightbox ────────────────────────────────
+  lightboxBackdrop: {
+    flex: 1,
+    backgroundColor: '#000',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  lightboxImage: {
+    width: '100%',
+    height: '100%',
+  },
+  lightboxClose: {
+    position: 'absolute',
+    top: 50,
+    right: 20,
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: 'rgba(0,0,0,0.6)',
     alignItems: 'center', justifyContent: 'center',
   },
 });

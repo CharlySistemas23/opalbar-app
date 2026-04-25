@@ -1183,13 +1183,15 @@ model MessageThread {
 }
 
 model Message {
-  id        String    @id @default(cuid())
-  threadId  String
-  senderId  String
-  content   String    @db.Text
-  isRead    Boolean   @default(false)
-  createdAt DateTime  @default(now())
-  deletedAt DateTime?
+  id         String    @id @default(cuid())
+  threadId   String
+  senderId   String
+  content    String?   @db.Text
+  imageUrl   String?
+  stickerKey String?
+  isRead     Boolean   @default(false)
+  createdAt  DateTime  @default(now())
+  deletedAt  DateTime?
 
   thread MessageThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
   sender User          @relation("messageSender", fields: [senderId], references: [id], onDelete: Cascade)
