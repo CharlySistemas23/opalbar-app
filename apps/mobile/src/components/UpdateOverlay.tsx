@@ -1,17 +1,23 @@
 // ─────────────────────────────────────────────
 //  UpdateOverlay — full-screen modal shown while an OTA update is being
-//  downloaded. Auto-reloads the app when the new bundle is ready so the user
-//  never sees a stale UI next to a "ready" state.
+//  downloaded. Shows an animated progress bar (expo-updates doesn't expose
+//  real download progress, so we ease toward 90% during download and snap
+//  to 100% once isUpdatePending fires) and auto-reloads when ready.
 //
 //  Also exposes `checkForUpdateManual` for the Settings "Buscar
 //  actualizaciones" button.
 // ─────────────────────────────────────────────
-import { useEffect, useState } from 'react';
-import { Modal, View, Text, StyleSheet, ActivityIndicator, Platform } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Modal, View, Text, StyleSheet, Animated, Easing, Platform } from 'react-native';
 import * as Updates from 'expo-updates';
 import { Feather } from '@expo/vector-icons';
-import { Colors } from '@/constants/tokens';
+import { Colors, Radius, Shadows, Spacing, Typography } from '@/constants/tokens';
 import { useAppStore } from '@/stores/app.store';
+
+// Tuning: slow ramp toward 90% so the bar always has visible motion even on
+// fast connections. The remaining 10% snaps when the bundle is actually ready.
+const SOFT_CAP = 0.9;
+const TIME_TO_SOFT_CAP_MS = 7000;
 
 export function UpdateOverlay() {
   const { language } = useAppStore();
@@ -19,50 +25,132 @@ export function UpdateOverlay() {
   const { isDownloading, isUpdatePending, availableUpdate } = Updates.useUpdates();
   const [reloading, setReloading] = useState(false);
 
-  // When a new bundle finishes downloading, expo-updates flips
-  // isUpdatePending → true. Reload automatically so the user boots into the
-  // fresh JS without needing to kill the app.
+  const progress = useRef(new Animated.Value(0)).current;
+  const cardOpacity = useRef(new Animated.Value(0)).current;
+  const cardScale = useRef(new Animated.Value(0.92)).current;
+  const pulse = useRef(new Animated.Value(0)).current;
+  const [pct, setPct] = useState(0);
+
+  const visible = isDownloading || isUpdatePending || reloading;
+
+  // Smooth fade-in + scale-in when the overlay first becomes visible.
+  useEffect(() => {
+    if (!visible) return;
+    Animated.parallel([
+      Animated.timing(cardOpacity, { toValue: 1, duration: 240, useNativeDriver: true }),
+      Animated.spring(cardScale, { toValue: 1, damping: 16, stiffness: 220, useNativeDriver: true }),
+    ]).start();
+  }, [visible, cardOpacity, cardScale]);
+
+  // Soft ramp to 90% while the download is in flight.
+  useEffect(() => {
+    if (!isDownloading || isUpdatePending) return;
+    progress.setValue(0);
+    const anim = Animated.timing(progress, {
+      toValue: SOFT_CAP,
+      duration: TIME_TO_SOFT_CAP_MS,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    });
+    anim.start();
+    return () => anim.stop();
+  }, [isDownloading, isUpdatePending, progress]);
+
+  // Snap to 100% the moment the bundle is ready.
+  useEffect(() => {
+    if (!isUpdatePending && !reloading) return;
+    Animated.timing(progress, {
+      toValue: 1,
+      duration: 320,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+  }, [isUpdatePending, reloading, progress]);
+
+  // Mirror progress.value into a percent string for the label.
+  useEffect(() => {
+    const id = progress.addListener(({ value }) => setPct(Math.round(value * 100)));
+    return () => progress.removeListener(id);
+  }, [progress]);
+
+  // Soft accent pulse on the badge while downloading.
+  useEffect(() => {
+    if (!isDownloading || isUpdatePending) return;
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1, duration: 900, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 0, duration: 900, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [isDownloading, isUpdatePending, pulse]);
+
+  // Auto-reload once the bundle is committed.
   useEffect(() => {
     if (!isUpdatePending || reloading) return;
     setReloading(true);
-    // Short grace period so the "Listo, reiniciando…" state is visible.
+    // Brief pause so users see the "Listo" state and the bar at 100%.
     const timer = setTimeout(() => {
       Updates.reloadAsync().catch(() => setReloading(false));
-    }, 800);
+    }, 900);
     return () => clearTimeout(timer);
   }, [isUpdatePending, reloading]);
 
   if (Platform.OS === 'web') return null;
-  const visible = isDownloading || isUpdatePending || reloading;
   if (!visible) return null;
 
-  const title = isUpdatePending || reloading
-    ? (t ? 'Listo, reiniciando…' : 'Ready, reloading…')
-    : (t ? 'Recibiendo actualización' : 'Receiving update');
+  const ready = isUpdatePending || reloading;
+  const title = ready
+    ? (t ? 'Actualización lista' : 'Update ready')
+    : (t ? 'Descargando actualización' : 'Downloading update');
+  const sub = ready
+    ? (t ? 'Reiniciando en un momento…' : 'Restarting in a moment…')
+    : (t ? 'No cierres la app — esto solo tomará unos segundos.' : 'Don\'t close the app — this only takes a few seconds.');
 
-  const sub = isUpdatePending || reloading
-    ? (t ? 'La app se reiniciará en un momento.' : 'The app will restart in a moment.')
-    : (t ? 'Estamos descargando la versión más reciente. No cierres la app.' : 'Downloading the latest version. Please don\'t close the app.');
+  const widthInterpolate = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0%', '100%'],
+  });
+  const pulseScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.08] });
+  const pulseOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.35, 0.05] });
 
   return (
     <Modal visible transparent animationType="fade" statusBarTranslucent>
       <View style={styles.backdrop}>
-        <View style={styles.card}>
-          <View style={styles.iconWrap}>
-            {isUpdatePending || reloading ? (
-              <Feather name="check" size={26} color={Colors.accentSuccess} />
-            ) : (
-              <ActivityIndicator size="large" color={Colors.accentPrimary} />
-            )}
+        <Animated.View style={[styles.card, { opacity: cardOpacity, transform: [{ scale: cardScale }] }]}>
+          <View style={styles.iconStack}>
+            {!ready ? (
+              <Animated.View
+                style={[
+                  styles.pulseRing,
+                  { transform: [{ scale: pulseScale }], opacity: pulseOpacity },
+                ]}
+              />
+            ) : null}
+            <View style={[styles.iconWrap, ready && styles.iconWrapReady]}>
+              <Feather
+                name={ready ? 'check' : 'download-cloud'}
+                size={28}
+                color={ready ? Colors.accentSuccess : Colors.accentPrimary}
+              />
+            </View>
           </View>
+
           <Text style={styles.title}>{title}</Text>
           <Text style={styles.sub}>{sub}</Text>
+
+          <View style={styles.barTrack}>
+            <Animated.View style={[styles.barFill, { width: widthInterpolate, backgroundColor: ready ? Colors.accentSuccess : Colors.accentPrimary }]} />
+          </View>
+          <Text style={styles.pct}>{pct}%</Text>
+
           {availableUpdate?.createdAt ? (
             <Text style={styles.meta}>
               {t ? 'Versión' : 'Version'} {formatCreatedAt(availableUpdate.createdAt)}
             </Text>
           ) : null}
-        </View>
+        </Animated.View>
       </View>
     </Modal>
   );
@@ -100,47 +188,91 @@ export async function checkForUpdateManual(): Promise<UpdateCheckResult> {
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.82)',
+    backgroundColor: 'rgba(0,0,0,0.86)',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 32,
+    paddingHorizontal: Spacing[6],
   },
   card: {
     width: '100%',
-    maxWidth: 340,
+    maxWidth: 360,
     backgroundColor: Colors.bgCard,
-    borderRadius: 18,
-    paddingVertical: 28,
-    paddingHorizontal: 24,
+    borderRadius: Radius.xl,
+    paddingVertical: Spacing[7],
+    paddingHorizontal: Spacing[6],
     alignItems: 'center',
-    gap: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: Colors.border,
+    borderWidth: 1,
+    borderColor: Colors.borderStrong,
+    ...Shadows.lg,
+  },
+  iconStack: {
+    width: 84,
+    height: 84,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: Spacing[4],
+  },
+  pulseRing: {
+    position: 'absolute',
+    width: 84,
+    height: 84,
+    borderRadius: 42,
+    backgroundColor: Colors.accentPrimary,
   },
   iconWrap: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
     backgroundColor: Colors.bgElevated,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 4,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  iconWrapReady: {
+    backgroundColor: Colors.accentSuccess + '14',
+    borderColor: Colors.accentSuccess + '55',
   },
   title: {
     color: Colors.textPrimary,
-    fontSize: 16,
-    fontWeight: '800',
+    fontFamily: Typography.fontFamily.serifSemiBold,
+    fontSize: Typography.fontSize.lg,
+    letterSpacing: Typography.letterSpacing.tight,
     textAlign: 'center',
+    marginBottom: Spacing[2],
   },
   sub: {
     color: Colors.textSecondary,
-    fontSize: 13,
+    fontFamily: Typography.fontFamily.sans,
+    fontSize: Typography.fontSize.sm,
     textAlign: 'center',
-    lineHeight: 19,
+    lineHeight: Typography.fontSize.sm * Typography.lineHeight.snug,
+    marginBottom: Spacing[5],
+  },
+  barTrack: {
+    width: '100%',
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: Colors.bgElevated,
+    overflow: 'hidden',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+  },
+  barFill: {
+    height: '100%',
+    borderRadius: 4,
+  },
+  pct: {
+    marginTop: Spacing[2],
+    color: Colors.textSecondary,
+    fontFamily: Typography.fontFamily.sansSemiBold,
+    fontSize: Typography.fontSize.sm,
+    letterSpacing: 0.5,
   },
   meta: {
     color: Colors.textMuted,
-    fontSize: 11,
-    marginTop: 6,
+    fontFamily: Typography.fontFamily.sans,
+    fontSize: Typography.fontSize.xs,
+    marginTop: Spacing[3],
   },
 });
