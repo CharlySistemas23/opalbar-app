@@ -87,15 +87,22 @@ export function UpdateOverlay() {
   }, [isDownloading, isUpdatePending, pulse]);
 
   // Auto-reload once the bundle is committed.
+  // NOTE: don't put `reloading` in deps — calling setReloading(true) inside
+  // would re-run the effect and the cleanup would cancel the timer before it
+  // fires. Use a ref to make sure we only schedule the reload once.
+  const reloadScheduledRef = useRef(false);
   useEffect(() => {
-    if (!isUpdatePending || reloading) return;
+    if (!isUpdatePending || reloadScheduledRef.current) return;
+    reloadScheduledRef.current = true;
     setReloading(true);
     // Brief pause so users see the "Listo" state and the bar at 100%.
-    const timer = setTimeout(() => {
-      Updates.reloadAsync().catch(() => setReloading(false));
+    setTimeout(() => {
+      Updates.reloadAsync().catch(() => {
+        reloadScheduledRef.current = false;
+        setReloading(false);
+      });
     }, 900);
-    return () => clearTimeout(timer);
-  }, [isUpdatePending, reloading]);
+  }, [isUpdatePending]);
 
   if (Platform.OS === 'web') return null;
   if (!visible) return null;
