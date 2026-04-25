@@ -84,6 +84,29 @@ function fmtDuration(sec: number) {
   return `${m}:${r.toString().padStart(2, '0')}`;
 }
 
+// Pulsing red dot for the recording bar.
+function RecordingPulse() {
+  const v = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(v, { toValue: 0.35, duration: 600, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        Animated.timing(v, { toValue: 1, duration: 600, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, []);
+  return (
+    <Animated.View
+      style={[
+        styles.recordPulse,
+        { opacity: v, transform: [{ scale: v.interpolate({ inputRange: [0.35, 1], outputRange: [0.85, 1.15] }) }] },
+      ]}
+    />
+  );
+}
+
 function TypingBubble() {
   const dots = [useRef(new Animated.Value(0.3)).current, useRef(new Animated.Value(0.3)).current, useRef(new Animated.Value(0.3)).current];
   useEffect(() => {
@@ -161,56 +184,114 @@ function buildTimeline(messages: any[]) {
   return out;
 }
 
-// Voice-note bubble — tap to play/pause, simple progress bar.
+// Stable pseudo-waveform — derive bar heights from the URL hash so a given
+// voice note always renders the same shape across mounts.
+function waveformFor(url: string, bars = 28) {
+  const out: number[] = [];
+  let h = 0;
+  for (let i = 0; i < url.length; i++) h = (h * 31 + url.charCodeAt(i)) >>> 0;
+  for (let i = 0; i < bars; i++) {
+    h = (h * 1664525 + 1013904223) >>> 0;
+    out.push(0.35 + ((h >>> 8) & 0xff) / 255 * 0.65);
+  }
+  return out;
+}
+
+// Voice-note bubble — tap to play/pause, animated progress over a waveform.
 function VoiceBubble({ url, durationSec, isMe }: { url: string; durationSec?: number | null; isMe: boolean }) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [loading, setLoading] = useState(false);
   const soundRef = useRef<Audio.Sound | null>(null);
+  const bars = useMemo(() => waveformFor(url), [url]);
 
-  useEffect(() => {
-    return () => {
-      soundRef.current?.unloadAsync().catch(() => {});
-      soundRef.current = null;
-    };
+  const cleanup = useCallback(async () => {
+    const s = soundRef.current;
+    soundRef.current = null;
+    if (s) {
+      try { s.setOnPlaybackStatusUpdate(null as any); } catch {}
+      try { await s.unloadAsync(); } catch {}
+    }
   }, []);
+
+  useEffect(() => () => { cleanup(); }, [cleanup]);
 
   const toggle = useCallback(async () => {
     try {
-      if (!soundRef.current) {
-        const { sound } = await Audio.Sound.createAsync({ uri: url }, { shouldPlay: true });
-        soundRef.current = sound;
-        setIsPlaying(true);
-        sound.setOnPlaybackStatusUpdate((status: any) => {
-          if (!status?.isLoaded) return;
-          if (status.durationMillis) setProgress(status.positionMillis / status.durationMillis);
-          if (status.didJustFinish) {
-            setIsPlaying(false);
-            setProgress(0);
-            sound.setPositionAsync(0).catch(() => {});
-          }
-        });
+      // Already loaded: just pause/resume.
+      if (soundRef.current) {
+        const status: any = await soundRef.current.getStatusAsync();
+        if (status.isLoaded && status.isPlaying) {
+          await soundRef.current.pauseAsync();
+          setIsPlaying(false);
+        } else if (status.isLoaded) {
+          await soundRef.current.playAsync();
+          setIsPlaying(true);
+        }
         return;
       }
-      const status: any = await soundRef.current.getStatusAsync();
-      if (status.isPlaying) {
-        await soundRef.current.pauseAsync();
-        setIsPlaying(false);
-      } else {
-        await soundRef.current.playAsync();
-        setIsPlaying(true);
-      }
-    } catch {}
-  }, [url]);
+      // Fresh play: ensure audio mode is set for playback (after recording the
+      // mode may still be in capture state, which on Android causes glitches).
+      setLoading(true);
+      try {
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: false,
+          playsInSilentModeIOS: true,
+        } as any);
+      } catch {}
+      const { sound } = await Audio.Sound.createAsync(
+        { uri: url },
+        { shouldPlay: true, isLooping: false, volume: 1.0 },
+      );
+      soundRef.current = sound;
+      setLoading(false);
+      setIsPlaying(true);
+      sound.setOnPlaybackStatusUpdate((status: any) => {
+        if (!status?.isLoaded) return;
+        if (status.durationMillis) {
+          setProgress(Math.min(1, status.positionMillis / status.durationMillis));
+        }
+        if (status.didJustFinish) {
+          // Fully release the sound so a future tap creates a fresh instance.
+          setIsPlaying(false);
+          setProgress(0);
+          cleanup();
+        }
+      });
+    } catch {
+      setLoading(false);
+    }
+  }, [url, cleanup]);
 
   const fillColor = isMe ? 'rgba(15,13,12,0.85)' : Colors.accentPrimary;
-  const trackColor = isMe ? 'rgba(15,13,12,0.18)' : Colors.borderStrong;
+  const dimColor = isMe ? 'rgba(15,13,12,0.28)' : Colors.borderStrong;
+
   return (
     <View style={styles.voiceRow}>
-      <Pressable onPress={toggle} hitSlop={6} style={[styles.voicePlay, { borderColor: fillColor }]}>
-        <Feather name={isPlaying ? 'pause' : 'play'} size={14} color={fillColor} />
+      <Pressable onPress={toggle} hitSlop={6} style={[styles.voicePlay, { backgroundColor: fillColor }]}>
+        {loading ? (
+          <ActivityIndicator size="small" color={isMe ? Colors.accentPrimary : '#fff'} />
+        ) : (
+          <Feather name={isPlaying ? 'pause' : 'play'} size={14} color={isMe ? Colors.accentPrimary : '#fff'} />
+        )}
       </Pressable>
-      <View style={[styles.voiceTrack, { backgroundColor: trackColor }]}>
-        <View style={[styles.voiceFill, { backgroundColor: fillColor, width: `${Math.round(progress * 100)}%` }]} />
+      <View style={styles.voiceWaveform}>
+        {bars.map((h, i) => {
+          const played = i / bars.length <= progress;
+          return (
+            <View
+              key={i}
+              style={[
+                styles.voiceBar,
+                {
+                  height: 4 + h * 18,
+                  backgroundColor: played ? fillColor : dimColor,
+                  opacity: played ? 1 : 0.6,
+                },
+              ]}
+            />
+          );
+        })}
       </View>
       <Text style={[styles.voiceTime, { color: isMe ? 'rgba(15,13,12,0.65)' : Colors.textMuted }]}>
         {fmtDuration(durationSec ?? 0)}
@@ -656,11 +737,11 @@ export default function MessageThread() {
     const preview = q.content
       ? q.content.slice(0, 80)
       : q.imageUrl
-        ? (t ? '📷 Foto' : '📷 Photo')
+        ? (t ? 'Foto' : 'Photo')
         : q.audioUrl
-          ? (t ? '🎤 Nota de voz' : '🎤 Voice note')
+          ? (t ? 'Nota de voz' : 'Voice note')
           : q.stickerKey
-            ? `${q.stickerKey}`
+            ? 'Sticker'
             : '…';
     return (
       <View style={[styles.replyQuote, isMe ? styles.replyQuoteMe : styles.replyQuoteThem]}>
@@ -673,6 +754,15 @@ export default function MessageThread() {
             {preview}
           </Text>
         </View>
+        {q.imageUrl ? (
+          <Image source={{ uri: q.imageUrl }} style={styles.replyQuoteThumb} />
+        ) : q.stickerKey ? (
+          <View style={styles.replyQuoteSticker}><Text style={{ fontSize: 22 }}>{q.stickerKey}</Text></View>
+        ) : q.audioUrl ? (
+          <View style={[styles.replyQuoteSticker, { backgroundColor: isMe ? 'rgba(15,13,12,0.18)' : Colors.bgElevated }]}>
+            <Feather name="mic" size={14} color={isMe ? 'rgba(15,13,12,0.85)' : Colors.accentPrimary} />
+          </View>
+        ) : null}
       </View>
     );
   };
@@ -963,9 +1053,11 @@ export default function MessageThread() {
             <View style={styles.replyComposeBar} />
             <View style={{ flex: 1 }}>
               <Text style={styles.replyComposeAuthor}>
+                <Feather name="corner-up-left" size={11} color={Colors.accentPrimary} />
+                {'  '}
                 {t ? 'Respondiendo a ' : 'Replying to '}
-                <Text style={{ fontFamily: Typography.fontFamily.sansBold }}>
-                  {replyTo.senderId === me?.id ? (t ? 'tu mensaje' : 'your message') : name}
+                <Text style={{ color: Colors.textPrimary, fontFamily: Typography.fontFamily.sansBold }}>
+                  {replyTo.senderId === me?.id ? (t ? 'ti' : 'yourself') : name}
                 </Text>
               </Text>
               <Text style={styles.replyComposePreview} numberOfLines={1}>
@@ -975,8 +1067,15 @@ export default function MessageThread() {
                       : replyTo.stickerKey ?? '…')}
               </Text>
             </View>
-            <Pressable onPress={() => setReplyTo(null)} hitSlop={10}>
-              <Feather name="x" size={18} color={Colors.textSecondary} />
+            {replyTo.imageUrl ? (
+              <Image source={{ uri: replyTo.imageUrl }} style={styles.replyComposeThumb} />
+            ) : replyTo.stickerKey ? (
+              <View style={styles.replyComposeStickerThumb}>
+                <Text style={{ fontSize: 26 }}>{replyTo.stickerKey}</Text>
+              </View>
+            ) : null}
+            <Pressable onPress={() => setReplyTo(null)} hitSlop={10} style={styles.replyComposeClose}>
+              <Feather name="x" size={16} color={Colors.textSecondary} />
             </Pressable>
           </View>
         )}
@@ -984,7 +1083,7 @@ export default function MessageThread() {
         {/* Voice recording overlay (replaces composer while recording) */}
         {recording ? (
           <View style={styles.recordBar}>
-            <View style={styles.recordPulse} />
+            <RecordingPulse />
             <Text style={styles.recordTime}>{fmtDuration(recordingDur)}</Text>
             <Text style={styles.recordHint}>{t ? 'Grabando…' : 'Recording…'}</Text>
             <View style={{ flex: 1 }} />
@@ -1034,7 +1133,7 @@ export default function MessageThread() {
                 style={({ pressed }) => [styles.micBtn, pressed && { opacity: 0.7 }]}
                 hitSlop={8}
               >
-                <Feather name="mic" size={18} color={Colors.textPrimary} />
+                <Feather name="mic" size={18} color={Colors.accentPrimary} />
               </Pressable>
             ) : (
               <Animated.View style={{ transform: [{ scale: sendScale }] }}>
@@ -1293,8 +1392,8 @@ const styles = StyleSheet.create({
   bubble: { paddingHorizontal: 14, paddingVertical: 10, ...Shadows.sm },
   bubbleMe: { backgroundColor: Colors.accentPrimary },
   bubbleThem: { backgroundColor: Colors.bgCard, borderWidth: StyleSheet.hairlineWidth, borderColor: Colors.borderStrong },
-  bubbleImage: { backgroundColor: Colors.bgCard, padding: 4, overflow: 'hidden' },
-  imageThumb: { width: 220, height: 220, borderRadius: 14, backgroundColor: Colors.bgElevated },
+  bubbleImage: { backgroundColor: Colors.bgCard, padding: 3, overflow: 'hidden' },
+  imageThumb: { width: 240, height: 240, borderRadius: 16, backgroundColor: Colors.bgElevated },
   imageCaption: {
     color: Colors.textPrimary, fontFamily: Typography.fontFamily.sans,
     fontSize: Typography.fontSize.base, paddingHorizontal: 8, paddingTop: 8, paddingBottom: 4,
@@ -1309,8 +1408,9 @@ const styles = StyleSheet.create({
   // Reply quote rendered inside a bubble
   replyQuote: {
     flexDirection: 'row', alignItems: 'center',
-    paddingVertical: 6, paddingRight: 10, paddingLeft: 8,
-    borderRadius: 10, gap: 8, marginBottom: 6,
+    paddingVertical: 6, paddingRight: 6, paddingLeft: 8,
+    borderRadius: 10, gap: 8, marginBottom: 8,
+    minHeight: 36,
   },
   replyQuoteMe: { backgroundColor: 'rgba(15,13,12,0.10)' },
   replyQuoteThem: { backgroundColor: Colors.bgElevated },
@@ -1324,22 +1424,37 @@ const styles = StyleSheet.create({
     fontSize: Typography.fontSize.xs,
     fontFamily: Typography.fontFamily.sans,
   },
+  replyQuoteThumb: {
+    width: 30, height: 30, borderRadius: 6,
+    backgroundColor: Colors.bgCard,
+  },
+  replyQuoteSticker: {
+    width: 30, height: 30, borderRadius: 6,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: Colors.bgCard,
+  },
 
   // Reaction chips
-  reactionRow: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 4, gap: 4 },
+  reactionRow: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 6, marginHorizontal: 4, gap: 5 },
   reactionChip: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    backgroundColor: Colors.bgCard,
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    backgroundColor: Colors.bgElevated,
     borderWidth: 1, borderColor: Colors.borderStrong,
-    paddingHorizontal: 8, paddingVertical: 3,
+    paddingHorizontal: 9, paddingVertical: 4,
     borderRadius: Radius.full,
+    ...Shadows.sm,
   },
   reactionChipMine: {
-    backgroundColor: Colors.accentPrimary + '22',
-    borderColor: Colors.accentPrimary + '88',
+    backgroundColor: Colors.accentPrimary + '2A',
+    borderColor: Colors.accentPrimary,
   },
-  reactionEmoji: { fontSize: 13 },
-  reactionCount: { fontSize: 11, fontFamily: Typography.fontFamily.sansMedium, color: Colors.textSecondary },
+  reactionEmoji: { fontSize: 14, lineHeight: 16 },
+  reactionCount: {
+    fontSize: 11,
+    fontFamily: Typography.fontFamily.sansBold,
+    color: Colors.textPrimary,
+    letterSpacing: 0.2,
+  },
 
   // Failed retry banner
   failedRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 },
@@ -1347,15 +1462,31 @@ const styles = StyleSheet.create({
   failedAction: { fontSize: 11, color: Colors.accentPrimary, fontFamily: Typography.fontFamily.sansBold, marginLeft: 4 },
 
   // Voice
-  voiceRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4, minWidth: 180 },
+  voiceRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 4, minWidth: 200 },
   voicePlay: {
-    width: 30, height: 30, borderRadius: 15,
+    width: 34, height: 34, borderRadius: 17,
     alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1.5,
+    ...Shadows.sm,
   },
-  voiceTrack: { flex: 1, height: 4, borderRadius: 2, overflow: 'hidden' },
-  voiceFill: { height: '100%' },
-  voiceTime: { fontSize: 11, fontFamily: Typography.fontFamily.sansMedium, minWidth: 32, textAlign: 'right' },
+  voiceWaveform: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 26,
+    gap: 2,
+  },
+  voiceBar: {
+    flex: 1,
+    minWidth: 2,
+    borderRadius: 1.5,
+  },
+  voiceTime: {
+    fontSize: 11,
+    fontFamily: Typography.fontFamily.sansMedium,
+    minWidth: 32,
+    textAlign: 'right',
+    letterSpacing: 0.3,
+  },
 
   stickerWrap: { paddingVertical: 4 },
   stickerGlyph: { fontSize: 78, lineHeight: 92 },
@@ -1415,21 +1546,37 @@ const styles = StyleSheet.create({
   replyComposeChip: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
     paddingHorizontal: 14, paddingVertical: 10,
-    backgroundColor: Colors.bgCard,
+    backgroundColor: Colors.bgElevated,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: Colors.borderStrong,
+    borderTopColor: Colors.accentPrimary + '44',
   },
-  replyComposeBar: { width: 3, height: 28, backgroundColor: Colors.accentPrimary, borderRadius: 2 },
+  replyComposeBar: { width: 3, height: 34, backgroundColor: Colors.accentPrimary, borderRadius: 2 },
   replyComposeAuthor: {
     fontSize: Typography.fontSize.xs,
     color: Colors.textSecondary,
     fontFamily: Typography.fontFamily.sans,
+    letterSpacing: 0.2,
   },
   replyComposePreview: {
-    fontSize: Typography.fontSize.xs,
-    color: Colors.textMuted,
-    fontFamily: Typography.fontFamily.sans,
+    fontSize: Typography.fontSize.sm,
+    color: Colors.textPrimary,
+    fontFamily: Typography.fontFamily.sansMedium,
     marginTop: 2,
+  },
+  replyComposeThumb: {
+    width: 36, height: 36, borderRadius: 8,
+    backgroundColor: Colors.bgCard,
+  },
+  replyComposeStickerThumb: {
+    width: 36, height: 36, borderRadius: 8,
+    backgroundColor: Colors.bgCard,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  replyComposeClose: {
+    width: 28, height: 28, borderRadius: 14,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: Colors.bgCard,
+    borderWidth: 1, borderColor: Colors.borderStrong,
   },
 
   compose: {
@@ -1470,8 +1617,8 @@ const styles = StyleSheet.create({
   sendBtnDisabled: { backgroundColor: Colors.bgCard, borderWidth: 1, borderColor: Colors.border },
   micBtn: {
     width: 42, height: 42, borderRadius: 21,
-    backgroundColor: Colors.bgCard,
-    borderWidth: 1, borderColor: Colors.borderStrong,
+    backgroundColor: Colors.accentPrimary + '18',
+    borderWidth: 1, borderColor: Colors.accentPrimary + '55',
     alignItems: 'center', justifyContent: 'center',
   },
   stickerBtn: {
