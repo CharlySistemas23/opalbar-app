@@ -12,6 +12,7 @@ import { PrismaService } from '../../database/prisma.service';
 import { paginate, getPaginationOffset, PaginationDto } from '../../common/dto/pagination.dto';
 import { PushService } from '../push/push.service';
 import { RealtimeService } from '../realtime/realtime.service';
+import { CommunityGateway } from '../community/community.gateway';
 
 @Injectable()
 export class AdminService {
@@ -21,6 +22,7 @@ export class AdminService {
     private readonly prisma: PrismaService,
     private readonly push: PushService,
     private readonly realtime: RealtimeService,
+    private readonly communityGateway: CommunityGateway,
   ) {}
 
   async broadcastPush(title: string, body: string, audience: 'ALL' | 'ADMINS' = 'ALL') {
@@ -669,6 +671,13 @@ export class AdminService {
 
     this.realtime.broadcast('post', action === 'approve' ? 'approved' : 'rejected', { id: postId, data: { reason } });
     this.realtime.toUser(post.userId, 'post', action === 'approve' ? 'approved' : 'rejected', { id: postId, data: { reason } });
+    // Notify the legacy /community socket so mobile feeds (which subscribe via
+    // useCommunityRealtime) reload and surface the newly published post.
+    if (action === 'approve' && post.status === PostStatus.PENDING_REVIEW) {
+      this.communityGateway.emitChanged({ type: 'post_created', postId });
+    } else if (action === 'reject') {
+      this.communityGateway.emitChanged({ type: 'post_deleted', postId });
+    }
   }
 
   /**
@@ -749,6 +758,10 @@ export class AdminService {
     for (const p of pending) {
       this.realtime.broadcast('post', action === 'approve' ? 'approved' : 'rejected', { id: p.id });
       this.realtime.toUser(p.userId, 'post', action === 'approve' ? 'approved' : 'rejected', { id: p.id });
+      this.communityGateway.emitChanged({
+        type: action === 'approve' ? 'post_created' : 'post_deleted',
+        postId: p.id,
+      });
     }
 
     return { processed: actionableIds.length, skipped };

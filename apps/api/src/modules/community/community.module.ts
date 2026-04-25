@@ -8,6 +8,6 @@ import { NotificationsModule } from '../notifications/notifications.module';
 	imports: [NotificationsModule],
 	controllers: [CommunityController, AdminCommunityController],
 	providers: [CommunityService, CommunityGateway],
-	exports: [CommunityService],
+	exports: [CommunityService, CommunityGateway],
 })
 export class CommunityModule {}
