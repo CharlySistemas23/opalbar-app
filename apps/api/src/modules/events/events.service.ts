@@ -62,12 +62,31 @@ export class EventsService {
         }),
       });
 
+      // List cards never render the long description body or the tag/pricing
+      // detail. Pulling those would inflate the response (description is
+      // unbounded text). Trim to exactly what the cards consume.
       const [data, total] = await Promise.all([
         this.prisma.event.findMany({
           where,
           skip,
           take: limit,
-          include: {
+          select: {
+            id: true,
+            title: true,
+            titleEn: true,
+            imageUrl: true,
+            coverUrl: true,
+            startDate: true,
+            endDate: true,
+            isFree: true,
+            isHighlighted: true,
+            status: true,
+            currentCapacity: true,
+            maxCapacity: true,
+            price: true,
+            currency: true,
+            venueId: true,
+            categoryId: true,
             venue: { select: { id: true, name: true, city: true } },
             category: { select: { id: true, name: true, icon: true, color: true } },
             _count: { select: { attendees: true } },

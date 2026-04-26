@@ -58,12 +58,33 @@ export class OffersService {
         }),
       });
 
+      // Cards never read description/terms (long Text columns) — pulling them
+      // bloats list responses for no UI gain. Trim to just the card surface.
       const [data, total] = await Promise.all([
         this.prisma.offer.findMany({
           where,
           skip,
           take: limit,
-          include: {
+          select: {
+            id: true,
+            title: true,
+            titleEn: true,
+            imageUrl: true,
+            type: true,
+            status: true,
+            discountValue: true,
+            minimumPurchase: true,
+            maxRedemptions: true,
+            currentRedemptions: true,
+            maxPerUser: true,
+            startDate: true,
+            endDate: true,
+            daysOfWeek: true,
+            startTime: true,
+            endTime: true,
+            isHighlighted: true,
+            pointsRequired: true,
+            venueId: true,
             venue: { select: { id: true, name: true, city: true } },
             _count: { select: { redemptions: true } },
           },
