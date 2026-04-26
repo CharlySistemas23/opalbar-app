@@ -1,6 +1,6 @@
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, ImageBackground, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ImageBackground, RefreshControl, FlatList } from 'react-native';
 import { Pressy, FadeIn } from '@/components/ui';
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
@@ -36,22 +36,42 @@ export default function Events() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const reqIdRef = useRef(0);
 
-  const load = useCallback(async () => {
-    setError(null);
+  const PAGE_SIZE = 20;
+
+  const load = useCallback(async (mode: 'fresh' | 'more' = 'fresh') => {
+    const nextPage = mode === 'more' ? page + 1 : 1;
+    if (mode === 'more' && (loadingMore || !hasMore)) return;
+    if (mode === 'more') setLoadingMore(true);
+    else setError(null);
+    const id = ++reqIdRef.current;
     try {
-      const r = await eventsApi.list({});
-      setItems(r.data?.data?.data ?? []);
+      const r = await eventsApi.list({ page: nextPage, limit: PAGE_SIZE });
+      if (reqIdRef.current !== id) return;
+      const payload = r.data?.data;
+      const rows: EventItem[] = payload?.data ?? [];
+      const meta = payload?.meta;
+      setItems((prev) => (mode === 'more' ? [...prev, ...rows] : rows));
+      setPage(nextPage);
+      setHasMore(meta ? !!meta.hasNextPage : rows.length === PAGE_SIZE);
     } catch (err) {
-      setItems([]);
+      if (reqIdRef.current !== id) return;
+      if (mode === 'fresh') setItems([]);
       setError(apiError(err));
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (reqIdRef.current === id) {
+        setLoading(false);
+        setRefreshing(false);
+        setLoadingMore(false);
+      }
     }
-  }, []);
+  }, [page, loadingMore, hasMore]);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  useFocusEffect(useCallback(() => { load('fresh'); }, []));
 
   const data = items;
 
@@ -70,39 +90,65 @@ export default function Events() {
       </View>
 
       {/* Event list */}
-      <ScrollView
-        contentContainerStyle={styles.list}
-        showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={Colors.accentPrimary} />}
-      >
-        {loading ? (
-          <ActivityIndicator color={Colors.accentPrimary} style={{ marginTop: 24 }} />
-        ) : error && data.length === 0 ? (
-          <ErrorState
-            title={t ? 'No se pudieron cargar' : 'Could not load'}
-            message={error}
-            retryLabel={t ? 'Reintentar' : 'Retry'}
-            onRetry={() => { setLoading(true); load(); }}
-          />
-        ) : data.length === 0 ? (
-          <EmptyState
-            icon="calendar"
-            title={t ? 'Sin eventos por ahora' : 'No events yet'}
-            message={t ? 'Pronto habrá nuevos eventos. Desliza hacia abajo para refrescar.' : 'New events coming soon. Pull down to refresh.'}
-          />
-        ) : (
-          data.map((ev, idx) => (
-            <FadeIn key={ev.id} delay={idx * 70} from={24}>
+      {loading && data.length === 0 ? (
+        <ActivityIndicator color={Colors.accentPrimary} style={{ marginTop: 40 }} />
+      ) : error && data.length === 0 ? (
+        <ErrorState
+          title={t ? 'No se pudieron cargar' : 'Could not load'}
+          message={error}
+          retryLabel={t ? 'Reintentar' : 'Retry'}
+          onRetry={() => { setLoading(true); load('fresh'); }}
+        />
+      ) : (
+        <FlatList
+          data={data}
+          keyExtractor={(ev, idx) => ev.id ?? `ev-${idx}`}
+          contentContainerStyle={styles.list}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => { setRefreshing(true); load('fresh'); }}
+              tintColor={Colors.accentPrimary}
+            />
+          }
+          renderItem={({ item: ev, index: idx }) => (
+            // Stagger the fade only on first paint; later pages drop it so
+            // appended items don't jitter as the user scrolls.
+            idx < 8 ? (
+              <FadeIn delay={idx * 70} from={24}>
+                <EventCard
+                  ev={ev}
+                  t={t}
+                  lang={language}
+                  onPress={() => router.push(`/(app)/events/${ev.id}` as never)}
+                />
+              </FadeIn>
+            ) : (
               <EventCard
                 ev={ev}
                 t={t}
                 lang={language}
                 onPress={() => router.push(`/(app)/events/${ev.id}` as never)}
               />
-            </FadeIn>
-          ))
-        )}
-      </ScrollView>
+            )
+          )}
+          onEndReachedThreshold={0.5}
+          onEndReached={() => load('more')}
+          ListFooterComponent={
+            loadingMore ? (
+              <ActivityIndicator color={Colors.accentPrimary} style={{ paddingVertical: 16 }} />
+            ) : null
+          }
+          ListEmptyComponent={
+            <EmptyState
+              icon="calendar"
+              title={t ? 'Sin eventos por ahora' : 'No events yet'}
+              message={t ? 'Pronto habrá nuevos eventos. Desliza hacia abajo para refrescar.' : 'New events coming soon. Pull down to refresh.'}
+            />
+          }
+        />
+      )}
     </SafeAreaView>
   );
 }

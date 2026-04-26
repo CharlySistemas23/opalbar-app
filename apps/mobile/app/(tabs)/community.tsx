@@ -109,7 +109,12 @@ export default function Community() {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'foryou' | 'following'>('foryou');
   const [showCreateSheet, setShowCreateSheet] = useState(false);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const reqIdRef = useRef(0);
   const fb = useFeedback();
+  const POSTS_PAGE = 20;
 
   // Real stories fetched from backend — shape: { venue, personal }
   const [venueGroup, setVenueGroup] = useState<any | null>(null);
@@ -167,35 +172,51 @@ export default function Community() {
     return personal;
   }, [venueGroup, personalGroups]);
 
-  const load = useCallback(async () => {
-    setError(null);
+  const load = useCallback(async (mode: 'fresh' | 'more' = 'fresh') => {
+    const nextPage = mode === 'more' ? page + 1 : 1;
+    if (mode === 'more' && (loadingMore || !hasMore)) return;
+    if (mode === 'more') setLoadingMore(true);
+    else setError(null);
+    const id = ++reqIdRef.current;
     try {
       const scope = activeTab === 'following' ? 'following' : 'forYou';
-      const r = await communityApi.posts({ limit: 50, scope, surface: 'community' });
-      const rows = r.data?.data?.data ?? [];
-      setPosts(rows.map((x: any) => adaptPost(x, t)));
+      const r = await communityApi.posts({ page: nextPage, limit: POSTS_PAGE, scope, surface: 'community' });
+      if (reqIdRef.current !== id) return;
+      const payload = r.data?.data;
+      const rows = payload?.data ?? [];
+      const meta = payload?.meta;
+      const adapted = rows.map((x: any) => adaptPost(x, t));
+      setPosts((prev) => (mode === 'more' ? [...prev, ...adapted] : adapted));
+      setPage(nextPage);
+      setHasMore(meta ? !!meta.hasNextPage : rows.length === POSTS_PAGE);
     } catch (err) {
-      setError(apiError(err, t ? 'No se pudieron cargar las publicaciones.' : 'Could not load posts.'));
+      if (reqIdRef.current === id) {
+        setError(apiError(err, t ? 'No se pudieron cargar las publicaciones.' : 'Could not load posts.'));
+      }
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (reqIdRef.current === id) {
+        setLoading(false);
+        setRefreshing(false);
+        setLoadingMore(false);
+      }
     }
-  }, [activeTab, t]);
+  }, [activeTab, t, page, loadingMore, hasMore]);
 
   useFocusEffect(
     useCallback(() => {
-      load();
-    }, [load]),
+      // Always refresh from page 1 when the tab regains focus.
+      load('fresh');
+    }, [activeTab, t]),
   );
 
   useCommunityRealtime(() => {
-    load();
+    load('fresh');
   });
 
   // Also listen on the unified /rt socket — covers post approvals/rejections
   // and gives us a redundant channel in case /community is flaky.
   useRealtime(['post', 'comment'], () => {
-    load();
+    load('fresh');
   });
 
   // Stories don't go through /community — refresh the carousel when the
@@ -203,6 +224,15 @@ export default function Community() {
   useRealtime(['story'], () => {
     loadStories();
   });
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    load('fresh');
+  }, [load]);
+
+  const onEndReached = useCallback(() => {
+    load('more');
+  }, [load]);
 
   async function toggleLike(post: CommunityPost) {
     const newHas = !post.hasReacted;
@@ -344,7 +374,7 @@ export default function Community() {
           retryLabel={t ? 'Reintentar' : 'Retry'}
           onRetry={() => {
             setLoading(true);
-            load();
+            load('fresh');
           }}
         />
       ) : (
@@ -415,12 +445,16 @@ export default function Community() {
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
-              onRefresh={() => {
-                setRefreshing(true);
-                load();
-              }}
+              onRefresh={onRefresh}
               tintColor={Colors.accentPrimary}
             />
+          }
+          onEndReachedThreshold={0.5}
+          onEndReached={onEndReached}
+          ListFooterComponent={
+            loadingMore ? (
+              <ActivityIndicator color={Colors.accentPrimary} style={{ paddingVertical: 16 }} />
+            ) : null
           }
           renderItem={({ item }) => (
             <PostCard
