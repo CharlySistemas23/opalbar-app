@@ -192,8 +192,8 @@ export class MessagesService {
         OR: [{ userAId: meId }, { userBId: meId }],
       },
       include: {
-        userA: { select: { id: true, profile: { select: { firstName: true, lastName: true, avatarUrl: true } } } },
-        userB: { select: { id: true, profile: { select: { firstName: true, lastName: true, avatarUrl: true } } } },
+        userA: { select: { id: true, lastSeenAt: true, profile: { select: { firstName: true, lastName: true, avatarUrl: true } } } },
+        userB: { select: { id: true, lastSeenAt: true, profile: { select: { firstName: true, lastName: true, avatarUrl: true } } } },
       },
     });
     if (!thread) throw new NotFoundException('Thread not found');

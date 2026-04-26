@@ -12,6 +12,7 @@ import { getRtSocket } from '../api/rt-socket';
 export interface ThreadSocketHandle {
   connected: boolean;
   otherOnline: boolean;
+  otherLastSeenAt: string | null;
   typingUserIds: Set<string>;
   emitTyping: (isTyping: boolean) => void;
   markRead: () => void;
@@ -24,10 +25,12 @@ export function useThreadSocket(
     otherUserId?: string;
     onReaction?: (payload: any) => void;
     onDeleted?: (payload: any) => void;
+    onRead?: (payload: { threadId: string; byUserId: string; at: string }) => void;
   },
 ): ThreadSocketHandle {
   const [connected, setConnected] = useState(false);
   const [otherOnline, setOtherOnline] = useState(false);
+  const [otherLastSeenAt, setOtherLastSeenAt] = useState<string | null>(null);
   const [typingUserIds, setTypingUserIds] = useState<Set<string>>(new Set());
   const socketRef = useRef<Socket | null>(null);
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -40,6 +43,8 @@ export function useThreadSocket(
   useEffect(() => { onReactionRef.current = opts?.onReaction; }, [opts?.onReaction]);
   const onDeletedRef = useRef(opts?.onDeleted);
   useEffect(() => { onDeletedRef.current = opts?.onDeleted; }, [opts?.onDeleted]);
+  const onReadRef = useRef(opts?.onRead);
+  useEffect(() => { onReadRef.current = opts?.onRead; }, [opts?.onRead]);
 
   useEffect(() => {
     if (!threadId) return;
@@ -49,9 +54,9 @@ export function useThreadSocket(
     const handleConnect = () => {
       setConnected(true);
       socket.emit('thread:join', { threadId }, (ack: any) => {
-        if (ack?.ok && typeof ack.otherOnline === 'boolean') {
-          setOtherOnline(ack.otherOnline);
-        }
+        if (!ack?.ok) return;
+        if (typeof ack.otherOnline === 'boolean') setOtherOnline(ack.otherOnline);
+        if (ack.otherLastSeenAt) setOtherLastSeenAt(ack.otherLastSeenAt);
       });
     };
     const handleDisconnect = () => setConnected(false);
@@ -78,10 +83,20 @@ export function useThreadSocket(
       });
     };
     const handlePresenceOnline = (payload: { userId: string }) => {
-      if (opts?.otherUserId && payload.userId === opts.otherUserId) setOtherOnline(true);
+      if (opts?.otherUserId && payload.userId === opts.otherUserId) {
+        setOtherOnline(true);
+        setOtherLastSeenAt(null);
+      }
     };
-    const handlePresenceOffline = (payload: { userId: string }) => {
-      if (opts?.otherUserId && payload.userId === opts.otherUserId) setOtherOnline(false);
+    const handlePresenceOffline = (payload: { userId: string; lastSeenAt?: string | null; at?: string }) => {
+      if (opts?.otherUserId && payload.userId === opts.otherUserId) {
+        setOtherOnline(false);
+        setOtherLastSeenAt(payload.lastSeenAt ?? payload.at ?? new Date().toISOString());
+      }
+    };
+    const handleRead = (payload: { threadId: string; byUserId: string; at: string }) => {
+      if (payload.threadId !== threadId) return;
+      onReadRef.current?.(payload);
     };
 
     socket.on('connect', handleConnect);
@@ -91,6 +106,7 @@ export function useThreadSocket(
     socket.on('typing:stop', handleTypingStop);
     socket.on('presence:online', handlePresenceOnline);
     socket.on('presence:offline', handlePresenceOffline);
+    socket.on('message:read', handleRead);
 
     // If already connected when the hook mounts, join immediately
     if (socket.connected) handleConnect();
@@ -103,6 +119,7 @@ export function useThreadSocket(
       socket.off('typing:stop', handleTypingStop);
       socket.off('presence:online', handlePresenceOnline);
       socket.off('presence:offline', handlePresenceOffline);
+      socket.off('message:read', handleRead);
       if (socket.connected) socket.emit('thread:leave', { threadId });
       if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
     };
@@ -162,5 +179,5 @@ export function useThreadSocket(
     socket.emit('message:read', { threadId });
   }, [threadId]);
 
-  return { connected, otherOnline, typingUserIds, emitTyping, markRead };
+  return { connected, otherOnline, otherLastSeenAt, typingUserIds, emitTyping, markRead };
 }

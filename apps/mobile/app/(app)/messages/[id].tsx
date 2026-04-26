@@ -398,10 +398,24 @@ export default function MessageThread() {
     setMessages((prev) => prev.filter((m) => m.id !== mid));
   }, []);
 
-  const { otherOnline, typingUserIds, emitTyping, markRead } = useThreadSocket(
+  // Peer read all my messages — flip isRead so the double-check renders.
+  const handlePeerRead = useCallback((payload: { byUserId: string }) => {
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.senderId === me?.id && !m.isRead ? { ...m, isRead: true } : m,
+      ),
+    );
+  }, [me?.id]);
+
+  const { otherOnline, otherLastSeenAt, typingUserIds, emitTyping, markRead } = useThreadSocket(
     id,
     handleIncoming,
-    { otherUserId: thread?.otherUser?.id, onReaction: handleReaction, onDeleted: handleDeleted },
+    {
+      otherUserId: thread?.otherUser?.id,
+      onReaction: handleReaction,
+      onDeleted: handleDeleted,
+      onRead: handlePeerRead,
+    },
   );
 
   useEffect(() => {
@@ -699,6 +713,25 @@ export default function MessageThread() {
   const name = `${first} ${last}`.trim() || 'Usuario';
   const initials = ((first[0] || '') + (last[0] || '')).toUpperCase() || 'U';
 
+  // Prefer the live presence timestamp; fall back to the persisted one from
+  // the thread payload so we still show "última vez" on first paint.
+  const lastSeenLabel = useMemo(() => {
+    if (otherOnline) return null;
+    const iso = otherLastSeenAt ?? other?.lastSeenAt ?? null;
+    if (!iso) return null;
+    const then = new Date(iso).getTime();
+    if (!Number.isFinite(then)) return null;
+    const diffMin = Math.max(0, Math.round((Date.now() - then) / 60000));
+    if (diffMin < 1) return t ? 'Última vez hace un momento' : 'Last seen just now';
+    if (diffMin < 60) return t ? `Última vez hace ${diffMin} min` : `Last seen ${diffMin} min ago`;
+    const diffH = Math.round(diffMin / 60);
+    if (diffH < 24) return t ? `Última vez hace ${diffH} h` : `Last seen ${diffH} h ago`;
+    const diffD = Math.round(diffH / 24);
+    if (diffD < 7) return t ? `Última vez hace ${diffD} d` : `Last seen ${diffD} d ago`;
+    const d = new Date(iso);
+    return t ? `Última vez ${d.toLocaleDateString('es')}` : `Last seen ${d.toLocaleDateString('en')}`;
+  }, [otherOnline, otherLastSeenAt, other?.lastSeenAt, t]);
+
   const timeline = useMemo(() => {
     const tl = buildTimeline(messages);
     if (isOtherTyping) tl.push({ type: 'typing', id: '__typing__' });
@@ -821,7 +854,9 @@ export default function MessageThread() {
                 ) : (
                   <>
                     <View style={[styles.statusDot, { backgroundColor: Colors.textMuted }]} />
-                    <Text style={styles.headerSub}>{t ? 'Desconectado' : 'Offline'}</Text>
+                    <Text style={styles.headerSub} numberOfLines={1}>
+                      {lastSeenLabel ?? (t ? 'Desconectado' : 'Offline')}
+                    </Text>
                   </>
                 )}
               </View>

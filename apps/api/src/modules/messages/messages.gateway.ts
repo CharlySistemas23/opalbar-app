@@ -87,7 +87,7 @@ export class MessagesGateway implements OnGatewayConnection, OnGatewayDisconnect
     }
   }
 
-  handleDisconnect(socket: Socket) {
+  async handleDisconnect(socket: Socket) {
     const authed = socket as AuthedSocket;
     const userId = authed.data?.userId;
     if (!userId) return;
@@ -95,7 +95,18 @@ export class MessagesGateway implements OnGatewayConnection, OnGatewayDisconnect
     const count = (this.online.get(userId) ?? 1) - 1;
     if (count <= 0) {
       this.online.delete(userId);
-      this.broadcastPresence(userId, false);
+      const lastSeenAt = new Date();
+      // Persist last-seen so the peer can render "última vez hace X" even after
+      // they reconnect. Failures here must not break disconnect cleanup.
+      try {
+        await this.prisma.user.update({
+          where: { id: userId },
+          data: { lastSeenAt },
+        });
+      } catch (err) {
+        this.logger.warn(`lastSeenAt update failed for ${userId}: ${(err as Error).message}`);
+      }
+      this.broadcastPresence(userId, false, lastSeenAt);
     } else {
       this.online.set(userId, count);
     }
@@ -126,10 +137,16 @@ export class MessagesGateway implements OnGatewayConnection, OnGatewayDisconnect
 
     // Notify the other user in the thread that we're present
     const otherId = thread.userAId === userId ? thread.userBId : thread.userAId;
-    return {
-      ok: true,
-      otherOnline: this.online.has(otherId),
-    };
+    const otherOnline = this.online.has(otherId);
+    let otherLastSeenAt: string | null = null;
+    if (!otherOnline) {
+      const u = await this.prisma.user.findUnique({
+        where: { id: otherId },
+        select: { lastSeenAt: true },
+      });
+      otherLastSeenAt = u?.lastSeenAt ? u.lastSeenAt.toISOString() : null;
+    }
+    return { ok: true, otherOnline, otherLastSeenAt };
   }
 
   @SubscribeMessage('thread:leave')
@@ -210,10 +227,12 @@ export class MessagesGateway implements OnGatewayConnection, OnGatewayDisconnect
     return `thread:${threadId}`;
   }
 
-  private broadcastPresence(userId: string, online: boolean) {
+  private broadcastPresence(userId: string, online: boolean, lastSeenAt?: Date) {
+    const at = (lastSeenAt ?? new Date()).toISOString();
     this.server.emit(online ? 'presence:online' : 'presence:offline', {
       userId,
-      at: new Date().toISOString(),
+      at,
+      lastSeenAt: online ? null : at,
     });
   }
 
