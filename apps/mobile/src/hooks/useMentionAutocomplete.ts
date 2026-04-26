@@ -88,16 +88,12 @@ export function useMentionAutocomplete() {
     return () => clearTimeout(handle);
   }, [activeQuery]);
 
-  const onChangeText = useCallback(
-    (next: string) => {
-      setText(next);
-      // Caret may be stale here; recompute against new text using current selection
-      // (RN fires onChangeText before onSelectionChange in most setups).
-      const caret = Math.min(selection.end, next.length);
-      setActiveQuery(detectActiveToken(next, caret));
-    },
-    [selection.end],
-  );
+  const onChangeText = useCallback((next: string) => {
+    setText(next);
+    // selection.end lags one keystroke behind in RN, so use end-of-text as the
+    // caret estimate. onSelectionChange refines this for middle-of-text edits.
+    setActiveQuery(detectActiveToken(next, next.length));
+  }, []);
 
   const onSelectionChange = useCallback(
     (e: NativeSyntheticEvent<TextInputSelectionChangeEventData>) => {
