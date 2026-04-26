@@ -4,10 +4,13 @@
 import { io, type Socket } from 'socket.io-client';
 import { tokenStore } from './client';
 
-const BASE_URL =
-  (process.env['EXPO_PUBLIC_API_URL'] || 'http://localhost:3000/api/v1')
-    .replace(/\/api\/v1\/?$/, '') // Socket.io runs at root, not /api/v1
-    .replace(/\/$/, '');
+// Mirror of api/client.ts: a LAN URL baked from local .env into the OTA
+// bundle cannot resolve on the device. Fall back to Railway in release.
+const PROD_HOST = 'https://opalbar-app-production.up.railway.app';
+const ENV_URL = process.env['EXPO_PUBLIC_API_URL'];
+const isLanUrl = typeof ENV_URL === 'string' && /^https?:\/\/(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?/.test(ENV_URL);
+const RAW = ENV_URL && !(!__DEV__ && isLanUrl) ? ENV_URL : (__DEV__ ? 'http://localhost:3000/api/v1' : PROD_HOST);
+const BASE_URL = RAW.replace(/\/api\/v1\/?$/, '').replace(/\/$/, '');
 
 let _socket: Socket | null = null;
 
@@ -26,7 +29,9 @@ export function getSocket(): Socket {
   }
 
   _socket = io(BASE_URL, {
-    transports: ['websocket'],
+    // Polling first — Railway's edge / some WiFi routers refuse WSS upgrades,
+    // which would leave the chat permanently "Desconectado".
+    transports: ['polling', 'websocket'],
     autoConnect: true,
     reconnection: true,
     reconnectionAttempts: Infinity,
