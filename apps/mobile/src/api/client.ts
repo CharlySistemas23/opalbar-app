@@ -174,8 +174,9 @@ export const usersApi = {
   updateInterests: (data: unknown) => apiClient.patch('/users/me/interests', data),
   updatePrivacy: (data: unknown) => apiClient.patch('/users/me/consent', data),
   updateNotifications: (data: unknown) => apiClient.patch('/users/me/notifications', data),
-  updateDmPolicy: (policy: 'EVERYONE' | 'FOLLOWING' | 'NONE') =>
-    apiClient.patch('/users/me/dm-policy', { policy }),
+  updateDmPolicy: (
+    policy: 'EVERYONE' | 'FOLLOWING' | 'FRIENDS_OF_FRIENDS' | 'FRIENDS_ONLY' | 'NONE',
+  ) => apiClient.patch('/users/me/dm-policy', { policy }),
   updateConsent: (data: unknown) => apiClient.patch('/users/me/consent', data),
   exportData: () => apiClient.post('/users/me/export'),
   deleteAccount: (reason?: string) => apiClient.delete('/users/me', { data: { reason } }),
@@ -194,6 +195,31 @@ export const usersApi = {
   savedItems: (type?: string) => apiClient.get('/users/me/saved', { params: type ? { type } : {} }),
   toggleSave: (type: string, targetId: string) =>
     apiClient.post('/users/me/saved', { type, targetId }),
+};
+
+// Friendships (FB/IG hybrid)
+export type FriendPolicy = 'EVERYONE' | 'FRIENDS_OF_FRIENDS' | 'NONE';
+export type FriendshipState =
+  | 'self'
+  | 'none'
+  | 'outgoing'
+  | 'incoming'
+  | 'accepted'
+  | 'blocked';
+
+export const friendshipsApi = {
+  list: (limit = 100) => apiClient.get('/friendships', { params: { limit } }),
+  requests: (tab: 'main' | 'filtered' = 'main', limit = 50) =>
+    apiClient.get('/friendships/requests', { params: { tab, limit } }),
+  requestsCounts: () => apiClient.get('/friendships/requests/counts'),
+  outgoing: (limit = 50) => apiClient.get('/friendships/outgoing', { params: { limit } }),
+  request: (userId: string) => apiClient.post(`/friendships/request/${userId}`),
+  accept: (friendshipId: string) => apiClient.post(`/friendships/${friendshipId}/accept`),
+  decline: (friendshipId: string) => apiClient.post(`/friendships/${friendshipId}/decline`),
+  cancel: (userId: string) => apiClient.delete(`/friendships/request/${userId}`),
+  remove: (userId: string) => apiClient.delete(`/friendships/${userId}`),
+  updatePolicy: (policy: FriendPolicy) =>
+    apiClient.patch('/friendships/me/policy', { policy }),
 };
 
 // Messaging

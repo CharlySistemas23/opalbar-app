@@ -1,5 +1,5 @@
 import { ForbiddenException, Inject, Injectable, NotFoundException, forwardRef } from '@nestjs/common';
-import { DmPolicy, MessageThreadStatus, NotificationType, UserRole } from '@prisma/client';
+import { DmPolicy, FriendshipStatus, MessageThreadStatus, NotificationType, UserRole } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { MessagesGateway } from './messages.gateway';
 import { RealtimeService } from '../realtime/realtime.service';
@@ -61,7 +61,55 @@ export class MessagesService {
 
     if (recipient.dmPolicy === DmPolicy.EVERYONE) return MessageThreadStatus.ACCEPTED;
 
-    // FOLLOWING / NONE both require recipient → sender follow to auto-accept
+    // FRIENDS_ONLY / FRIENDS_OF_FRIENDS / NONE: existing accepted friendship
+    // is the strongest auto-accept signal. Check that first regardless of
+    // policy — friends should never land in requests.
+    const friendship = await this.prisma.friendship.findFirst({
+      where: {
+        status: FriendshipStatus.ACCEPTED,
+        OR: [
+          { requesterId: senderId, addresseeId: recipientId },
+          { requesterId: recipientId, addresseeId: senderId },
+        ],
+      },
+      select: { id: true },
+    });
+    if (friendship) return MessageThreadStatus.ACCEPTED;
+
+    if (recipient.dmPolicy === DmPolicy.FRIENDS_ONLY) {
+      throw new ForbiddenException('This user only accepts messages from friends');
+    }
+
+    if (recipient.dmPolicy === DmPolicy.FRIENDS_OF_FRIENDS) {
+      // Check mutual friend exists.
+      const mySet = await this.prisma.friendship.findMany({
+        where: {
+          status: FriendshipStatus.ACCEPTED,
+          OR: [{ requesterId: senderId }, { addresseeId: senderId }],
+        },
+        select: { requesterId: true, addresseeId: true },
+      });
+      const myFriendIds = mySet.map((r) =>
+        r.requesterId === senderId ? r.addresseeId : r.requesterId,
+      );
+      const mutualExists = myFriendIds.length === 0
+        ? false
+        : !!(await this.prisma.friendship.findFirst({
+            where: {
+              status: FriendshipStatus.ACCEPTED,
+              OR: [
+                { requesterId: recipientId, addresseeId: { in: myFriendIds } },
+                { addresseeId: recipientId, requesterId: { in: myFriendIds } },
+              ],
+            },
+            select: { id: true },
+          }));
+      if (mutualExists) return MessageThreadStatus.ACCEPTED;
+      // No mutual friend → land in requests rather than hard reject.
+      return MessageThreadStatus.PENDING;
+    }
+
+    // FOLLOWING / NONE: legacy behavior — recipient → sender follow auto-accepts
     const recipientFollowsSender = await this.prisma.follow.findUnique({
       where: { followerId_followingId: { followerId: recipientId, followingId: senderId } },
       select: { id: true },

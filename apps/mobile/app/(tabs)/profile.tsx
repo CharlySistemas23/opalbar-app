@@ -31,6 +31,7 @@ const ACTIVITY_MENU: MenuEntry[] = [
 const ACCOUNT_MENU: MenuEntry[] = [
   { icon: 'user', label: { es: 'Editar perfil', en: 'Edit profile' }, tint: Colors.textPrimary, path: '/(app)/profile/edit' },
   { icon: 'message-circle', label: { es: 'Mensajes', en: 'Messages' }, tint: '#60A5FA', path: '/(app)/messages' },
+  { icon: 'user-plus', label: { es: 'Solicitudes de amistad', en: 'Friend requests' }, tint: Colors.accentPrimary, path: '/(app)/profile/friend-requests' },
   { icon: 'bell', label: { es: 'Notificaciones', en: 'Notifications' }, tint: '#A855F7', path: '/(app)/profile/notifications' },
   { icon: 'settings', label: { es: 'Configuración', en: 'Settings' }, tint: Colors.textMuted, path: '/(app)/profile/preferences' },
 ];

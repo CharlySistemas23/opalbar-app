@@ -17,7 +17,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { usersApi, messagesApi, communityApi } from '@/api/client';
+import { usersApi, messagesApi, communityApi, friendshipsApi } from '@/api/client';
 import { useAuthStore } from '@/stores/auth.store';
 import { useAppStore } from '@/stores/app.store';
 import { toast } from '@/components/Toast';
@@ -112,6 +112,147 @@ export default function UserProfile() {
       alive = false;
     };
   }, [id]);
+
+  // Friendship state machine — drives the primary action button next to Follow.
+  // The backend returns { status, isFriend, mutualCount, friendshipId? } as part
+  // of getPublicProfile so the button can render the right label/CTA on first paint.
+  async function sendFriendRequest() {
+    if (!profile) return;
+    setBusy(true);
+    try {
+      const r = await friendshipsApi.request(id);
+      // Backend returns { ok, status, friendship: { id, ... } } — pluck the new
+      // friendship id so a subsequent accept/decline can address the right row
+      // without an extra round-trip.
+      const fsId = r.data?.data?.friendship?.id;
+      setProfile((p: any) => ({
+        ...p,
+        friendship: {
+          ...(p.friendship ?? { mutualCount: 0 }),
+          status: 'outgoing',
+          friendshipId: fsId ?? null,
+          isFriend: false,
+        },
+      }));
+      fb.success();
+      toast(t ? 'Solicitud enviada.' : 'Request sent.', 'success');
+    } catch (err: any) {
+      fb.error();
+      toast(err?.response?.data?.message || 'Error', 'danger');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function cancelFriendRequest() {
+    if (!profile) return;
+    setBusy(true);
+    try {
+      await friendshipsApi.cancel(id);
+      setProfile((p: any) => ({
+        ...p,
+        friendship: {
+          ...(p.friendship ?? { mutualCount: 0 }),
+          status: 'none',
+          friendshipId: null,
+          isFriend: false,
+        },
+      }));
+      fb.tap();
+      toast(t ? 'Solicitud cancelada.' : 'Request cancelled.', 'info');
+    } catch (err: any) {
+      fb.error();
+      toast(err?.response?.data?.message || 'Error', 'danger');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function acceptFriendRequest() {
+    if (!profile?.friendship?.friendshipId) return;
+    setBusy(true);
+    try {
+      await friendshipsApi.accept(profile.friendship.friendshipId);
+      setProfile((p: any) => ({
+        ...p,
+        friendship: { ...(p.friendship ?? {}), status: 'accepted', isFriend: true },
+        _count: { ...(p._count ?? {}), friends: (p._count?.friends ?? 0) + 1 },
+      }));
+      fb.success();
+      toast(t ? 'Ahora son amigos.' : "You're now friends.", 'success');
+    } catch (err: any) {
+      fb.error();
+      toast(err?.response?.data?.message || 'Error', 'danger');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function declineFriendRequest() {
+    if (!profile?.friendship?.friendshipId) return;
+    setBusy(true);
+    try {
+      await friendshipsApi.decline(profile.friendship.friendshipId);
+      setProfile((p: any) => ({
+        ...p,
+        friendship: {
+          ...(p.friendship ?? { mutualCount: 0 }),
+          status: 'none',
+          friendshipId: null,
+          isFriend: false,
+        },
+      }));
+      fb.tap();
+      toast(t ? 'Solicitud rechazada.' : 'Request declined.', 'info');
+    } catch (err: any) {
+      fb.error();
+      toast(err?.response?.data?.message || 'Error', 'danger');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function confirmUnfriend() {
+    Alert.alert(
+      t ? 'Eliminar amistad' : 'Remove friend',
+      t
+        ? '¿Seguro que quieres dejar de ser amigos?'
+        : 'Are you sure you want to remove this friend?',
+      [
+        { text: t ? 'Cancelar' : 'Cancel', style: 'cancel' },
+        {
+          text: t ? 'Eliminar' : 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            setBusy(true);
+            try {
+              await friendshipsApi.remove(id);
+              setProfile((p: any) => ({
+                ...p,
+                friendship: {
+                  ...(p.friendship ?? { mutualCount: 0 }),
+                  status: 'none',
+                  friendshipId: null,
+                  isFriend: false,
+                },
+                _count: {
+                  ...(p._count ?? {}),
+                  friends: Math.max(0, (p._count?.friends ?? 1) - 1),
+                },
+              }));
+              fb.tap();
+              toast(t ? 'Amistad eliminada.' : 'Friend removed.', 'info');
+            } catch (err: any) {
+              fb.error();
+              toast(err?.response?.data?.message || 'Error', 'danger');
+            } finally {
+              setBusy(false);
+            }
+          },
+        },
+      ],
+    );
+  }
 
   async function toggleFollow() {
     if (!profile) return;
@@ -489,6 +630,13 @@ export default function UserProfile() {
           </View>
           <Pressable
             style={({ pressed }) => [styles.stat, pressed && styles.pressed]}
+            onPress={() => router.push(`/(app)/users/${profile.id}/friends` as never)}
+          >
+            <Text style={styles.statValue}>{profile._count?.friends ?? 0}</Text>
+            <Text style={styles.statLabel}>{t ? 'Amigos' : 'Friends'}</Text>
+          </Pressable>
+          <Pressable
+            style={({ pressed }) => [styles.stat, pressed && styles.pressed]}
             onPress={() => router.push(`/(app)/users/${profile.id}/followers` as never)}
           >
             <Text style={styles.statValue}>{profile._count?.followers ?? 0}</Text>
@@ -503,9 +651,38 @@ export default function UserProfile() {
           </Pressable>
         </View>
 
+        {!isMe && (profile.friendship?.mutualCount ?? 0) > 0 && (
+          <Pressable
+            onPress={() => router.push(`/(app)/users/${profile.id}/friends?tab=mutual` as never)}
+            style={({ pressed }) => [styles.mutualsRow, pressed && styles.pressed]}
+          >
+            <Feather name="users" size={12} color={Colors.textMuted} />
+            <Text style={styles.mutualsText}>
+              {profile.friendship.mutualCount}{' '}
+              {t
+                ? profile.friendship.mutualCount === 1
+                  ? 'amigo en común'
+                  : 'amigos en común'
+                : profile.friendship.mutualCount === 1
+                  ? 'mutual friend'
+                  : 'mutual friends'}
+            </Text>
+          </Pressable>
+        )}
+
         {/* ── Actions (IG-style) ──────────────── */}
         {!isMe && (
           <View style={styles.actionsRow}>
+            <FriendButton
+              status={profile.friendship?.status ?? 'none'}
+              busy={busy}
+              t={t}
+              onSend={sendFriendRequest}
+              onCancel={cancelFriendRequest}
+              onAccept={acceptFriendRequest}
+              onDecline={declineFriendRequest}
+              onRemove={confirmUnfriend}
+            />
             <Pressable
               style={({ pressed }) => [
                 styles.followBtn,
@@ -524,7 +701,7 @@ export default function UserProfile() {
               style={({ pressed }) => [styles.msgBtn, pressed && { opacity: 0.85 }]}
               onPress={handleMessage}
             >
-              <Text style={styles.msgLabel}>{t ? 'Mensaje' : 'Message'}</Text>
+              <Feather name="message-circle" size={16} color={Colors.textPrimary} />
             </Pressable>
           </View>
         )}
@@ -803,6 +980,119 @@ function MenuItem({
         ]}
       >
         {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+// ─────────────────────────────────────────────
+//  Friend Button — primary CTA, drives the friendship state machine
+//  · 'none'      → "Agregar amigo" (filled accent)
+//  · 'outgoing'  → "Solicitud enviada" (muted, tap to cancel)
+//  · 'incoming'  → "Aceptar" + small ✕ to decline
+//  · 'accepted'  → "Amigos" with chevron, opens unfriend confirm
+//  · 'blocked'   → hidden (caller should suppress wider context too)
+// ─────────────────────────────────────────────
+function FriendButton({
+  status,
+  busy,
+  t,
+  onSend,
+  onCancel,
+  onAccept,
+  onDecline,
+  onRemove,
+}: {
+  status: 'self' | 'none' | 'outgoing' | 'incoming' | 'accepted' | 'blocked';
+  busy: boolean;
+  t: boolean;
+  onSend: () => void;
+  onCancel: () => void;
+  onAccept: () => void;
+  onDecline: () => void;
+  onRemove: () => void;
+}) {
+  if (status === 'blocked' || status === 'self') return null;
+
+  if (status === 'incoming') {
+    return (
+      <View style={styles.friendIncomingWrap}>
+        <Pressable
+          style={({ pressed }) => [
+            styles.friendBtnPrimary,
+            (busy || pressed) && { opacity: 0.85 },
+          ]}
+          onPress={onAccept}
+          disabled={busy}
+        >
+          <Feather name="user-check" size={14} color={Colors.textInverse} />
+          <Text style={styles.friendBtnPrimaryLabel}>{t ? 'Aceptar' : 'Accept'}</Text>
+        </Pressable>
+        <Pressable
+          style={({ pressed }) => [
+            styles.friendBtnDecline,
+            (busy || pressed) && { opacity: 0.85 },
+          ]}
+          onPress={onDecline}
+          disabled={busy}
+          hitSlop={6}
+        >
+          <Feather name="x" size={16} color={Colors.textPrimary} />
+        </Pressable>
+      </View>
+    );
+  }
+
+  if (status === 'outgoing') {
+    return (
+      <Pressable
+        style={({ pressed }) => [
+          styles.friendBtnGhost,
+          (busy || pressed) && { opacity: 0.85 },
+        ]}
+        onPress={onCancel}
+        disabled={busy}
+      >
+        <Feather name="clock" size={14} color={Colors.textPrimary} />
+        <Text style={styles.friendBtnGhostLabel}>
+          {t ? 'Enviada' : 'Sent'}
+        </Text>
+      </Pressable>
+    );
+  }
+
+  if (status === 'accepted') {
+    return (
+      <Pressable
+        style={({ pressed }) => [
+          styles.friendBtnGhost,
+          (busy || pressed) && { opacity: 0.85 },
+        ]}
+        onPress={onRemove}
+        disabled={busy}
+      >
+        <Feather name="user-check" size={14} color={Colors.accentSuccess} />
+        <Text style={[styles.friendBtnGhostLabel, { color: Colors.accentSuccess }]}>
+          {t ? 'Amigos' : 'Friends'}
+        </Text>
+        <Feather name="chevron-down" size={12} color={Colors.textSecondary} />
+      </Pressable>
+    );
+  }
+
+  // status === 'none'
+  return (
+    <Pressable
+      style={({ pressed }) => [
+        styles.friendBtnPrimary,
+        (busy || pressed) && { opacity: 0.85 },
+      ]}
+      onPress={onSend}
+      disabled={busy}
+    >
+      <Feather name="user-plus" size={14} color={Colors.textInverse} />
+      <Text style={styles.friendBtnPrimaryLabel}>
+        {t ? 'Agregar amigo' : 'Add friend'}
       </Text>
     </Pressable>
   );
@@ -1271,15 +1561,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 6,
     height: 38,
-    backgroundColor: Colors.accentPrimary,
+    backgroundColor: Colors.bgElevated,
     borderRadius: 10,
   },
   followingBtn: {
     backgroundColor: Colors.bgElevated,
   },
-  followLabel: { color: Colors.textInverse, fontSize: 14, fontWeight: '700' },
+  followLabel: { color: Colors.textPrimary, fontSize: 14, fontWeight: '700' },
   msgBtn: {
-    flex: 2,
+    width: 44,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1289,6 +1579,67 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   msgLabel: { color: Colors.textPrimary, fontSize: 14, fontWeight: '700' },
+
+  // Friend button (primary CTA in actionsRow)
+  friendBtnPrimary: {
+    flex: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    height: 38,
+    backgroundColor: Colors.accentPrimary,
+    borderRadius: 10,
+  },
+  friendBtnPrimaryLabel: {
+    color: Colors.textInverse,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  friendBtnGhost: {
+    flex: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    height: 38,
+    backgroundColor: Colors.bgElevated,
+    borderRadius: 10,
+  },
+  friendBtnGhostLabel: {
+    color: Colors.textPrimary,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  friendIncomingWrap: {
+    flex: 2,
+    flexDirection: 'row',
+    gap: 6,
+  },
+  friendBtnDecline: {
+    width: 38,
+    height: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.bgElevated,
+    borderRadius: 10,
+  },
+
+  // Mutuals hint
+  mutualsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    alignSelf: 'center',
+    marginTop: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  mutualsText: {
+    color: Colors.textMuted,
+    fontSize: 12,
+    fontWeight: '500',
+  },
   editBtn: {
     flex: 1,
     flexDirection: 'row',

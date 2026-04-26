@@ -156,13 +156,30 @@ enum NotificationType {
   ACCOUNT_ALERT
   MESSAGE_NEW
   MESSAGE_REQUEST
+  FRIEND_REQUEST
+  FRIEND_ACCEPTED
   SYSTEM
 }
 
 enum DmPolicy {
   EVERYONE
   FOLLOWING
+  FRIENDS_OF_FRIENDS
+  FRIENDS_ONLY
   NONE
+}
+
+enum FriendPolicy {
+  EVERYONE
+  FRIENDS_OF_FRIENDS
+  NONE
+}
+
+enum FriendshipStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  BLOCKED
 }
 
 enum MessageThreadStatus {
@@ -224,17 +241,19 @@ enum AdminActionType {
 // ─────────────────────────────────────────────
 
 model User {
-  id           String     @id @default(cuid())
-  email        String?    @unique
-  phone        String?    @unique
+  id           String       @id @default(cuid())
+  email        String?      @unique
+  phone        String?      @unique
   passwordHash String?
-  role         UserRole   @default(USER)
-  status       UserStatus @default(PENDING_VERIFICATION)
-  isVerified   Boolean    @default(false)
-  points       Int        @default(0)
-  dmPolicy     DmPolicy   @default(EVERYONE)
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  role         UserRole     @default(USER)
+  status       UserStatus   @default(PENDING_VERIFICATION)
+  isVerified   Boolean      @default(false)
+  points       Int          @default(0)
+  dmPolicy     DmPolicy     @default(EVERYONE)
+  friendPolicy FriendPolicy @default(EVERYONE)
+  isPrivate    Boolean      @default(false)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
   deletedAt    DateTime?
 
   // Relations
@@ -268,13 +287,17 @@ model User {
   reviews              Review[]
 
   // Follows / Messaging / Saved
-  followers    Follow[]        @relation("following")
-  following    Follow[]        @relation("follower")
-  threadsA     MessageThread[] @relation("threadUserA")
-  threadsB     MessageThread[] @relation("threadUserB")
+  followers        Follow[]          @relation("following")
+  following        Follow[]          @relation("follower")
+  threadsA         MessageThread[]   @relation("threadUserA")
+  threadsB         MessageThread[]   @relation("threadUserB")
   messagesSent     Message[]         @relation("messageSender")
   messageReactions MessageReaction[] @relation("messageReactor")
   savedItems       SavedItem[]
+
+  // Friendships (bidirectional)
+  friendshipsRequested Friendship[] @relation("friendshipRequester")
+  friendshipsReceived  Friendship[] @relation("friendshipAddressee")
 
   // Stories
   stories    Story[]     @relation("storyAuthor")
@@ -1163,14 +1186,42 @@ model Follow {
   @@index([followingId])
 }
 
+// ─────────────────────────────────────────────
+//  FRIENDSHIPS (bidirectional, FB/IG hybrid)
+//  · Stored once per pair: requester → addressee
+//  · status PENDING until addressee accepts
+//  · filteredAt set if request landed in the
+//    "Filtradas" tab (low-trust signals)
+// ─────────────────────────────────────────────
+model Friendship {
+  id          String           @id @default(cuid())
+  requesterId String
+  addresseeId String
+  status      FriendshipStatus @default(PENDING)
+  filteredAt  DateTime?
+  acceptedAt  DateTime?
+  declinedAt  DateTime?
+  blockedAt   DateTime?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  requester User @relation("friendshipRequester", fields: [requesterId], references: [id], onDelete: Cascade)
+  addressee User @relation("friendshipAddressee", fields: [addresseeId], references: [id], onDelete: Cascade)
+
+  @@unique([requesterId, addresseeId])
+  @@index([requesterId, status])
+  @@index([addresseeId, status])
+  @@index([status])
+}
+
 model MessageThread {
-  id             String              @id @default(cuid())
-  userAId        String
-  userBId        String
-  lastMessageAt  DateTime            @default(now())
-  createdAt      DateTime            @default(now())
-  status         MessageThreadStatus @default(ACCEPTED)
-  requestedById  String?             // who initiated the conversation (for PENDING threads)
+  id            String              @id @default(cuid())
+  userAId       String
+  userBId       String
+  lastMessageAt DateTime            @default(now())
+  createdAt     DateTime            @default(now())
+  status        MessageThreadStatus @default(ACCEPTED)
+  requestedById String? // who initiated the conversation (for PENDING threads)
 
   userA    User      @relation("threadUserA", fields: [userAId], references: [id], onDelete: Cascade)
   userB    User      @relation("threadUserB", fields: [userBId], references: [id], onDelete: Cascade)
@@ -1324,35 +1375,35 @@ enum EmailAudienceType {
 }
 
 model EmailCampaign {
-  id             String                @id @default(cuid())
-  subject        String                @db.VarChar(200)
-  preheader      String?               @db.VarChar(200)
-  headline       String                @db.VarChar(160)
-  body           String                @db.Text
-  ctaLabel       String?               @db.VarChar(60)
-  ctaUrl         String?               @db.VarChar(500)
-  heroImageUrl   String?               @db.VarChar(500)
-  template       EmailCampaignTemplate @default(GENERIC)
+  id           String                @id @default(cuid())
+  subject      String                @db.VarChar(200)
+  preheader    String?               @db.VarChar(200)
+  headline     String                @db.VarChar(160)
+  body         String                @db.Text
+  ctaLabel     String?               @db.VarChar(60)
+  ctaUrl       String?               @db.VarChar(500)
+  heroImageUrl String?               @db.VarChar(500)
+  template     EmailCampaignTemplate @default(GENERIC)
 
   // Segmentation stored as JSON — flexible filters
-  audienceType   EmailAudienceType     @default(ALL)
+  audienceType   EmailAudienceType @default(ALL)
   audienceFilter Json? // { cities?: string[], interestIds?: string[], loyaltyLevelIds?: string[], minPoints?: number }
 
-  status         EmailCampaignStatus   @default(DRAFT)
-  scheduledAt    DateTime?
-  sentAt         DateTime?
+  status      EmailCampaignStatus @default(DRAFT)
+  scheduledAt DateTime?
+  sentAt      DateTime?
 
-  recipientCount Int                   @default(0)
-  sentCount      Int                   @default(0)
-  openCount      Int                   @default(0)
-  unsubCount     Int                   @default(0)
-  failCount      Int                   @default(0)
+  recipientCount Int @default(0)
+  sentCount      Int @default(0)
+  openCount      Int @default(0)
+  unsubCount     Int @default(0)
+  failCount      Int @default(0)
 
-  createdById    String
-  createdAt      DateTime              @default(now())
-  updatedAt      DateTime              @updatedAt
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  recipients     EmailCampaignRecipient[]
+  recipients EmailCampaignRecipient[]
 
   @@index([status])
   @@index([scheduledAt])
@@ -1380,12 +1431,12 @@ model EmailCampaignRecipient {
 }
 
 model MarketingAsset {
-  id          String   @id @default(cuid())
-  mimeType    String   @db.VarChar(100)
-  sizeBytes   Int
-  data        Bytes
-  uploadedBy  String
-  createdAt   DateTime @default(now())
+  id         String   @id @default(cuid())
+  mimeType   String   @db.VarChar(100)
+  sizeBytes  Int
+  data       Bytes
+  uploadedBy String
+  createdAt  DateTime @default(now())
 
   @@index([createdAt])
 }

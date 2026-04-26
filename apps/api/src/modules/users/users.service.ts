@@ -3,6 +3,7 @@ import { DmPolicy, NotificationType } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { FriendshipsService } from '../friendships/friendships.service';
 import { UpdateProfileDto, UpdateInterestsDto } from './dto/update-profile.dto';
 
 @Injectable()
@@ -11,6 +12,7 @@ export class UsersService {
     private readonly prisma: PrismaService,
     private readonly realtime: RealtimeService,
     private readonly notifications: NotificationsService,
+    private readonly friendships: FriendshipsService,
   ) {}
 
   async findById(id: string) {
@@ -218,6 +220,7 @@ export class UsersService {
       where: { id, deletedAt: null },
       select: {
         id: true, email: true, createdAt: true, points: true,
+        friendPolicy: true, isPrivate: true,
         profile: {
           select: {
             firstName: true, lastName: true, avatarUrl: true, coverUrl: true, bio: true,
@@ -237,13 +240,29 @@ export class UsersService {
     if (!user) return null;
 
     let isFollowing = false;
+    let friendship: Awaited<ReturnType<FriendshipsService['getProfileContext']>> = {
+      status: 'none',
+      isFriend: false,
+      mutualCount: 0,
+    };
     if (viewerId && viewerId !== id) {
-      const existing = await this.prisma.follow.findUnique({
-        where: { followerId_followingId: { followerId: viewerId, followingId: id } },
-      });
+      const [existing, fctx] = await Promise.all([
+        this.prisma.follow.findUnique({
+          where: { followerId_followingId: { followerId: viewerId, followingId: id } },
+        }),
+        this.friendships.getProfileContext(viewerId, id),
+      ]);
       isFollowing = !!existing;
+      friendship = fctx;
     }
-    return { ...user, isFollowing };
+    // friendsCount derived once so the UI can show "X amigos" alongside followers/following.
+    const friendIds = await this.friendships.getFriendIds(id);
+    return {
+      ...user,
+      isFollowing,
+      friendship,
+      _count: { ...user._count, friends: friendIds.length },
+    };
   }
 
   // ─────────────────────────────────────────────

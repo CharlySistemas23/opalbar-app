@@ -3,12 +3,12 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
-import { usersApi } from '@/api/client';
+import { usersApi, friendshipsApi, type FriendPolicy } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { useAppStore } from '@/stores/app.store';
 import { Colors, Typography, Spacing, Radius } from '@/constants/tokens';
 
-type DmPolicy = 'EVERYONE' | 'FOLLOWING' | 'NONE';
+type DmPolicy = 'EVERYONE' | 'FOLLOWING' | 'FRIENDS_OF_FRIENDS' | 'FRIENDS_ONLY' | 'NONE';
 
 export default function Privacy() {
   const router = useRouter();
@@ -16,6 +16,7 @@ export default function Privacy() {
   const t = language === 'es';
   const [settings, setSettings] = useState({ showProfile: true, showActivity: false, allowMessages: true });
   const [dmPolicy, setDmPolicy] = useState<DmPolicy>('EVERYONE');
+  const [friendPolicy, setFriendPolicy] = useState<FriendPolicy>('EVERYONE');
   const [loadingPolicy, setLoadingPolicy] = useState(true);
 
   useEffect(() => {
@@ -23,8 +24,10 @@ export default function Privacy() {
     usersApi.me()
       .then((res: any) => {
         if (!mounted) return;
-        const policy = res?.data?.dmPolicy as DmPolicy | undefined;
-        if (policy) setDmPolicy(policy);
+        const dm = res?.data?.dmPolicy as DmPolicy | undefined;
+        const fp = res?.data?.friendPolicy as FriendPolicy | undefined;
+        if (dm) setDmPolicy(dm);
+        if (fp) setFriendPolicy(fp);
       })
       .catch(() => {})
       .finally(() => mounted && setLoadingPolicy(false));
@@ -56,6 +59,18 @@ export default function Privacy() {
     }
   }
 
+  async function selectFriendPolicy(next: FriendPolicy) {
+    if (next === friendPolicy) return;
+    const prev = friendPolicy;
+    setFriendPolicy(next);
+    try {
+      await friendshipsApi.updatePolicy(next);
+    } catch (err: any) {
+      setFriendPolicy(prev);
+      Alert.alert(t ? 'Error' : 'Error', apiError(err));
+    }
+  }
+
   const items = [
     { key: 'showProfile' as const, label: t ? 'Perfil público' : 'Public profile', desc: t ? 'Otros usuarios pueden ver tu perfil' : 'Other users can see your profile' },
     { key: 'showActivity' as const, label: t ? 'Mostrar actividad' : 'Show activity', desc: t ? 'Tu actividad reciente es visible' : 'Your recent activity is visible' },
@@ -74,9 +89,37 @@ export default function Privacy() {
       desc: t ? 'Solo gente que sigues puede iniciarte una conversación' : 'Only people you follow can start a conversation',
     },
     {
+      value: 'FRIENDS_OF_FRIENDS',
+      label: t ? 'Amigos de amigos' : 'Friends of friends',
+      desc: t ? 'Solo gente con amigos en común puede escribirte' : 'Only people with mutual friends can message you',
+    },
+    {
+      value: 'FRIENDS_ONLY',
+      label: t ? 'Solo amigos' : 'Friends only',
+      desc: t ? 'Solo tus amigos confirmados pueden escribirte' : 'Only confirmed friends can message you',
+    },
+    {
       value: 'NONE',
       label: t ? 'Nadie' : 'No one',
       desc: t ? 'Nadie nuevo puede enviarte mensajes' : 'No one new can message you',
+    },
+  ];
+
+  const friendOptions: { value: FriendPolicy; label: string; desc: string }[] = [
+    {
+      value: 'EVERYONE',
+      label: t ? 'Todos' : 'Everyone',
+      desc: t ? 'Cualquiera puede enviarte solicitudes de amistad' : 'Anyone can send you friend requests',
+    },
+    {
+      value: 'FRIENDS_OF_FRIENDS',
+      label: t ? 'Amigos de amigos' : 'Friends of friends',
+      desc: t ? 'Solo personas con amigos en común pueden enviarte solicitudes' : 'Only people with mutual friends can send requests',
+    },
+    {
+      value: 'NONE',
+      label: t ? 'Nadie' : 'No one',
+      desc: t ? 'Nadie puede enviarte solicitudes de amistad' : 'No one can send you friend requests',
     },
   ];
 
@@ -118,6 +161,35 @@ export default function Privacy() {
               <Pressable
                 key={opt.value}
                 onPress={() => selectPolicy(opt.value)}
+                disabled={loadingPolicy}
+                style={({ pressed }) => [
+                  styles.row,
+                  i > 0 && styles.rowBorder,
+                  pressed && { opacity: 0.7 },
+                ]}
+              >
+                <View style={styles.rowInfo}>
+                  <Text style={styles.rowLabel}>{opt.label}</Text>
+                  <Text style={styles.rowDesc}>{opt.desc}</Text>
+                </View>
+                <View style={[styles.radio, selected && styles.radioOn]}>
+                  {selected && <View style={styles.radioDot} />}
+                </View>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        <Text style={styles.sectionTitle}>
+          {t ? 'Quién puede enviarme solicitudes de amistad' : 'Who can send me friend requests'}
+        </Text>
+        <View style={styles.card}>
+          {friendOptions.map((opt, i) => {
+            const selected = friendPolicy === opt.value;
+            return (
+              <Pressable
+                key={opt.value}
+                onPress={() => selectFriendPolicy(opt.value)}
                 disabled={loadingPolicy}
                 style={({ pressed }) => [
                   styles.row,
