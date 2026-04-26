@@ -5,6 +5,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException } from '@nestjs/common';
 import { WalletService } from '../wallet.service';
 import { PrismaService } from '../../../database/prisma.service';
+import { NotificationsService } from '../../notifications/notifications.service';
 
 const mockUser = {
   id: 'user-123',
@@ -26,8 +27,12 @@ const mockPrisma = {
     findMany: jest.fn(),
     findFirst: jest.fn(),
   },
-  userProfile: { updateMany: jest.fn() },
+  userProfile: { updateMany: jest.fn(), findUnique: jest.fn() },
   $transaction: jest.fn((ops) => Promise.all(Array.isArray(ops) ? ops : [])),
+};
+
+const mockNotifications = {
+  createNotification: jest.fn().mockResolvedValue({}),
 };
 
 describe('WalletService', () => {
@@ -38,6 +43,7 @@ describe('WalletService', () => {
       providers: [
         WalletService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: NotificationsService, useValue: mockNotifications },
       ],
     }).compile();
 

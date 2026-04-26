@@ -1,11 +1,15 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { WalletTransactionType, WalletReferenceType } from '@prisma/client';
+import { NotificationType, WalletTransactionType, WalletReferenceType } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { paginate, getPaginationOffset, PaginationDto } from '../../common/dto/pagination.dto';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class WalletService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notifications: NotificationsService,
+  ) {}
 
   async getWallet(userId: string) {
     const user = await this.prisma.user.findUnique({
@@ -121,11 +125,45 @@ export class WalletService {
       orderBy: { minPoints: 'desc' },
     });
 
-    if (level) {
-      await this.prisma.userProfile.updateMany({
-        where: { userId },
-        data: { loyaltyLevelId: level.id },
+    if (!level) return;
+
+    // Check the current level *before* writing so we know if this counts as
+    // a level-up (and therefore deserves the celebratory notification).
+    const profile = await this.prisma.userProfile.findUnique({
+      where: { userId },
+      select: { loyaltyLevelId: true },
+    });
+    const previousLevelId = profile?.loyaltyLevelId ?? null;
+
+    if (previousLevelId === level.id) return;
+
+    await this.prisma.userProfile.updateMany({
+      where: { userId },
+      data: { loyaltyLevelId: level.id },
+    });
+
+    // Only celebrate when the user actually moved up. If they downgraded
+    // (which shouldn't happen via addPoints, but does via admin tools),
+    // stay silent.
+    const previousLevel = previousLevelId
+      ? await this.prisma.loyaltyLevel.findUnique({ where: { id: previousLevelId }, select: { minPoints: true } })
+      : null;
+    if (previousLevel && previousLevel.minPoints >= level.minPoints) return;
+
+    const nameEs = level.name;
+    const nameEn = level.nameEn ?? level.name;
+    try {
+      await this.notifications.createNotification({
+        userId,
+        type: NotificationType.LEVEL_UP,
+        title: `¡Subiste a ${nameEs}!`,
+        titleEn: `You leveled up to ${nameEn}!`,
+        body: `Ahora eres nivel ${nameEs}. Disfruta nuevos beneficios.`,
+        bodyEn: `You are now ${nameEn}. Enjoy your new perks.`,
+        data: { levelId: level.id, levelName: nameEs, points },
       });
+    } catch {
+      // Notification failures must never break the points-earning flow.
     }
   }
 }
