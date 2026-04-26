@@ -56,6 +56,11 @@ export function useMentionAutocomplete() {
 
   const reqIdRef = useRef(0);
 
+  // Holds the latest committed text so onSelectionChange can read fresh state
+  // even when its captured `text` is one keystroke stale (RN fires
+  // onChangeText + onSelectionChange before re-render on Android).
+  const textRef = useRef('');
+
   // Detect active @token immediately before the caret. Returns the query
   // (without the @) or null if there is none.
   const detectActiveToken = (s: string, caret: number): string | null => {
@@ -89,6 +94,7 @@ export function useMentionAutocomplete() {
   }, [activeQuery]);
 
   const onChangeText = useCallback((next: string) => {
+    textRef.current = next;
     setText(next);
     // selection.end lags one keystroke behind in RN, so use end-of-text as the
     // caret estimate. onSelectionChange refines this for middle-of-text edits.
@@ -99,9 +105,14 @@ export function useMentionAutocomplete() {
     (e: NativeSyntheticEvent<TextInputSelectionChangeEventData>) => {
       const sel = e.nativeEvent.selection;
       setSelection(sel);
-      setActiveQuery(detectActiveToken(text, sel.end));
+      // Read from textRef — `text` state in this closure can be one keystroke
+      // behind the actual TextInput contents on Android, which would clobber
+      // the activeQuery just set by onChangeText with a stale value.
+      const latest = textRef.current;
+      const caret = Math.min(sel.end, latest.length);
+      setActiveQuery(detectActiveToken(latest, caret));
     },
-    [text],
+    [],
   );
 
   const pickSuggestion = useCallback(
@@ -118,6 +129,7 @@ export function useMentionAutocomplete() {
       setText(next);
       setActiveQuery(null);
       setSuggestions([]);
+      textRef.current = next;
       const newCaret = replaceFrom + handle.length + 2; // '@handle '
       setSelection({ start: newCaret, end: newCaret });
     },
@@ -150,6 +162,7 @@ export function useMentionAutocomplete() {
   );
 
   const reset = useCallback(() => {
+    textRef.current = '';
     setText('');
     setSelection({ start: 0, end: 0 });
     setActiveQuery(null);
