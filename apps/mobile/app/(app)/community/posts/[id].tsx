@@ -30,6 +30,8 @@ import { useCommunityRealtime } from '@/hooks/useCommunityRealtime';
 import { useFeedback } from '@/hooks/useFeedback';
 import { sharePost } from '@/utils/share';
 import { ErrorState } from '@/components/ErrorState';
+import { useMentionAutocomplete } from '@/hooks/useMentionAutocomplete';
+import { MentionSuggestions } from '@/components/MentionSuggestions';
 
 // ─────────────────────────────────────────────
 //  Post Detail — Instagram × Facebook hybrid
@@ -78,7 +80,9 @@ export default function PostDetail() {
   const [post, setPost] = useState<any>(null);
   const [comments, setComments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [comment, setComment] = useState('');
+  const mention = useMentionAutocomplete();
+  const comment = mention.text;
+  const setComment = mention.setText;
   const [sending, setSending] = useState(false);
   const [liked, setLiked] = useState(false);
   const [showReport, setShowReport] = useState(false);
@@ -218,7 +222,7 @@ export default function PostDetail() {
     if (!body) return;
     if (!isAuthenticated) return router.push('/(auth)/login' as never);
     const parentId = replyTo?.id;
-    if (!overrideText) setComment('');
+    if (!overrideText) mention.reset();
     const savedReply = replyTo;
     setReplyTo(null);
     setSending(true);
@@ -298,9 +302,9 @@ export default function PostDetail() {
     const name =
       `${c.user?.profile?.firstName ?? ''} ${c.user?.profile?.lastName ?? ''}`.trim() || 'Usuario';
     const firstName = (c.user?.profile?.firstName ?? '').trim();
-    const mention = firstName ? `@${firstName} ` : '';
+    const seed = firstName ? `@${firstName} ` : '';
     setReplyTo({ id: c.id, name });
-    setComment((prev) => (prev.trim().length > 0 ? prev : mention));
+    setComment(comment.trim().length > 0 ? comment : seed);
   }
 
   function toggleThread(commentId: string) {
@@ -676,6 +680,22 @@ export default function PostDetail() {
             ))}
           </ScrollView>
 
+          {/* ── Mention autocomplete popover ────── */}
+          {mention.activeQuery !== null && (
+            <View style={{ paddingHorizontal: 12, paddingTop: 8 }}>
+              <MentionSuggestions
+                suggestions={mention.suggestions}
+                loading={mention.loading}
+                onPick={mention.pickSuggestion}
+                emptyHint={
+                  mention.activeQuery && mention.activeQuery.length > 0
+                    ? t ? 'Sin coincidencias' : 'No matches'
+                    : undefined
+                }
+              />
+            </View>
+          )}
+
           {/* ── Compose bar (IG) ────────────────── */}
           <View style={styles.compose}>
             {me?.profile?.avatarUrl ? (
@@ -700,7 +720,8 @@ export default function PostDetail() {
               }
               placeholderTextColor={Colors.textMuted}
               value={comment}
-              onChangeText={setComment}
+              onChangeText={mention.onChangeText}
+              onSelectionChange={mention.onSelectionChange}
               multiline
             />
             <Pressable
