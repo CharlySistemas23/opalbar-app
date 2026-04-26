@@ -29,6 +29,7 @@ import { Heart } from '@/components/Heart';
 import { useCommunityRealtime } from '@/hooks/useCommunityRealtime';
 import { useFeedback } from '@/hooks/useFeedback';
 import { sharePost } from '@/utils/share';
+import { ErrorState } from '@/components/ErrorState';
 
 // ─────────────────────────────────────────────
 //  Post Detail — Instagram × Facebook hybrid
@@ -110,7 +111,9 @@ export default function PostDetail() {
     return t ? 'Más recientes' : 'Most recent';
   }, [commentSort, t]);
 
+  const [loadError, setLoadError] = useState<string | null>(null);
   const load = useCallback(async () => {
+    setLoadError(null);
     try {
       const [postRes, commentsRes] = await Promise.all([
         communityApi.post(id),
@@ -122,7 +125,9 @@ export default function PostDetail() {
       setLiked(!!p?.hasReacted);
       const c = commentsRes.data?.data;
       setComments(Array.isArray(c) ? c : c?.data ?? []);
-    } catch {}
+    } catch (err) {
+      setLoadError(apiError(err));
+    }
     finally {
       setLoading(false);
     }
@@ -307,6 +312,17 @@ export default function PostDetail() {
       <View style={styles.center}>
         <ActivityIndicator color={Colors.accentPrimary} />
       </View>
+    );
+  }
+  if (loadError && !post) {
+    return (
+      <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
+        <ErrorState
+          message={loadError}
+          retryLabel={t ? 'Reintentar' : 'Retry'}
+          onRetry={() => { setLoading(true); load(); }}
+        />
+      </SafeAreaView>
     );
   }
   if (!post) {

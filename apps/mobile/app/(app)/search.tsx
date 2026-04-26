@@ -4,8 +4,11 @@ import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { usersApi, eventsApi, venueApi } from '@/api/client';
+import { apiError } from '@/api/errors';
 import { useAppStore } from '@/stores/app.store';
 import { Colors, Radius } from '@/constants/tokens';
+import { EmptyState } from '@/components/EmptyState';
+import { ErrorState } from '@/components/ErrorState';
 
 type Tab = 'people' | 'bars' | 'events';
 const TABS: { key: Tab; label: { es: string; en: string } }[] = [
@@ -30,13 +33,16 @@ export default function Search() {
   const [q, setQ] = useState('');
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<any[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
   const runSearch = useCallback(async (query: string, which: Tab) => {
     if (!query.trim()) {
       setResults([]);
+      setError(null);
       return;
     }
     setLoading(true);
+    setError(null);
     try {
       if (which === 'people') {
         const r = await usersApi.search(query);
@@ -48,8 +54,9 @@ export default function Search() {
         const r = await eventsApi.list({ search: query });
         setResults(r.data?.data?.data ?? []);
       }
-    } catch {
+    } catch (err) {
       setResults([]);
+      setError(apiError(err));
     } finally { setLoading(false); }
   }, []);
 
@@ -109,19 +116,23 @@ export default function Search() {
       {loading ? (
         <View style={styles.center}><ActivityIndicator color={Colors.accentPrimary} /></View>
       ) : q.trim().length === 0 ? (
-        <View style={styles.center}>
-          <Feather name="search" size={42} color={Colors.textMuted} />
-          <Text style={styles.placeholder}>
-            {t ? 'Busca personas, bares o eventos' : 'Search people, bars or events'}
-          </Text>
-        </View>
+        <EmptyState
+          icon="search"
+          title={t ? 'Empieza a buscar' : 'Start searching'}
+          message={t ? 'Personas, bares o eventos.' : 'People, bars or events.'}
+        />
+      ) : error ? (
+        <ErrorState
+          message={error}
+          retryLabel={t ? 'Reintentar' : 'Retry'}
+          onRetry={() => runSearch(q, tab)}
+        />
       ) : results.length === 0 ? (
-        <View style={styles.center}>
-          <Feather name="frown" size={42} color={Colors.textMuted} />
-          <Text style={styles.placeholder}>
-            {t ? 'Sin resultados para' : 'No results for'} "{q}"
-          </Text>
-        </View>
+        <EmptyState
+          icon="frown"
+          title={t ? 'Sin resultados' : 'No results'}
+          message={t ? `No encontramos nada para "${q}".` : `Nothing found for "${q}".`}
+        />
       ) : (
         <FlatList
           data={results}

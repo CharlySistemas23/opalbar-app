@@ -1,12 +1,14 @@
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Linking, Platform, Alert, Image } from 'react-native';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { Button } from '@/components/ui';
 import { venueApi, reviewsApi } from '@/api/client';
+import { apiError } from '@/api/errors';
 import { useAppStore } from '@/stores/app.store';
 import { Colors, Typography, Spacing, Radius } from '@/constants/tokens';
+import { ErrorState } from '@/components/ErrorState';
 
 /**
  * Open native maps for the venue. iOS prefers Apple Maps (with labeled pin);
@@ -63,18 +65,34 @@ export default function VenueDetail() {
   const [venue, setVenue] = useState<any>(null);
   const [summary, setSummary] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const load = useCallback(() => {
+    setLoadError(null);
     Promise.all([
       venueApi.get(id),
       reviewsApi.venueSummary(id),
     ]).then(([vRes, rRes]) => {
       setVenue(vRes.data.data);
       setSummary(rRes.data.data);
-    }).finally(() => setLoading(false));
+    }).catch((err) => setLoadError(apiError(err)))
+      .finally(() => setLoading(false));
   }, [id]);
 
+  useEffect(() => { load(); }, [load]);
+
   if (loading) return <View style={styles.center}><ActivityIndicator color={Colors.accentPrimary} /></View>;
+  if (loadError && !venue) {
+    return (
+      <SafeAreaView style={styles.root} edges={['top']}>
+        <ErrorState
+          message={loadError}
+          retryLabel={t ? 'Reintentar' : 'Retry'}
+          onRetry={() => { setLoading(true); load(); }}
+        />
+      </SafeAreaView>
+    );
+  }
   if (!venue) return <View style={styles.center}><Text style={styles.notFound}>{t ? 'Venue no encontrado' : 'Venue not found'}</Text></View>;
 
   const rating = Number(venue.ratingAvg ?? summary?.averageRating ?? 0);

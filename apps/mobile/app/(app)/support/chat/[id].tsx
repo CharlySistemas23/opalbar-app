@@ -4,9 +4,12 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { supportApi } from '@/api/client';
+import { apiError } from '@/api/errors';
 import { useAuthStore } from '@/stores/auth.store';
 import { useAppStore } from '@/stores/app.store';
 import { Colors, Radius } from '@/constants/tokens';
+import { EmptyState } from '@/components/EmptyState';
+import { ErrorState } from '@/components/ErrorState';
 
 export default function SupportChat() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -19,14 +22,18 @@ export default function SupportChat() {
   const [loading, setLoading] = useState(true);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const listRef = useRef<FlatList>(null);
 
   async function load() {
+    setLoadError(null);
     try {
       const r = await supportApi.messages(id);
       const msgs = r.data?.data?.data ?? r.data?.data ?? [];
       setMessages(msgs);
-    } catch {}
+    } catch (err) {
+      setLoadError(apiError(err));
+    }
     finally { setLoading(false); }
   }
 
@@ -81,6 +88,12 @@ export default function SupportChat() {
 
         {loading ? (
           <View style={styles.center}><ActivityIndicator color={Colors.accentPrimary} /></View>
+        ) : loadError && messages.length === 0 ? (
+          <ErrorState
+            message={loadError}
+            retryLabel={t ? 'Reintentar' : 'Retry'}
+            onRetry={() => { setLoading(true); load(); }}
+          />
         ) : (
           <FlatList
             ref={listRef}
@@ -105,9 +118,11 @@ export default function SupportChat() {
               );
             }}
             ListEmptyComponent={
-              <Text style={styles.empty}>
-                {t ? 'Inicia la conversación.' : 'Start the conversation.'}
-              </Text>
+              <EmptyState
+                icon="message-circle"
+                title={t ? 'Inicia la conversación' : 'Start the conversation'}
+                message={t ? 'Cuéntanos cómo podemos ayudarte.' : 'Tell us how we can help.'}
+              ></EmptyState>
             }
           />
         )}
