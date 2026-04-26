@@ -376,6 +376,17 @@ export class CommunityService {
         .catch(() => {});
     }
 
+    if (dto.mentions && dto.mentions.length > 0) {
+      this.mentions
+        .applyMentions({
+          authorId: userId,
+          targetType: MentionTargetType.COMMENT,
+          targetId: comment.id,
+          mentions: dto.mentions,
+        })
+        .catch(() => {});
+    }
+
     return comment;
   }
 

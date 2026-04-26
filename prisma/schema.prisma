@@ -160,6 +160,7 @@ enum NotificationType {
   FRIEND_ACCEPTED
   POST_MENTION
   STORY_MENTION
+  COMMENT_MENTION
   MENTION_APPROVAL_NEEDED
   SYSTEM
 }
@@ -188,6 +189,7 @@ enum MentionPolicy {
 enum MentionTargetType {
   POST
   STORY
+  COMMENT
 }
 
 enum MentionStatus {

@@ -66,7 +66,7 @@ export class NotificationsService {
     const notification = await this.prisma.notification.create({ data: data as any });
 
     // Send push notification (placeholder — integrate FCM/APNs)
-    await this.sendPush(data.userId, data.title, data.body, data.data);
+    await this.sendPush(data.userId, data.title, data.body, data.data, data.imageUrl);
 
     // Real-time push to the user's open sockets
     this.realtime.toUser(data.userId, 'notification', 'created', {
@@ -166,7 +166,7 @@ export class NotificationsService {
       // Send push only if this is the SECOND interaction or every 5th —
       // avoids "Ana liked your post" five times in a row.
       if (count === 2 || count % 5 === 0) {
-        await this.sendPush(input.userId, title, input.body ?? '', nextData);
+        await this.sendPush(input.userId, title, input.body ?? '', nextData, input.imageUrl ?? input.actor.avatarUrl);
       }
 
       return updated;
@@ -206,8 +206,14 @@ export class NotificationsService {
     title: string,
     body: string,
     data?: Record<string, unknown>,
+    imageUrl?: string,
   ) {
-    await this.push.sendToUser(userId, { title, body, data });
+    await this.push.sendToUser(userId, {
+      title,
+      body,
+      data,
+      ...(imageUrl ? { richContent: { image: imageUrl } } : {}),
+    });
   }
 
   /**

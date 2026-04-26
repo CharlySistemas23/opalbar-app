@@ -346,6 +346,7 @@ export class MessagesService {
             actorAvatarUrl: senderProfile?.avatarUrl ?? null,
             isRequest: true,
           },
+          imageUrl: senderProfile?.avatarUrl ?? undefined,
         })
         .catch(() => {});
     } else if (thread.status === MessageThreadStatus.ACCEPTED) {
@@ -369,6 +370,7 @@ export class MessagesService {
               actorName: senderName,
               actorAvatarUrl: senderProfile?.avatarUrl ?? null,
             },
+            imageUrl: senderProfile?.avatarUrl ?? undefined,
           })
           .catch(() => {});
       }

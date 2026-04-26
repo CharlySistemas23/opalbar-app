@@ -222,12 +222,16 @@ export default function PostDetail() {
     if (!body) return;
     if (!isAuthenticated) return router.push('/(auth)/login' as never);
     const parentId = replyTo?.id;
+    const mentions = overrideText ? [] : mention.buildMentions();
     if (!overrideText) mention.reset();
     const savedReply = replyTo;
     setReplyTo(null);
     setSending(true);
     try {
-      await communityApi.addComment(id, parentId ? { content: body, parentId } : { content: body });
+      const payload: Record<string, unknown> = { content: body };
+      if (parentId) payload.parentId = parentId;
+      if (mentions.length > 0) payload.mentions = mentions;
+      await communityApi.addComment(id, payload);
       fb.send();
       await load();
     } catch (err: any) {

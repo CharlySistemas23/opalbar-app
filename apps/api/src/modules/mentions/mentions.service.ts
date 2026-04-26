@@ -160,29 +160,43 @@ export class MentionsService {
     });
     const actorName = `${actor?.firstName ?? ''} ${actor?.lastName ?? ''}`.trim() || 'Alguien';
 
-    const isPost = targetType === MentionTargetType.POST;
-    const approvedType = isPost ? NotificationType.POST_MENTION : NotificationType.STORY_MENTION;
+    const approvedType =
+      targetType === MentionTargetType.POST
+        ? NotificationType.POST_MENTION
+        : targetType === MentionTargetType.STORY
+          ? NotificationType.STORY_MENTION
+          : NotificationType.COMMENT_MENTION;
     const pendingType = NotificationType.MENTION_APPROVAL_NEEDED;
+
+    const approvedTitleEs =
+      targetType === MentionTargetType.POST
+        ? 'Te etiquetaron en una publicación'
+        : targetType === MentionTargetType.STORY
+          ? 'Te etiquetaron en una historia'
+          : 'Te mencionaron en un comentario';
+    const approvedTitleEn =
+      targetType === MentionTargetType.POST
+        ? 'You were tagged in a post'
+        : targetType === MentionTargetType.STORY
+          ? 'You were tagged in a story'
+          : 'You were mentioned in a comment';
 
     for (const m of mentions) {
       const isApproved = m.status === MentionStatus.APPROVED;
       const type = isApproved ? approvedType : pendingType;
 
-      const title = isApproved
-        ? isPost
-          ? 'Te etiquetaron en una publicación'
-          : 'Te etiquetaron en una historia'
-        : 'Solicitud de etiqueta';
-      const titleEn = isApproved
-        ? isPost
-          ? 'You were tagged in a post'
-          : 'You were tagged in a story'
-        : 'Tag request';
+      const title = isApproved ? approvedTitleEs : 'Solicitud de etiqueta';
+      const titleEn = isApproved ? approvedTitleEn : 'Tag request';
+      const isComment = targetType === MentionTargetType.COMMENT;
       const body = isApproved
-        ? `${actorName} te etiquetó.`
+        ? isComment
+          ? `${actorName} te mencionó en un comentario.`
+          : `${actorName} te etiquetó.`
         : `${actorName} quiere etiquetarte. Aprueba para que sea visible.`;
       const bodyEn = isApproved
-        ? `${actorName} tagged you.`
+        ? isComment
+          ? `${actorName} mentioned you in a comment.`
+          : `${actorName} tagged you.`
         : `${actorName} wants to tag you. Approve to make it visible.`;
 
       this.notifications
@@ -201,6 +215,7 @@ export class MentionsService {
             targetType,
             targetId,
           },
+          imageUrl: actor?.avatarUrl ?? undefined,
         })
         .catch(() => {});
 

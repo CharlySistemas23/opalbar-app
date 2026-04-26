@@ -8,6 +8,9 @@ interface PushPayload {
   body: string;
   data?: Record<string, any>;
   sound?: 'default';
+  // Expo translates this into FCM bigPicture/largeIcon (Android) and APNs
+  // attachments (iOS). Used to show the sender's avatar on DM pushes etc.
+  richContent?: { image?: string };
 }
 
 @Injectable()
@@ -58,6 +61,7 @@ export class PushService {
       title: payload.title,
       body: payload.body,
       data: payload.data,
+      ...(payload.richContent?.image ? { richContent: { image: payload.richContent.image } } : {}),
     }));
 
     try {

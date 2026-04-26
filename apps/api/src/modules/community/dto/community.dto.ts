@@ -61,6 +61,13 @@ export class UpdatePostDto {
 export class CreateCommentDto {
   @ApiProperty({ maxLength: 1000 }) @IsString() @MinLength(1) @MaxLength(1000) content: string;
   @ApiPropertyOptional({ description: 'Parent comment ID for replies' }) @IsOptional() @IsString() parentId?: string;
+
+  @ApiPropertyOptional({ type: [MentionInputDto], description: 'Users mentioned in the comment' })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => MentionInputDto)
+  mentions?: MentionInputDto[];
 }
 
 export class ReactDto {
