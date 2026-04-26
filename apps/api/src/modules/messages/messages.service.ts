@@ -349,24 +349,29 @@ export class MessagesService {
         })
         .catch(() => {});
     } else if (thread.status === MessageThreadStatus.ACCEPTED) {
-      const senderProfile = await this.prisma.userProfile.findUnique({ where: { userId: meId } });
-      const senderName = senderProfile
-        ? `${senderProfile.firstName ?? ''} ${senderProfile.lastName ?? ''}`.trim() || 'Alguien'
-        : 'Alguien';
-      await this.notifications
-        .createNotification({
-          userId: recipientId,
-          type: NotificationType.MESSAGE_NEW,
-          title: senderName,
-          body: preview,
-          data: {
-            threadId,
-            actorId: meId,
-            actorName: senderName,
-            actorAvatarUrl: senderProfile?.avatarUrl ?? null,
-          },
-        })
-        .catch(() => {});
+      // WhatsApp-style: don't notify the recipient if they're already inside
+      // the conversation — the realtime payload + chat UI is enough.
+      const recipientInRoom = this.gateway.isUserInThread(recipientId, threadId);
+      if (!recipientInRoom) {
+        const senderProfile = await this.prisma.userProfile.findUnique({ where: { userId: meId } });
+        const senderName = senderProfile
+          ? `${senderProfile.firstName ?? ''} ${senderProfile.lastName ?? ''}`.trim() || 'Alguien'
+          : 'Alguien';
+        await this.notifications
+          .createNotification({
+            userId: recipientId,
+            type: NotificationType.MESSAGE_NEW,
+            title: senderName,
+            body: preview,
+            data: {
+              threadId,
+              actorId: meId,
+              actorName: senderName,
+              actorAvatarUrl: senderProfile?.avatarUrl ?? null,
+            },
+          })
+          .catch(() => {});
+      }
     }
 
     return msg;

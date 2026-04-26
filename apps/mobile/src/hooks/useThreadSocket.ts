@@ -14,7 +14,9 @@ export interface ThreadSocketHandle {
   otherOnline: boolean;
   otherLastSeenAt: string | null;
   typingUserIds: Set<string>;
+  recordingUserIds: Set<string>;
   emitTyping: (isTyping: boolean) => void;
+  emitRecording: (isRecording: boolean) => void;
   markRead: () => void;
 }
 
@@ -32,9 +34,11 @@ export function useThreadSocket(
   const [otherOnline, setOtherOnline] = useState(false);
   const [otherLastSeenAt, setOtherLastSeenAt] = useState<string | null>(null);
   const [typingUserIds, setTypingUserIds] = useState<Set<string>>(new Set());
+  const [recordingUserIds, setRecordingUserIds] = useState<Set<string>>(new Set());
   const socketRef = useRef<Socket | null>(null);
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTypingStateRef = useRef<boolean>(false);
+  const lastRecordingStateRef = useRef<boolean>(false);
 
   // Keep a ref to the latest onNewMessage so we don't reattach listeners
   const onNewMessageRef = useRef(onNewMessage);
@@ -98,6 +102,24 @@ export function useThreadSocket(
       if (payload.threadId !== threadId) return;
       onReadRef.current?.(payload);
     };
+    const handleVoiceStart = (payload: { threadId: string; userId: string }) => {
+      if (payload.threadId !== threadId) return;
+      setRecordingUserIds((prev) => {
+        if (prev.has(payload.userId)) return prev;
+        const next = new Set(prev);
+        next.add(payload.userId);
+        return next;
+      });
+    };
+    const handleVoiceStop = (payload: { threadId: string; userId: string }) => {
+      if (payload.threadId !== threadId) return;
+      setRecordingUserIds((prev) => {
+        if (!prev.has(payload.userId)) return prev;
+        const next = new Set(prev);
+        next.delete(payload.userId);
+        return next;
+      });
+    };
 
     socket.on('connect', handleConnect);
     socket.on('disconnect', handleDisconnect);
@@ -107,6 +129,8 @@ export function useThreadSocket(
     socket.on('presence:online', handlePresenceOnline);
     socket.on('presence:offline', handlePresenceOffline);
     socket.on('message:read', handleRead);
+    socket.on('voice:start', handleVoiceStart);
+    socket.on('voice:stop', handleVoiceStop);
 
     // If already connected when the hook mounts, join immediately
     if (socket.connected) handleConnect();
@@ -120,7 +144,15 @@ export function useThreadSocket(
       socket.off('presence:online', handlePresenceOnline);
       socket.off('presence:offline', handlePresenceOffline);
       socket.off('message:read', handleRead);
-      if (socket.connected) socket.emit('thread:leave', { threadId });
+      socket.off('voice:start', handleVoiceStart);
+      socket.off('voice:stop', handleVoiceStop);
+      if (socket.connected) {
+        if (lastTypingStateRef.current) socket.emit('typing:stop', { threadId });
+        if (lastRecordingStateRef.current) socket.emit('voice:stop', { threadId });
+        socket.emit('thread:leave', { threadId });
+      }
+      lastTypingStateRef.current = false;
+      lastRecordingStateRef.current = false;
       if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
     };
   }, [threadId, opts?.otherUserId]);
@@ -179,5 +211,25 @@ export function useThreadSocket(
     socket.emit('message:read', { threadId });
   }, [threadId]);
 
-  return { connected, otherOnline, otherLastSeenAt, typingUserIds, emitTyping, markRead };
+  const emitRecording = useCallback(
+    (isRecording: boolean) => {
+      const socket = socketRef.current;
+      if (!socket || !threadId) return;
+      if (isRecording === lastRecordingStateRef.current) return;
+      socket.emit(isRecording ? 'voice:start' : 'voice:stop', { threadId });
+      lastRecordingStateRef.current = isRecording;
+    },
+    [threadId],
+  );
+
+  return {
+    connected,
+    otherOnline,
+    otherLastSeenAt,
+    typingUserIds,
+    recordingUserIds,
+    emitTyping,
+    emitRecording,
+    markRead,
+  };
 }

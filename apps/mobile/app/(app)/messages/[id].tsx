@@ -407,7 +407,15 @@ export default function MessageThread() {
     );
   }, [me?.id]);
 
-  const { otherOnline, otherLastSeenAt, typingUserIds, emitTyping, markRead } = useThreadSocket(
+  const {
+    otherOnline,
+    otherLastSeenAt,
+    typingUserIds,
+    recordingUserIds,
+    emitTyping,
+    emitRecording,
+    markRead,
+  } = useThreadSocket(
     id,
     handleIncoming,
     {
@@ -559,11 +567,12 @@ export default function MessageThread() {
       setRecording(rec);
       setRecordingDur(0);
       fb.tap();
+      emitRecording(true);
       recTimerRef.current = setInterval(() => setRecordingDur((d) => d + 1), 1000);
     } catch (err: any) {
       Alert.alert('Error', err?.message ?? 'Recording failed');
     }
-  }, [fb, t]);
+  }, [fb, t, emitRecording]);
 
   const cancelRecording = useCallback(async () => {
     if (recTimerRef.current) clearInterval(recTimerRef.current);
@@ -571,7 +580,8 @@ export default function MessageThread() {
     setRecordingDur(0);
     try { await recording?.stopAndUnloadAsync(); } catch {}
     setRecording(null);
-  }, [recording]);
+    emitRecording(false);
+  }, [recording, emitRecording]);
 
   const stopAndSendRecording = useCallback(async () => {
     const rec = recording;
@@ -581,6 +591,7 @@ export default function MessageThread() {
     const duration = recordingDur;
     setRecording(null);
     setRecordingDur(0);
+    emitRecording(false);
     try {
       await rec.stopAndUnloadAsync();
       const uri = rec.getURI();
@@ -597,7 +608,7 @@ export default function MessageThread() {
     } finally {
       setUploadingAudio(false);
     }
-  }, [recording, recordingDur, replyTo?.id, sendPayload, fb]);
+  }, [recording, recordingDur, replyTo?.id, sendPayload, fb, emitRecording]);
 
   // ── Reactions ─────────────────────────────────
   const reactToMessage = useCallback(async (msg: any, emoji: string) => {
@@ -708,6 +719,7 @@ export default function MessageThread() {
 
   const other = thread?.otherUser;
   const isOtherTyping = !!other?.id && typingUserIds.has(other.id);
+  const isOtherRecording = !!other?.id && recordingUserIds.has(other.id);
   const first = other?.profile?.firstName ?? '';
   const last = other?.profile?.lastName ?? '';
   const name = `${first} ${last}`.trim() || 'Usuario';
@@ -839,7 +851,14 @@ export default function MessageThread() {
             <View style={{ flex: 1, marginLeft: 12 }}>
               <Text style={styles.headerName} numberOfLines={1}>{name}</Text>
               <View style={styles.headerSubRow}>
-                {isOtherTyping ? (
+                {isOtherRecording ? (
+                  <>
+                    <View style={[styles.statusDot, { backgroundColor: Colors.accentDanger }]} />
+                    <Text style={[styles.headerSub, { color: Colors.accentDanger }]}>
+                      {t ? 'Grabando audio…' : 'Recording audio…'}
+                    </Text>
+                  </>
+                ) : isOtherTyping ? (
                   <>
                     <View style={[styles.statusDot, { backgroundColor: Colors.accentPrimary }]} />
                     <Text style={[styles.headerSub, { color: Colors.accentPrimary }]}>

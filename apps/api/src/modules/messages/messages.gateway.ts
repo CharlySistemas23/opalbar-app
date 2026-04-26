@@ -185,6 +185,31 @@ export class MessagesGateway implements OnGatewayConnection, OnGatewayDisconnect
     });
   }
 
+  // ── VOICE RECORDING INDICATOR ──────────────────
+  @SubscribeMessage('voice:start')
+  onVoiceStart(
+    @ConnectedSocket() socket: AuthedSocket,
+    @MessageBody() body: { threadId: string },
+  ) {
+    if (!body?.threadId) return;
+    socket.to(this.threadRoom(body.threadId)).emit('voice:start', {
+      threadId: body.threadId,
+      userId: socket.data.userId,
+    });
+  }
+
+  @SubscribeMessage('voice:stop')
+  onVoiceStop(
+    @ConnectedSocket() socket: AuthedSocket,
+    @MessageBody() body: { threadId: string },
+  ) {
+    if (!body?.threadId) return;
+    socket.to(this.threadRoom(body.threadId)).emit('voice:stop', {
+      threadId: body.threadId,
+      userId: socket.data.userId,
+    });
+  }
+
   // ── READ RECEIPTS ──────────────────────────────
   @SubscribeMessage('message:read')
   async onMessageRead(
@@ -220,6 +245,20 @@ export class MessagesGateway implements OnGatewayConnection, OnGatewayDisconnect
       threadId,
       message,
     });
+  }
+
+  /** True if the user has any socket currently joined to the thread room.
+   *  Used by MessagesService to skip notifications when the recipient is
+   *  already viewing the conversation. */
+  isUserInThread(userId: string, threadId: string): boolean {
+    if (!this.online.has(userId)) return false;
+    const room = this.server.sockets.adapter.rooms.get(this.threadRoom(threadId));
+    if (!room || room.size === 0) return false;
+    for (const socketId of room) {
+      const s = this.server.sockets.sockets.get(socketId) as AuthedSocket | undefined;
+      if (s?.data?.userId === userId) return true;
+    }
+    return false;
   }
 
   // ── HELPERS ────────────────────────────────────
