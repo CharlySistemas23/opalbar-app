@@ -199,6 +199,10 @@ export const usersApi = {
 
 // Friendships (FB/IG hybrid)
 export type FriendPolicy = 'EVERYONE' | 'FRIENDS_OF_FRIENDS' | 'NONE';
+export type MentionPolicy = 'EVERYONE' | 'FRIENDS_OF_FRIENDS' | 'FRIENDS_ONLY' | 'NONE';
+export type MentionInput = { userId: string; x?: number | null; y?: number | null };
+export type MentionTargetType = 'POST' | 'STORY';
+export type MentionStatus = 'APPROVED' | 'PENDING' | 'REJECTED';
 export type FriendshipState =
   | 'self'
   | 'none'
@@ -220,6 +224,21 @@ export const friendshipsApi = {
   remove: (userId: string) => apiClient.delete(`/friendships/${userId}`),
   updatePolicy: (policy: FriendPolicy) =>
     apiClient.patch('/friendships/me/policy', { policy }),
+};
+
+// Mentions / tagging
+export const mentionsApi = {
+  pending: (limit = 50) => apiClient.get('/mentions/pending', { params: { limit } }),
+  pendingCount: () => apiClient.get('/mentions/pending/count'),
+  approve: (id: string) => apiClient.post(`/mentions/${id}/approve`),
+  reject: (id: string) => apiClient.post(`/mentions/${id}/reject`),
+  remove: (id: string) => apiClient.delete(`/mentions/${id}`),
+  tagged: (userId: string, limit = 30) =>
+    apiClient.get(`/mentions/tagged/${userId}`, { params: { limit } }),
+  forTarget: (targetType: MentionTargetType, targetId: string) =>
+    apiClient.get(`/mentions/target/${targetType}/${targetId}`),
+  updatePolicy: (policy: MentionPolicy) =>
+    apiClient.patch('/mentions/me/policy', { policy }),
 };
 
 // Messaging
@@ -297,7 +316,7 @@ export const communityApi = {
   stories: (scope?: 'forYou' | 'following') =>
     apiClient.get('/community/stories', { params: scope ? { scope } : {} }),
   userStories: (userId: string) => apiClient.get(`/community/users/${userId}/stories`),
-  createStory: (data: { mediaUrl: string; caption?: string }) =>
+  createStory: (data: { mediaUrl: string; caption?: string; mentions?: MentionInput[] }) =>
     apiClientUpload.post('/community/stories', data),
   deleteStory: (id: string) => apiClient.delete(`/community/stories/${id}`),
   viewStory: (id: string) => apiClient.post(`/community/stories/${id}/view`),

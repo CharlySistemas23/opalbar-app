@@ -3,13 +3,14 @@ import {
   Injectable, NotFoundException,
 } from '@nestjs/common';
 import { createHash } from 'crypto';
-import { NotificationType, PostStatus, ReportTargetType, StoryScope, UserRole } from '@prisma/client';
+import { MentionTargetType, NotificationType, PostStatus, ReportTargetType, StoryScope, UserRole } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { RedisService } from '../../database/redis.service';
 import { paginate, getPaginationOffset } from '../../common/dto/pagination.dto';
 import { CommunityGateway } from './community.gateway';
 import { NotificationsService } from '../notifications/notifications.service';
 import { RealtimeService } from '../realtime/realtime.service';
+import { MentionsService } from '../mentions/mentions.service';
 import {
   CreatePostDto, UpdatePostDto, CreateCommentDto,
   ReactDto, CreateReportDto, PostFilterDto, CommunityFeedScope, PostSurface,
@@ -38,6 +39,7 @@ export class CommunityService {
     private readonly communityGateway: CommunityGateway,
     private readonly notifications: NotificationsService,
     private readonly realtime: RealtimeService,
+    private readonly mentions: MentionsService,
   ) {}
 
   private static hashFilter(obj: unknown): string {
@@ -183,6 +185,17 @@ export class CommunityService {
           referenceType: 'POST_ENGAGEMENT',
         },
       });
+    }
+
+    if (dto.mentions && dto.mentions.length > 0) {
+      this.mentions
+        .applyMentions({
+          authorId: userId,
+          targetType: MentionTargetType.POST,
+          targetId: post.id,
+          mentions: dto.mentions,
+        })
+        .catch(() => {});
     }
 
     await this.invalidateFeed();
@@ -639,6 +652,17 @@ export class CommunityService {
       id: story.id,
       data: { userId, scope },
     });
+
+    if (dto.mentions && dto.mentions.length > 0 && scope === StoryScope.PERSONAL) {
+      this.mentions
+        .applyMentions({
+          authorId: userId,
+          targetType: MentionTargetType.STORY,
+          targetId: story.id,
+          mentions: dto.mentions,
+        })
+        .catch(() => {});
+    }
 
     // Venue stories are house announcements — push to every active user.
     // Personal stories don't push (would be spammy at scale; only realtime).

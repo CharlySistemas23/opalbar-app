@@ -24,6 +24,9 @@ import { Colors } from '@/constants/tokens';
 import { uploadImage, UploadError } from '@/utils/uploadImage';
 import { toast } from '@/components/Toast';
 import { useFeedback } from '@/hooks/useFeedback';
+import { useMentionAutocomplete } from '@/hooks/useMentionAutocomplete';
+import { MentionSuggestions } from '@/components/MentionSuggestions';
+import { PhotoTagger, type PhotoTag } from '@/components/PhotoTagger';
 
 // ─────────────────────────────────────────────
 //  New Post — Wall or Community
@@ -56,8 +59,12 @@ export default function NewPost() {
   const isWallPost = surfaceChoice === 'wall';
   const canChangeSurface = !surfaceParam;
 
-  const [content, setContent] = useState('');
+  const mention = useMentionAutocomplete();
+  const content = mention.text;
+  const setContent = mention.setText;
   const [localImage, setLocalImage] = useState<string | null>(null);
+  const [photoTags, setPhotoTags] = useState<PhotoTag[]>([]);
+  const [taggerOpen, setTaggerOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [pickingImage, setPickingImage] = useState(false);
   const [selectedRatio, setSelectedRatio] = useState<AspectRatioKey>('1:1');
@@ -145,10 +152,21 @@ export default function NewPost() {
           return;
         }
       }
+      const coordsByUserId = new Map(
+        photoTags.map((t) => [t.userId, { x: t.x, y: t.y }] as const),
+      );
+      const mentions = mention.buildMentions(coordsByUserId);
+      // Merge in photo-only tags (tagged on the picture but never @-typed).
+      for (const pt of photoTags) {
+        if (!mentions.find((m) => m.userId === pt.userId)) {
+          mentions.push({ userId: pt.userId, x: pt.x, y: pt.y });
+        }
+      }
       const res = await communityApi.createPost({
         content: content.trim() || '',
         imageUrl: uploadedUrl,
         surface: isWallPost ? 'wall' : 'community',
+        mentions: mentions.length > 0 ? mentions : undefined,
       });
       refreshUser();
       const status = res.data?.data?.status;
@@ -308,19 +326,36 @@ export default function NewPost() {
             placeholder={
               isWallPost
                 ? t
-                  ? '¿Qué quieres compartir en tu muro?'
-                  : 'What do you want to share?'
+                  ? '¿Qué quieres compartir en tu muro? Usa @ para etiquetar.'
+                  : 'What do you want to share? Use @ to tag.'
                 : t
-                  ? '¿Qué está pasando en OPAL BAR?'
-                  : "What's happening at OPAL BAR?"
+                  ? '¿Qué está pasando en OPAL BAR? Usa @ para etiquetar.'
+                  : "What's happening at OPAL BAR? Use @ to tag."
             }
             placeholderTextColor={Colors.textMuted}
             value={content}
-            onChangeText={setContent}
+            onChangeText={mention.onChangeText}
+            onSelectionChange={mention.onSelectionChange}
             multiline
             maxLength={MAX_LEN}
             autoFocus={!localImage}
           />
+          {(mention.activeQuery !== null) && (
+            <View style={{ marginTop: 8 }}>
+              <MentionSuggestions
+                suggestions={mention.suggestions}
+                loading={mention.loading}
+                onPick={mention.pickSuggestion}
+                emptyHint={
+                  mention.activeQuery && mention.activeQuery.length > 0
+                    ? t
+                      ? 'Sin coincidencias'
+                      : 'No matches'
+                    : undefined
+                }
+              />
+            </View>
+          )}
 
           {/* ── Image preview ──────────────────── */}
           {localImage ? (
@@ -337,10 +372,26 @@ export default function NewPost() {
                 style={({ pressed }) => [styles.removeBtn, pressed && styles.pressed]}
                 onPress={() => {
                   setLocalImage(null);
+                  setPhotoTags([]);
                 }}
                 hitSlop={10}
               >
                 <Feather name="x" size={16} color="#fff" />
+              </Pressable>
+              <Pressable
+                style={({ pressed }) => [styles.tagBtn, pressed && styles.pressed]}
+                onPress={() => setTaggerOpen(true)}
+              >
+                <Feather name="user-plus" size={14} color="#fff" />
+                <Text style={styles.tagBtnText}>
+                  {photoTags.length > 0
+                    ? t
+                      ? `${photoTags.length} etiquetad${photoTags.length === 1 ? 'o' : 'os'}`
+                      : `${photoTags.length} tagged`
+                    : t
+                      ? 'Etiquetar personas'
+                      : 'Tag people'}
+                </Text>
               </Pressable>
             </View>
           ) : null}
@@ -415,6 +466,13 @@ export default function NewPost() {
           )}
         </View>
       </KeyboardAvoidingView>
+      <PhotoTagger
+        visible={taggerOpen}
+        imageUri={localImage}
+        initialTags={photoTags}
+        onClose={() => setTaggerOpen(false)}
+        onSubmit={setPhotoTags}
+      />
     </SafeAreaView>
   );
 }
@@ -526,6 +584,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  tagBtn: {
+    position: 'absolute',
+    bottom: 10,
+    left: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 14,
+    backgroundColor: 'rgba(0,0,0,0.62)',
+  },
+  tagBtnText: { color: '#fff', fontSize: 12, fontWeight: '700' },
 
   charCount: {
     alignSelf: 'flex-end',

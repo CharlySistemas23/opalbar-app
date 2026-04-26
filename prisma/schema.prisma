@@ -158,6 +158,9 @@ enum NotificationType {
   MESSAGE_REQUEST
   FRIEND_REQUEST
   FRIEND_ACCEPTED
+  POST_MENTION
+  STORY_MENTION
+  MENTION_APPROVAL_NEEDED
   SYSTEM
 }
 
@@ -173,6 +176,24 @@ enum FriendPolicy {
   EVERYONE
   FRIENDS_OF_FRIENDS
   NONE
+}
+
+enum MentionPolicy {
+  EVERYONE
+  FRIENDS_OF_FRIENDS
+  FRIENDS_ONLY
+  NONE
+}
+
+enum MentionTargetType {
+  POST
+  STORY
+}
+
+enum MentionStatus {
+  APPROVED
+  PENDING
+  REJECTED
 }
 
 enum FriendshipStatus {
@@ -241,20 +262,21 @@ enum AdminActionType {
 // ─────────────────────────────────────────────
 
 model User {
-  id           String       @id @default(cuid())
-  email        String?      @unique
-  phone        String?      @unique
-  passwordHash String?
-  role         UserRole     @default(USER)
-  status       UserStatus   @default(PENDING_VERIFICATION)
-  isVerified   Boolean      @default(false)
-  points       Int          @default(0)
-  dmPolicy     DmPolicy     @default(EVERYONE)
-  friendPolicy FriendPolicy @default(EVERYONE)
-  isPrivate    Boolean      @default(false)
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
-  deletedAt    DateTime?
+  id            String        @id @default(cuid())
+  email         String?       @unique
+  phone         String?       @unique
+  passwordHash  String?
+  role          UserRole      @default(USER)
+  status        UserStatus    @default(PENDING_VERIFICATION)
+  isVerified    Boolean       @default(false)
+  points        Int           @default(0)
+  dmPolicy      DmPolicy      @default(EVERYONE)
+  friendPolicy  FriendPolicy  @default(EVERYONE)
+  mentionPolicy MentionPolicy @default(EVERYONE)
+  isPrivate     Boolean       @default(false)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  deletedAt     DateTime?
 
   // Relations
   profile              UserProfile?
@@ -298,6 +320,10 @@ model User {
   // Friendships (bidirectional)
   friendshipsRequested Friendship[] @relation("friendshipRequester")
   friendshipsReceived  Friendship[] @relation("friendshipAddressee")
+
+  // Mentions (polymorphic across posts/stories)
+  mentionsCreated  Mention[] @relation("mentionAuthor")
+  mentionsReceived Mention[] @relation("mentionTarget")
 
   // Stories
   stories    Story[]     @relation("storyAuthor")
@@ -1439,4 +1465,33 @@ model MarketingAsset {
   createdAt  DateTime @default(now())
 
   @@index([createdAt])
+}
+
+// ─────────────────────────────────────────────
+//  MENTIONS — polymorphic tagging across posts & stories
+//  · targetType discriminates POST vs STORY (FK enforced at app layer)
+//  · x/y are normalized [0,1] coords for photo tags (null = caption-only)
+//  · status APPROVED bypasses approval; PENDING when target user requires it
+// ─────────────────────────────────────────────
+
+model Mention {
+  id           String            @id @default(cuid())
+  targetType   MentionTargetType
+  targetId     String
+  targetUserId String // who is being mentioned
+  authorId     String // who created the mention
+  status       MentionStatus     @default(APPROVED)
+  x            Float? // 0..1 normalized horizontal coord (photo tag)
+  y            Float? // 0..1 normalized vertical coord (photo tag)
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  targetUser User @relation("mentionTarget", fields: [targetUserId], references: [id], onDelete: Cascade)
+  author     User @relation("mentionAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@unique([targetType, targetId, targetUserId])
+  @@index([targetUserId, status])
+  @@index([targetType, targetId])
+  @@index([authorId])
+  @@index([status])
 }

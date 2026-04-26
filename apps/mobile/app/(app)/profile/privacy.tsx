@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
-import { usersApi, friendshipsApi, type FriendPolicy } from '@/api/client';
+import { usersApi, friendshipsApi, mentionsApi, type FriendPolicy, type MentionPolicy } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { useAppStore } from '@/stores/app.store';
 import { Colors, Typography, Spacing, Radius } from '@/constants/tokens';
@@ -17,6 +17,7 @@ export default function Privacy() {
   const [settings, setSettings] = useState({ showProfile: true, showActivity: false, allowMessages: true });
   const [dmPolicy, setDmPolicy] = useState<DmPolicy>('EVERYONE');
   const [friendPolicy, setFriendPolicy] = useState<FriendPolicy>('EVERYONE');
+  const [mentionPolicy, setMentionPolicy] = useState<MentionPolicy>('EVERYONE');
   const [loadingPolicy, setLoadingPolicy] = useState(true);
 
   useEffect(() => {
@@ -26,8 +27,10 @@ export default function Privacy() {
         if (!mounted) return;
         const dm = res?.data?.dmPolicy as DmPolicy | undefined;
         const fp = res?.data?.friendPolicy as FriendPolicy | undefined;
+        const mp = res?.data?.mentionPolicy as MentionPolicy | undefined;
         if (dm) setDmPolicy(dm);
         if (fp) setFriendPolicy(fp);
+        if (mp) setMentionPolicy(mp);
       })
       .catch(() => {})
       .finally(() => mounted && setLoadingPolicy(false));
@@ -71,6 +74,18 @@ export default function Privacy() {
     }
   }
 
+  async function selectMentionPolicy(next: MentionPolicy) {
+    if (next === mentionPolicy) return;
+    const prev = mentionPolicy;
+    setMentionPolicy(next);
+    try {
+      await mentionsApi.updatePolicy(next);
+    } catch (err: any) {
+      setMentionPolicy(prev);
+      Alert.alert(t ? 'Error' : 'Error', apiError(err));
+    }
+  }
+
   const items = [
     { key: 'showProfile' as const, label: t ? 'Perfil público' : 'Public profile', desc: t ? 'Otros usuarios pueden ver tu perfil' : 'Other users can see your profile' },
     { key: 'showActivity' as const, label: t ? 'Mostrar actividad' : 'Show activity', desc: t ? 'Tu actividad reciente es visible' : 'Your recent activity is visible' },
@@ -102,6 +117,29 @@ export default function Privacy() {
       value: 'NONE',
       label: t ? 'Nadie' : 'No one',
       desc: t ? 'Nadie nuevo puede enviarte mensajes' : 'No one new can message you',
+    },
+  ];
+
+  const mentionOptions: { value: MentionPolicy; label: string; desc: string }[] = [
+    {
+      value: 'EVERYONE',
+      label: t ? 'Todos' : 'Everyone',
+      desc: t ? 'Cualquiera puede etiquetarte y aparece de inmediato' : 'Anyone can tag you and it appears instantly',
+    },
+    {
+      value: 'FRIENDS_OF_FRIENDS',
+      label: t ? 'Amigos de amigos' : 'Friends of friends',
+      desc: t ? 'Amigos te etiquetan al instante; amigos de amigos requieren aprobación' : 'Friends tag instantly; friends-of-friends need approval',
+    },
+    {
+      value: 'FRIENDS_ONLY',
+      label: t ? 'Solo amigos' : 'Friends only',
+      desc: t ? 'Solo tus amigos te etiquetan al instante; otros requieren aprobación' : 'Only friends tag instantly; others require approval',
+    },
+    {
+      value: 'NONE',
+      label: t ? 'Nadie' : 'No one',
+      desc: t ? 'Nadie puede etiquetarte' : 'No one can tag you',
     },
   ];
 
@@ -161,6 +199,35 @@ export default function Privacy() {
               <Pressable
                 key={opt.value}
                 onPress={() => selectPolicy(opt.value)}
+                disabled={loadingPolicy}
+                style={({ pressed }) => [
+                  styles.row,
+                  i > 0 && styles.rowBorder,
+                  pressed && { opacity: 0.7 },
+                ]}
+              >
+                <View style={styles.rowInfo}>
+                  <Text style={styles.rowLabel}>{opt.label}</Text>
+                  <Text style={styles.rowDesc}>{opt.desc}</Text>
+                </View>
+                <View style={[styles.radio, selected && styles.radioOn]}>
+                  {selected && <View style={styles.radioDot} />}
+                </View>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        <Text style={styles.sectionTitle}>
+          {t ? 'Quién puede etiquetarme' : 'Who can tag me'}
+        </Text>
+        <View style={styles.card}>
+          {mentionOptions.map((opt, i) => {
+            const selected = mentionPolicy === opt.value;
+            return (
+              <Pressable
+                key={opt.value}
+                onPress={() => selectMentionPolicy(opt.value)}
                 disabled={loadingPolicy}
                 style={({ pressed }) => [
                   styles.row,

@@ -1,7 +1,30 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ReactionType, ReportReason } from '@prisma/client';
-import { IsEnum, IsOptional, IsString, IsUrl, MaxLength, MinLength } from 'class-validator';
+import { Type } from 'class-transformer';
+import {
+  IsArray,
+  IsEnum,
+  IsNumber,
+  IsOptional,
+  IsString,
+  IsUrl,
+  Max,
+  MaxLength,
+  Min,
+  MinLength,
+  ValidateNested,
+} from 'class-validator';
 import { PaginationDto } from '../../../common/dto/pagination.dto';
+
+// One mention attached at create-time. Coords are normalized [0,1]; omit both
+// for caption-only mentions ("foto con @user").
+export class MentionInputDto {
+  @ApiProperty() @IsString() userId: string;
+  @ApiPropertyOptional({ description: 'Normalized x coord (0..1) for photo tags' })
+  @IsOptional() @IsNumber() @Min(0) @Max(1) x?: number;
+  @ApiPropertyOptional({ description: 'Normalized y coord (0..1) for photo tags' })
+  @IsOptional() @IsNumber() @Min(0) @Max(1) y?: number;
+}
 
 export enum CommunityFeedScope {
   FOR_YOU = 'forYou',
@@ -21,6 +44,13 @@ export class CreatePostDto {
   @IsOptional()
   @IsEnum(PostSurface)
   surface?: PostSurface;
+
+  @ApiPropertyOptional({ type: [MentionInputDto], description: 'Users mentioned in the post' })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => MentionInputDto)
+  mentions?: MentionInputDto[];
 }
 
 export class UpdatePostDto {
@@ -53,6 +83,13 @@ export class CreateStoryDto {
   @IsString()
   @MaxLength(500)
   caption?: string;
+
+  @ApiPropertyOptional({ type: [MentionInputDto], description: 'Users tagged in the story' })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => MentionInputDto)
+  mentions?: MentionInputDto[];
 }
 
 export enum StoryFeedScope {

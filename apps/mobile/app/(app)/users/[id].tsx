@@ -17,7 +17,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { usersApi, messagesApi, communityApi, friendshipsApi } from '@/api/client';
+import { usersApi, messagesApi, communityApi, friendshipsApi, mentionsApi } from '@/api/client';
 import { useAuthStore } from '@/stores/auth.store';
 import { useAppStore } from '@/stores/app.store';
 import { toast } from '@/components/Toast';
@@ -67,9 +67,11 @@ export default function UserProfile() {
   const [busy, setBusy] = useState(false);
   const [wallPosts, setWallPosts] = useState<any[]>([]);
   const [communityPosts, setCommunityPosts] = useState<any[]>([]);
+  const [taggedItems, setTaggedItems] = useState<any[]>([]);
+  const [taggedLoading, setTaggedLoading] = useState(false);
   const [postsLoading, setPostsLoading] = useState(true);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
-  const [tab, setTab] = useState<'grid' | 'feed' | 'community'>('grid');
+  const [tab, setTab] = useState<'grid' | 'feed' | 'community' | 'tagged'>('grid');
   const [coverUploading, setCoverUploading] = useState(false);
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -106,6 +108,23 @@ export default function UserProfile() {
       .finally(() => {
         if (!alive) return;
         setPostsLoading(false);
+      });
+
+    setTaggedLoading(true);
+    mentionsApi
+      .tagged(id)
+      .then((r) => {
+        if (!alive) return;
+        const list = r.data?.data ?? r.data ?? [];
+        setTaggedItems(Array.isArray(list) ? list : []);
+      })
+      .catch(() => {
+        if (!alive) return;
+        setTaggedItems([]);
+      })
+      .finally(() => {
+        if (!alive) return;
+        setTaggedLoading(false);
       });
 
     return () => {
@@ -766,6 +785,17 @@ export default function UserProfile() {
             />
             {tab === 'community' && <View style={styles.tabMark} />}
           </Pressable>
+          <Pressable
+            style={({ pressed }) => [styles.tab, pressed && styles.pressed]}
+            onPress={() => setTab('tagged')}
+          >
+            <Feather
+              name="user-check"
+              size={22}
+              color={tab === 'tagged' ? Colors.textPrimary : Colors.textMuted}
+            />
+            {tab === 'tagged' && <View style={styles.tabMark} />}
+          </Pressable>
         </View>
 
         {/* ── Content ─────────────────────────── */}
@@ -858,7 +888,7 @@ export default function UserProfile() {
               onToggleLike={toggleReaction}
             />
           </>
-        ) : (
+        ) : tab === 'community' ? (
           <FeedList
             posts={communitySource}
             profile={profile}
@@ -869,6 +899,65 @@ export default function UserProfile() {
             onLongPress={(url) => setPreviewImage(url)}
             onToggleLike={toggleReaction}
           />
+        ) : taggedLoading ? (
+          <View style={styles.loadingBox}>
+            <ActivityIndicator color={Colors.accentPrimary} />
+          </View>
+        ) : taggedItems.length === 0 ? (
+          <View style={styles.emptyBox}>
+            <Feather name="user-check" size={36} color={Colors.textMuted} />
+            <Text style={styles.emptyTitle}>{t ? 'Sin etiquetas' : 'Not tagged yet'}</Text>
+            <Text style={styles.emptySub}>
+              {isMe
+                ? t
+                  ? 'Cuando alguien te etiquete, lo verás aquí.'
+                  : 'When someone tags you, it will show up here.'
+                : t
+                  ? 'Aún no hay etiquetas visibles.'
+                  : 'No public tags yet.'}
+            </Text>
+          </View>
+        ) : (
+          <View style={styles.grid}>
+            {taggedItems.map((row: any) => {
+              const isStory = row.targetType === 'STORY';
+              const item = row.item ?? {};
+              const imageUrl = isStory ? item.mediaUrl : item.imageUrl;
+              const onPress = () => {
+                if (isStory) return; // stories are ephemeral; long-press preview only
+                router.push(`/(app)/community/posts/${item.id}` as never);
+              };
+              return (
+                <Pressable
+                  key={row.mentionId}
+                  style={({ pressed }) => [styles.tile, pressed && { opacity: 0.9 }]}
+                  onPress={onPress}
+                  onLongPress={() => imageUrl && setPreviewImage(imageUrl)}
+                >
+                  {imageUrl ? (
+                    <Image source={{ uri: imageUrl }} style={styles.tileImg} />
+                  ) : (
+                    <View style={styles.tileText}>
+                      <Feather name="message-square" size={18} color={Colors.textMuted} />
+                      <Text style={styles.tileTextContent} numberOfLines={4}>
+                        {item.content || item.caption || ''}
+                      </Text>
+                    </View>
+                  )}
+                  {row.status === 'PENDING' && (
+                    <View style={styles.tileOverlay}>
+                      <View style={styles.tileOverlayRow}>
+                        <Feather name="clock" size={12} color="#fff" />
+                        <Text style={styles.tileOverlayText}>
+                          {t ? 'Pendiente' : 'Pending'}
+                        </Text>
+                      </View>
+                    </View>
+                  )}
+                </Pressable>
+              );
+            })}
+          </View>
         )}
       </ScrollView>
 

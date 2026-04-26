@@ -38,6 +38,7 @@ import { ContentMonitorModule } from '../modules/content-monitor/content-monitor
 import { ReviewsModule } from '../modules/reviews/reviews.module';
 import { MessagesModule } from '../modules/messages/messages.module';
 import { FriendshipsModule } from '../modules/friendships/friendships.module';
+import { MentionsModule } from '../modules/mentions/mentions.module';
 import { CheckinModule } from '../modules/checkin/checkin.module';
 import { VenuesModule } from '../modules/venues/venues.module';
 import { PushModule } from '../modules/push/push.module';
@@ -97,6 +98,7 @@ import { RealtimeModule } from '../modules/realtime/realtime.module';
     ReviewsModule,
     MessagesModule,
     FriendshipsModule,
+    MentionsModule,
     CheckinModule,
     VenuesModule,
     PushModule,

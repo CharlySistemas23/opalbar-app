@@ -22,6 +22,9 @@ import { Colors } from '@/constants/tokens';
 import { toast } from '@/components/Toast';
 import { uploadImage, UploadError } from '@/utils/uploadImage';
 import { useFeedback } from '@/hooks/useFeedback';
+import { useMentionAutocomplete } from '@/hooks/useMentionAutocomplete';
+import { MentionSuggestions } from '@/components/MentionSuggestions';
+import { PhotoTagger, type PhotoTag } from '@/components/PhotoTagger';
 
 // ─────────────────────────────────────────────
 //  New Story — IG-style composer (aligned w/ new-post)
@@ -38,8 +41,11 @@ export default function NewStory() {
   const { language } = useAppStore();
   const t = language === 'es';
 
+  const mention = useMentionAutocomplete();
+  const caption = mention.text;
   const [localImage, setLocalImage] = useState<string | null>(null);
-  const [caption, setCaption] = useState('');
+  const [photoTags, setPhotoTags] = useState<PhotoTag[]>([]);
+  const [taggerOpen, setTaggerOpen] = useState(false);
   const [picking, setPicking] = useState(false);
   const [publishing, setPublishing] = useState(false);
 
@@ -108,9 +114,19 @@ export default function NewStory() {
         toast(t ? `No se pudo subir la imagen: ${msg}` : `Could not upload image: ${msg}`, 'danger');
         return;
       }
+      const coordsByUserId = new Map(
+        photoTags.map((t) => [t.userId, { x: t.x, y: t.y }] as const),
+      );
+      const mentions = mention.buildMentions(coordsByUserId);
+      for (const pt of photoTags) {
+        if (!mentions.find((m) => m.userId === pt.userId)) {
+          mentions.push({ userId: pt.userId, x: pt.x, y: pt.y });
+        }
+      }
       await communityApi.createStory({
         mediaUrl,
         caption: caption.trim() || undefined,
+        mentions: mentions.length > 0 ? mentions : undefined,
       });
       fb.success();
       toast(t ? 'Historia publicada' : 'Story published', 'success');
@@ -171,11 +187,27 @@ export default function NewStory() {
               <Pressable
                 onPress={() => {
                   setLocalImage(null);
+                  setPhotoTags([]);
                 }}
                 style={({ pressed }) => [styles.retakeBtn, pressed && styles.pressed]}
               >
                 <Feather name="refresh-cw" size={14} color="#fff" />
                 <Text style={styles.retakeBtnText}>{t ? 'Cambiar foto' : 'Retake'}</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setTaggerOpen(true)}
+                style={({ pressed }) => [styles.tagBtnStory, pressed && styles.pressed]}
+              >
+                <Feather name="user-plus" size={14} color="#fff" />
+                <Text style={styles.retakeBtnText}>
+                  {photoTags.length > 0
+                    ? t
+                      ? `${photoTags.length} etiquetad${photoTags.length === 1 ? 'o' : 'os'}`
+                      : `${photoTags.length} tagged`
+                    : t
+                      ? 'Etiquetar'
+                      : 'Tag'}
+                </Text>
               </Pressable>
             </>
           ) : (
@@ -198,12 +230,22 @@ export default function NewStory() {
         {/* ── Caption input (bottom, above action bar) ── */}
         {localImage && (
           <View style={styles.captionBar}>
+            {mention.activeQuery !== null && (
+              <View style={{ marginBottom: 8 }}>
+                <MentionSuggestions
+                  suggestions={mention.suggestions}
+                  loading={mention.loading}
+                  onPick={mention.pickSuggestion}
+                />
+              </View>
+            )}
             <TextInput
               style={styles.captionInput}
-              placeholder={t ? 'Añade un texto a tu historia…' : 'Add a caption…'}
+              placeholder={t ? 'Añade texto. Usa @ para etiquetar…' : 'Add a caption. Use @ to tag…'}
               placeholderTextColor={Colors.textMuted}
               value={caption}
-              onChangeText={setCaption}
+              onChangeText={mention.onChangeText}
+              onSelectionChange={mention.onSelectionChange}
               maxLength={MAX_CAPTION}
               multiline
             />
@@ -252,6 +294,13 @@ export default function NewStory() {
           </View>
         </View>
       </KeyboardAvoidingView>
+      <PhotoTagger
+        visible={taggerOpen}
+        imageUri={localImage}
+        initialTags={photoTags}
+        onClose={() => setTaggerOpen(false)}
+        onSubmit={setPhotoTags}
+      />
     </SafeAreaView>
   );
 }
@@ -327,6 +376,18 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.55)',
   },
   retakeBtnText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  tagBtnStory: {
+    position: 'absolute',
+    top: 14,
+    left: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
 
   // Empty state
   emptyState: {
