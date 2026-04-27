@@ -22,10 +22,11 @@ y al repositorio.
 | SMTP                   | proveedor del usuario         | OTP logs; `[Mail]`/`[OTP]` en Logger          |
 
 **URLs clave:**
-- API: `https://opalbar-api.up.railway.app/api/v1`
-- Health (liveness): `GET /health`
-- Health (readiness): `GET /health/ready`
+- API: `https://opalbar-app-production.up.railway.app/api/v1`
+- Health (liveness): `GET /health` — fast, ~350ms p50
+- Health (readiness): `GET /health/ready` — DB + Redis + FCM, ~900ms p50
 - Audit log: `GET /api/v1/admin/audit?limit=100` (SUPER_ADMIN)
+- UptimeRobot dashboard: <https://uptimerobot.com/dashboard> (cuenta: `carlosalonsog966@gmail.com`)
 
 ---
 
@@ -44,10 +45,10 @@ y al repositorio.
 
 ```bash
 # 1. ¿La API responde?
-curl -fsS https://opalbar-api.up.railway.app/api/v1/health | jq
+curl -fsS https://opalbar-app-production.up.railway.app/api/v1/health | jq
 
 # 2. ¿Y la readiness (DB + Redis + FCM)?
-curl -fsS https://opalbar-api.up.railway.app/api/v1/health/ready | jq
+curl -fsS https://opalbar-app-production.up.railway.app/api/v1/health/ready | jq
 
 # 3. Logs en vivo
 railway logs --service api --tail
@@ -234,7 +235,53 @@ git revert <sha> && git push        # revertir el commit en main
 
 ---
 
-## 8. Contactos
+## 8. Monitoring externo (UptimeRobot)
+
+UptimeRobot pingea los endpoints de health desde fuera de Railway, de modo que
+si Railway entero cae (no sólo nuestro servicio), igual nos enteramos. Plan
+gratuito: 50 monitores, 5 min interval, alertas por email.
+
+**Monitores configurados:**
+
+| Nombre                 | URL                                                                            | Tipo | Intervalo |
+|------------------------|--------------------------------------------------------------------------------|------|-----------|
+| OpalBar API liveness   | `https://opalbar-app-production.up.railway.app/api/v1/health`                  | HTTPS| 5 min     |
+| OpalBar API readiness  | `https://opalbar-app-production.up.railway.app/api/v1/health/ready`            | HTTPS| 5 min     |
+
+**Configuración de alertas:**
+- Canal: email a `carlosalonsog966@gmail.com`
+- Trigger: 2 fallos consecutivos (evita falsos positivos por blip de red)
+- Recovery: 1 OK consecutivo
+
+**Setup desde cero (si hay que recrear):**
+
+1. Crear cuenta gratuita en <https://uptimerobot.com>.
+2. Add New Monitor → Monitor Type: `HTTP(s)`.
+3. Friendly Name: `OpalBar API liveness`.
+4. URL: `https://opalbar-app-production.up.railway.app/api/v1/health`.
+5. Monitoring Interval: `5 minutes`.
+6. Alert Contacts To Notify: marcar el correo del owner.
+7. Repetir para `/api/v1/health/ready`.
+8. (Opcional) crear status page público para que el equipo pueda chequear sin login.
+
+**Qué hacer si llega alerta de UptimeRobot:**
+
+```bash
+# 1. Confirmar manual
+curl -fsS https://opalbar-app-production.up.railway.app/api/v1/health
+curl -fsS https://opalbar-app-production.up.railway.app/api/v1/health/ready
+
+# 2. Si liveness falla → API caída. Saltar a §3 Diagnóstico inicial + Sentry.
+# 3. Si solo readiness falla → leer "services" del JSON; un subsistema degraded.
+#    - database error  → Railway Postgres caído (ver §3 y memoria
+#      project_railway_postgres_start_override.md)
+#    - redis degraded  → no es P0, push y pubsub funcionan vía polling fallback
+#    - fcm degraded    → push iOS/Android puede tardar; no afecta REST API
+```
+
+---
+
+## 9. Contactos
 
 - Owner técnico: carlosalonsog966@gmail.com
 - Firebase / FCM: pandacharlypc@gmail.com (proyecto `opalbar-a0a5e`)
