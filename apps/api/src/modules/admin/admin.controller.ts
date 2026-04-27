@@ -14,6 +14,9 @@ import { SupportService } from '../support/support.service';
 import { CreateQuickReplyDto, TicketFilterDto, UpdateQuickReplyDto, UpdateTicketDto } from '../support/dto/support.dto';
 import { ReviewsService } from '../reviews/reviews.service';
 import { ModerationReviewDto, ReviewFilterDto } from '../reviews/dto/review.dto';
+import { Audit } from '../audit/audit.decorator';
+import { AuditService } from '../audit/audit.service';
+import { PrismaService } from '../../database/prisma.service';
 
 @ApiTags('Admin')
 @ApiBearerAuth()
@@ -29,6 +32,8 @@ export class AdminController {
     private readonly reservationsService: ReservationsService,
     private readonly supportService: SupportService,
     private readonly reviewsService: ReviewsService,
+    private readonly auditService: AuditService,
+    private readonly prisma: PrismaService,
   ) {}
 
   @Get('stats') @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN) @ApiOperation({ summary: 'Dashboard stats' })
@@ -53,17 +58,20 @@ export class AdminController {
   listGdprRequests() { return this.adminService.listGdprRequests(); }
 
   @Patch('gdpr/export/:id') @ApiOperation({ summary: 'Process / approve export request' })
+  @Audit('gdpr.export.process', { targetType: 'GDPR_EXPORT' })
   processExport(@Param('id') id: string, @Body('action') action: 'APPROVE' | 'REJECT') {
     return this.adminService.processExportRequest(id, action);
   }
 
   @Patch('gdpr/deletion/:id') @ApiOperation({ summary: 'Process / approve deletion request' })
+  @Audit('gdpr.deletion.process', { targetType: 'GDPR_DELETION' })
   processDeletion(@Param('id') id: string, @Body('action') action: 'APPROVE' | 'REJECT') {
     return this.adminService.processDeletionRequest(id, action);
   }
 
   @Post('notifications/broadcast')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  @Audit('push.broadcast')
   @ApiOperation({ summary: 'Send a push notification to all users' })
   broadcast(@Body() body: { title: string; body: string; audience?: 'ALL' | 'ADMINS' }) {
     return this.adminService.broadcastPush(body.title, body.body, body.audience ?? 'ALL');
@@ -79,12 +87,16 @@ export class AdminController {
     return this.adminService.getUserDetail(id);
   }
 
-  @Delete('users/:id') @Roles(UserRole.SUPER_ADMIN) @ApiOperation({ summary: 'Delete user account (SuperAdmin only). Frees email/phone so they can re-register.' })
+  @Delete('users/:id') @Roles(UserRole.SUPER_ADMIN)
+  @Audit('user.delete', { targetType: 'USER' })
+  @ApiOperation({ summary: 'Delete user account (SuperAdmin only). Frees email/phone so they can re-register.' })
   deleteUser(@CurrentUser() admin: User, @Param('id') id: string) {
     return this.adminService.deleteUserDirect(admin.id, id);
   }
 
-  @Post('users/:id/points') @ApiOperation({ summary: 'Manually adjust points (+/-) with reason' })
+  @Post('users/:id/points')
+  @Audit('user.points.adjust', { targetType: 'USER' })
+  @ApiOperation({ summary: 'Manually adjust points (+/-) with reason' })
   adjustPoints(
     @CurrentUser() admin: User,
     @Param('id') id: string,
@@ -93,22 +105,30 @@ export class AdminController {
     return this.adminService.adjustUserPoints(admin.id, id, body.delta, body.reason);
   }
 
-  @Patch('users/:id/ban') @ApiOperation({ summary: 'Ban a user' })
+  @Patch('users/:id/ban')
+  @Audit('user.ban', { targetType: 'USER' })
+  @ApiOperation({ summary: 'Ban a user' })
   banUser(@CurrentUser() user: User, @Param('id') id: string, @Body('reason') reason: string) {
     return this.adminService.banUser(user.id, id, reason);
   }
 
-  @Patch('users/:id/unban') @ApiOperation({ summary: 'Unban a user' })
+  @Patch('users/:id/unban')
+  @Audit('user.unban', { targetType: 'USER' })
+  @ApiOperation({ summary: 'Unban a user' })
   unbanUser(@CurrentUser() user: User, @Param('id') id: string) {
     return this.adminService.unbanUser(user.id, id);
   }
 
-  @Patch('users/:id/role') @Roles(UserRole.SUPER_ADMIN) @ApiOperation({ summary: 'Update user role (SuperAdmin only)' })
+  @Patch('users/:id/role') @Roles(UserRole.SUPER_ADMIN)
+  @Audit('user.role.change', { targetType: 'USER' })
+  @ApiOperation({ summary: 'Update user role (SuperAdmin only)' })
   updateRole(@CurrentUser() admin: User, @Param('id') id: string, @Body('role') role: UserRole) {
     return this.adminService.updateUserRole(admin.id, id, role);
   }
 
-  @Patch('users/:id/note') @ApiOperation({ summary: 'Create/update internal admin note on user profile' })
+  @Patch('users/:id/note')
+  @Audit('user.note.update', { targetType: 'USER' })
+  @ApiOperation({ summary: 'Create/update internal admin note on user profile' })
   updateInternalNote(
     @CurrentUser() admin: User,
     @Param('id') id: string,
@@ -132,22 +152,30 @@ export class AdminController {
   @Get('posts/pending') @ApiOperation({ summary: 'Get posts pending moderation' })
   getPendingPosts(@Query() pagination: PaginationDto) { return this.adminService.getPendingPosts(pagination); }
 
-  @Patch('posts/:id/approve') @ApiOperation({ summary: 'Approve a post' })
+  @Patch('posts/:id/approve')
+  @Audit('post.approve', { targetType: 'POST' })
+  @ApiOperation({ summary: 'Approve a post' })
   approvePost(@CurrentUser() user: User, @Param('id') id: string) {
     return this.adminService.moderatePost(user.id, id, 'approve');
   }
 
-  @Patch('posts/:id/reject') @ApiOperation({ summary: 'Reject a post' })
+  @Patch('posts/:id/reject')
+  @Audit('post.reject', { targetType: 'POST' })
+  @ApiOperation({ summary: 'Reject a post' })
   rejectPost(@CurrentUser() user: User, @Param('id') id: string, @Body('reason') reason: string) {
     return this.adminService.moderatePost(user.id, id, 'reject', reason);
   }
 
-  @Post('posts/bulk/approve') @ApiOperation({ summary: 'Approve multiple posts at once (max 100)' })
+  @Post('posts/bulk/approve')
+  @Audit('post.bulk.approve')
+  @ApiOperation({ summary: 'Approve multiple posts at once (max 100)' })
   bulkApprovePosts(@CurrentUser() user: User, @Body('ids') ids: string[]) {
     return this.adminService.bulkModeratePosts(user.id, ids ?? [], 'approve');
   }
 
-  @Post('posts/bulk/reject') @ApiOperation({ summary: 'Reject multiple posts at once (max 100)' })
+  @Post('posts/bulk/reject')
+  @Audit('post.bulk.reject')
+  @ApiOperation({ summary: 'Reject multiple posts at once (max 100)' })
   bulkRejectPosts(
     @CurrentUser() user: User,
     @Body('ids') ids: string[],
@@ -162,7 +190,9 @@ export class AdminController {
   @Get('reports/:id') @ApiOperation({ summary: 'Get report detail with target content + all reporters' })
   getReportDetail(@Param('id') id: string) { return this.adminService.getReportDetail(id); }
 
-  @Patch('reports/:id/resolve') @ApiOperation({ summary: 'Resolve a report' })
+  @Patch('reports/:id/resolve')
+  @Audit('report.resolve', { targetType: 'REPORT' })
+  @ApiOperation({ summary: 'Resolve a report' })
   resolveReport(@CurrentUser() user: User, @Param('id') id: string, @Body('status') status: ReportStatus) {
     return this.adminService.resolveReport(id, user.id, status);
   }
@@ -183,7 +213,9 @@ export class AdminController {
   @Get('flags') @ApiOperation({ summary: 'List feature flags' })
   listFlags() { return this.adminService.listFeatureFlags(); }
 
-  @Patch('flags/:key') @Roles(UserRole.SUPER_ADMIN) @ApiOperation({ summary: 'Toggle feature flag' })
+  @Patch('flags/:key') @Roles(UserRole.SUPER_ADMIN)
+  @Audit('feature_flag.toggle', { targetType: 'FEATURE_FLAG', targetIdParam: 'key' })
+  @ApiOperation({ summary: 'Toggle feature flag' })
   toggleFlag(@Param('key') key: string, @Body('enabled') enabled: boolean) {
     return this.adminService.setFeatureFlag(key, enabled);
   }
@@ -237,8 +269,37 @@ export class AdminController {
     return this.reviewsService.findAll(filter);
   }
 
-  @Patch('reviews/:id/moderate') @ApiOperation({ summary: 'Approve or reject a review' })
+  @Patch('reviews/:id/moderate')
+  @Audit('review.moderate', { targetType: 'REVIEW' })
+  @ApiOperation({ summary: 'Approve or reject a review' })
   moderateReview(@Param('id') id: string, @Body() dto: ModerationReviewDto) {
     return this.reviewsService.moderate(id, dto);
+  }
+
+  // ── Audit log (read) ───────────────────────
+
+  @Get('audit')
+  @Roles(UserRole.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Read audit log (SuperAdmin only). Filter by action or actorId.' })
+  async getAuditLog(
+    @Query('action') action?: string,
+    @Query('actorId') actorId?: string,
+    @Query('targetId') targetId?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const take = Math.min(parseInt(limit ?? '100', 10) || 100, 500);
+    const where: Record<string, unknown> = {};
+    if (action) where['action'] = action;
+    if (actorId) where['actorId'] = actorId;
+    if (targetId) where['targetId'] = targetId;
+    const items = await this.prisma.auditLog.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take,
+      include: {
+        actor: { select: { id: true, email: true, role: true, profile: { select: { firstName: true, lastName: true } } } },
+      },
+    });
+    return { items, count: items.length };
   }
 }

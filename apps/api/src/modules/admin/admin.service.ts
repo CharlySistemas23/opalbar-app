@@ -1,4 +1,6 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import * as crypto from 'crypto';
 import {
   AdminActionType,
   ModerationAction,
@@ -16,6 +18,7 @@ import { RealtimeService } from '../realtime/realtime.service';
 import { CommunityGateway } from '../community/community.gateway';
 import { CommunityService } from '../community/community.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { OtpService } from '../otp/otp.service';
 
 @Injectable()
 export class AdminService {
@@ -28,6 +31,8 @@ export class AdminService {
     private readonly communityGateway: CommunityGateway,
     private readonly community: CommunityService,
     private readonly notifications: NotificationsService,
+    private readonly otp: OtpService,
+    private readonly config: ConfigService,
   ) {}
 
   async broadcastPush(title: string, body: string, audience: 'ALL' | 'ADMINS' = 'ALL') {
@@ -881,14 +886,167 @@ export class AdminService {
       this.realtime.toUserAndStaff(request.userId, 'gdpr', 'rejected', { id, data: { kind: 'export' } });
       return r;
     }
-    const downloadUrl = `https://opalbar.com/exports/${request.userId}-${Date.now()}.json`;
+
+    const payload = await this.buildUserExportBundle(request.userId);
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    const token = this.signExportToken(id, expiresAt.getTime());
+    const apiBase = (this.config.get<string>('API_PUBLIC_URL')
+      ?? this.config.get<string>('app.publicUrl')
+      ?? 'https://api.opalbar.com').replace(/\/+$/, '');
+    const downloadUrl = `${apiBase}/api/v1/users/me/export/download/${id}?token=${token}`;
+
     const r = await this.prisma.dataExportRequest.update({
       where: { id },
-      data: { status: 'COMPLETED', processedAt: new Date(), downloadUrl, expiresAt },
+      data: {
+        status: 'COMPLETED',
+        processedAt: new Date(),
+        downloadUrl,
+        payloadJson: payload as unknown as Prisma.InputJsonValue,
+        expiresAt,
+      },
     });
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: request.userId },
+      select: { email: true, profile: { select: { firstName: true } } },
+    });
+    if (user?.email) {
+      const firstName = user.profile?.firstName ?? '';
+      const subject = 'OPALBAR — Tu exportación de datos está lista';
+      const expiresStr = expiresAt.toLocaleDateString('es-MX', { day: '2-digit', month: 'long', year: 'numeric' });
+      const text = [
+        `Hola ${firstName},`,
+        ``,
+        `Procesamos tu solicitud de exportación de datos personales (GDPR).`,
+        `Descarga tu archivo JSON desde el siguiente enlace:`,
+        ``,
+        downloadUrl,
+        ``,
+        `El enlace expira el ${expiresStr}.`,
+        ``,
+        `Si no fuiste tú quien solicitó esta exportación, contacta a soporte de inmediato.`,
+        ``,
+        `— Equipo OPALBAR`,
+      ].join('\n');
+      const html = `
+<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#111">
+  <h2 style="margin:0 0 8px">Tu exportación de datos está lista</h2>
+  <p style="color:#555;margin:0 0 16px">Hola ${firstName || ''}, procesamos tu solicitud de exportación de datos personales (GDPR).</p>
+  <p style="margin:24px 0">
+    <a href="${downloadUrl}" style="display:inline-block;background:#7c3aed;color:#fff;padding:12px 20px;border-radius:10px;text-decoration:none;font-weight:bold">Descargar mis datos (JSON)</a>
+  </p>
+  <p style="color:#888;font-size:13px">El enlace expira el <strong>${expiresStr}</strong>.</p>
+  <p style="color:#aaa;font-size:12px;margin-top:32px">Si no fuiste tú quien solicitó esta exportación, contacta a soporte de inmediato.</p>
+</div>`.trim();
+      try {
+        await this.otp.sendEmail(user.email, subject, html, text);
+      } catch (err: any) {
+        this.logger.warn(`[GDPR] Failed to email export link to ${user.email}: ${err?.message ?? err}`);
+      }
+    }
+
     this.realtime.toUserAndStaff(request.userId, 'gdpr', 'approved', { id, data: { kind: 'export', downloadUrl } });
     return r;
+  }
+
+  /**
+   * Returns the export payload only when the signed token is valid and the
+   * request hasn't expired. Public endpoint — token is the auth.
+   */
+  async fetchExportPayload(id: string, token: string) {
+    const request = await this.prisma.dataExportRequest.findUnique({ where: { id } });
+    if (!request || request.status !== 'COMPLETED' || !request.payloadJson) {
+      throw new NotFoundException('Export not available');
+    }
+    if (request.expiresAt && request.expiresAt.getTime() < Date.now()) {
+      throw new NotFoundException('Export expired');
+    }
+    const expected = this.signExportToken(id, request.expiresAt?.getTime() ?? 0);
+    if (!crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(token))) {
+      throw new NotFoundException('Invalid token');
+    }
+    return request.payloadJson;
+  }
+
+  private signExportToken(requestId: string, expiresAtMs: number): string {
+    const secret = this.config.get<string>('jwt.accessSecret') ?? process.env['JWT_ACCESS_SECRET'] ?? 'dev-secret';
+    return crypto
+      .createHmac('sha256', secret)
+      .update(`gdpr-export:${requestId}:${expiresAtMs}`)
+      .digest('hex');
+  }
+
+  private async buildUserExportBundle(userId: string) {
+    const [user, posts, comments, reservations, reviews, follows, followers, sessions, points, notificationsLog] =
+      await Promise.all([
+        this.prisma.user.findUnique({
+          where: { id: userId },
+          select: {
+            id: true, email: true, phone: true, role: true, status: true, isVerified: true,
+            createdAt: true, lastActiveAt: true, dmPolicy: true,
+            profile: true,
+            interests: { select: { category: { select: { name: true, slug: true } } } },
+            consent: true,
+            notificationSettings: true,
+          },
+        }),
+        this.prisma.post.findMany({
+          where: { authorId: userId },
+          select: { id: true, content: true, mediaUrls: true, status: true, createdAt: true, updatedAt: true },
+        }),
+        this.prisma.comment.findMany({
+          where: { authorId: userId },
+          select: { id: true, postId: true, content: true, createdAt: true, updatedAt: true },
+        }),
+        this.prisma.reservation.findMany({
+          where: { userId },
+          select: { id: true, status: true, partySize: true, dateTime: true, notes: true, createdAt: true },
+        }),
+        this.prisma.review.findMany({
+          where: { userId },
+          select: { id: true, rating: true, content: true, createdAt: true },
+        }),
+        this.prisma.follow.findMany({
+          where: { followerId: userId },
+          select: { followingId: true, createdAt: true },
+        }),
+        this.prisma.follow.findMany({
+          where: { followingId: userId },
+          select: { followerId: true, createdAt: true },
+        }),
+        this.prisma.session.findMany({
+          where: { userId },
+          select: { id: true, deviceName: true, deviceOs: true, ipAddress: true, createdAt: true, lastUsedAt: true, isActive: true },
+        }),
+        this.prisma.pointsTransaction.findMany({
+          where: { userId },
+          select: { id: true, delta: true, reason: true, createdAt: true },
+        }).catch(() => [] as Array<{ id: string; delta: number; reason: string | null; createdAt: Date }>),
+        this.prisma.notification.findMany({
+          where: { userId },
+          select: { id: true, type: true, title: true, body: true, createdAt: true, readAt: true },
+          take: 1000,
+          orderBy: { createdAt: 'desc' },
+        }),
+      ]);
+
+    return {
+      meta: {
+        generatedAt: new Date().toISOString(),
+        format: 'opalbar-gdpr-export-v1',
+        userId,
+      },
+      account: user,
+      posts,
+      comments,
+      reservations,
+      reviews,
+      following: follows,
+      followers,
+      sessions,
+      pointsTransactions: points,
+      notifications: notificationsLog,
+    };
   }
 
   async processDeletionRequest(id: string, action: 'APPROVE' | 'REJECT') {

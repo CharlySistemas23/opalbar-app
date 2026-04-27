@@ -29,6 +29,8 @@ export class LoggingInterceptor implements NestInterceptor {
     const { method, url, ip } = request;
     const userAgent = request.get('user-agent') || '';
     const start = Date.now();
+    const userId = (request as Request & { user?: { id?: string } }).user?.id;
+    const userTag = userId ? ` user=${userId}` : '';
 
     return next.handle().pipe(
       tap({
@@ -36,13 +38,13 @@ export class LoggingInterceptor implements NestInterceptor {
           const { statusCode } = response;
           const elapsed = Date.now() - start;
           this.logger.log(
-            `[${requestId}] ${method} ${url} ${statusCode} ${elapsed}ms — ${ip} "${userAgent}"`,
+            `[${requestId}] ${method} ${url} ${statusCode} ${elapsed}ms${userTag} — ${ip}`,
           );
         },
         error: (err) => {
           const elapsed = Date.now() - start;
           this.logger.error(
-            `[${requestId}] ${method} ${url} ERROR ${elapsed}ms — ${err.message}`,
+            `[${requestId}] ${method} ${url} ERROR ${elapsed}ms${userTag} — ${err.message}`,
           );
         },
       }),

@@ -78,6 +78,8 @@ apiClient.interceptors.response.use(
 
 export const authApi = {
   login: (email: string, password: string) => apiClient.post('/auth/login', { email, password }),
+  verify2FA: (identifier: string, code: string) =>
+    apiClient.post('/auth/login/2fa', { identifier, code }),
   me: () => apiClient.get('/auth/me'),
   logout: () => apiClient.post('/auth/logout'),
 };

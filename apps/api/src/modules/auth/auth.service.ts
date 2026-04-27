@@ -12,7 +12,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { OtpType, User, UserStatus } from '@prisma/client';
+import { OtpType, User, UserRole, UserStatus } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { v4 as uuidv4 } from 'uuid';
 import { PrismaService } from '../../database/prisma.service';
@@ -31,6 +31,12 @@ export interface AuthTokens {
 export interface AuthResponse {
   user: Partial<User>;
   tokens: AuthTokens;
+}
+
+export interface TwoFactorChallenge {
+  requires2FA: true;
+  identifier: string;
+  expiresIn: number;
 }
 
 const BCRYPT_ROUNDS = 12;
@@ -171,7 +177,11 @@ export class AuthService {
   //  LOGIN
   // ─────────────────────────────────────────
 
-  async login(dto: LoginDto, ipAddress?: string, userAgent?: string): Promise<AuthResponse> {
+  async login(
+    dto: LoginDto,
+    ipAddress?: string,
+    userAgent?: string,
+  ): Promise<AuthResponse | TwoFactorChallenge> {
     if (!dto.email && !dto.phone) {
       throw new BadRequestException('Email or phone number is required');
     }
@@ -220,6 +230,29 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
+    // ── 2FA gate for SUPER_ADMIN ──
+    // Password is correct, but we don't issue tokens yet — send OTP and require
+    // the caller to complete /auth/login/2fa with the code. Mobile users (USER
+    // role) flow through normally below.
+    if (user.role === UserRole.SUPER_ADMIN && user.email) {
+      await logAttempt(true, '2FA_REQUIRED');
+      try {
+        const otp = await this.otpService.sendOtp({
+          email: user.email,
+          type: OtpType.LOGIN_2FA,
+        });
+        return {
+          requires2FA: true,
+          identifier: user.email,
+          expiresIn: otp.expiresIn,
+        };
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.error(`Failed to send 2FA OTP to ${user.email}: ${msg}`);
+        throw new UnauthorizedException('Could not send 2FA code. Try again.');
+      }
+    }
+
     await logAttempt(true);
 
     // Generate tokens & create session
@@ -231,6 +264,53 @@ export class AuthService {
       userAgent,
     });
 
+    return {
+      user: this.sanitizeUser(user),
+      tokens,
+    };
+  }
+
+  // ─────────────────────────────────────────
+  //  LOGIN — 2FA second step (SUPER_ADMIN only)
+  //  Caller has already passed password check; this verifies the OTP
+  //  and issues tokens.
+  // ─────────────────────────────────────────
+
+  async loginVerify2FA(
+    identifier: string,
+    code: string,
+    meta: { deviceToken?: string; deviceName?: string; deviceOs?: string; ipAddress?: string; userAgent?: string },
+  ): Promise<AuthResponse> {
+    const user = await this.prisma.user.findFirst({
+      where: { email: identifier },
+      include: { profile: true },
+    });
+
+    if (!user || user.role !== UserRole.SUPER_ADMIN) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+    if (user.status === UserStatus.BANNED || user.status === UserStatus.DELETED) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    // Verify the OTP — throws BadRequest on mismatch / expiry.
+    await this.otpService.verifyOtp({
+      identifier,
+      code,
+      type: OtpType.LOGIN_2FA,
+    });
+
+    await this.prisma.loginAttempt.create({
+      data: {
+        userId: user.id,
+        email: identifier,
+        ipAddress: meta.ipAddress || 'unknown',
+        success: true,
+        reason: '2FA_SUCCESS',
+      },
+    });
+
+    const tokens = await this.createSession(user, meta);
     return {
       user: this.sanitizeUser(user),
       tokens,

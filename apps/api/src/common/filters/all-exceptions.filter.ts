@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { Prisma } from '@prisma/client';
+import * as Sentry from '@sentry/nestjs';
 
 export interface ErrorResponse {
   statusCode: number;
@@ -75,12 +76,22 @@ export class AllExceptionsFilter implements ExceptionFilter {
       error = exception.constructor.name;
     }
 
-    // Log 5xx errors
+    // Log 5xx errors + ship to Sentry (no-op if DSN unset)
     if (status >= 500) {
       this.logger.error(
         `[${request.method}] ${request.url} → ${status}`,
         exception instanceof Error ? exception.stack : String(exception),
       );
+      Sentry.captureException(exception, {
+        tags: {
+          method: request.method,
+          path: request.route?.path || request.url,
+          status: String(status),
+        },
+        extra: {
+          requestId: request.headers['x-request-id'],
+        },
+      });
     }
 
     const body: ErrorResponse = {

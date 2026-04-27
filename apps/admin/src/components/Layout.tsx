@@ -1,7 +1,9 @@
+import { useCallback } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Users, Calendar, Tag, MessageSquare, MessagesSquare, Flag, Inbox, Bell, BarChart3, Settings, Shield, LogOut, Home, MapPin } from 'lucide-react';
+import { LayoutDashboard, Users, Calendar, Tag, MessageSquare, MessagesSquare, Flag, Inbox, Bell, BarChart3, Settings, Shield, LogOut, Home, MapPin, Clock } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import { useRealtime } from '@/hooks/useRealtime';
+import { useIdleLogout } from '@/hooks/useIdleLogout';
 import clsx from 'clsx';
 
 const NAV = [
@@ -24,6 +26,13 @@ export function Layout() {
   const { user, logout } = useAuthStore();
   const navigate = useNavigate();
   useRealtime(!!user);
+
+  const onIdleLogout = useCallback(async () => {
+    await logout();
+    navigate('/login', { replace: true, state: { idle: true } });
+  }, [logout, navigate]);
+
+  const { warning, stayActive } = useIdleLogout(!!user, onIdleLogout);
 
   return (
     <div className="min-h-screen flex">
@@ -88,6 +97,29 @@ export function Layout() {
       <main className="flex-1 overflow-auto">
         <Outlet />
       </main>
+
+      {warning && (
+        <div className="fixed bottom-6 right-6 z-50 w-80 p-4 rounded-2xl bg-zinc-950 border border-warning/40 shadow-2xl">
+          <div className="flex items-start gap-3">
+            <div className="w-9 h-9 rounded-xl bg-warning/15 border border-warning/40 flex items-center justify-center shrink-0">
+              <Clock className="text-warning" size={18} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-zinc-100">Sesión por expirar</p>
+              <p className="text-xs text-muted mt-0.5">
+                Cerraremos tu sesión en <span className="text-warning font-bold">{warning.secondsLeft}s</span> por inactividad.
+              </p>
+              <button
+                type="button"
+                onClick={stayActive}
+                className="mt-3 w-full px-3 py-1.5 rounded-lg bg-accent/15 border border-accent/40 text-accent text-xs font-bold hover:bg-accent/25 transition"
+              >
+                Sigo aquí
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

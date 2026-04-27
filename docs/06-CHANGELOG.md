@@ -5,6 +5,46 @@
 
 ---
 
+## 2026-04-27 — Fase 4 hardening (seguridad + observabilidad)
+
+### Observabilidad
+- **Sentry backend** (`@sentry/nestjs`): init en `instrument.ts` (first-import en `main.ts`), captura 5xx con tags `method/path/status` y extra `requestId`. `beforeSend` redacta `authorization`, `cookie`, `x-refresh-token` y campos sensibles del body.
+- **Sentry admin web** (`@sentry/react`): mismo patrón, redact de cookies/auth headers.
+- **Health enriquecido**: `GET /health` liveness rápido; `GET /health/ready` chequea DB + Redis + FCM con latencias en paralelo. Status agregado: `ok | degraded | error`.
+- **Logging interceptor** ahora taggea `userId` por request; nuevo `redact()` util reutilizable.
+
+### Audit log
+- Nuevo modelo Prisma `AuditLog` (actor, role, action, target, IP, UA, metadata, timestamps + 4 índices).
+- `@Audit()` decorator + `AuditInterceptor` (APP_INTERCEPTOR global) graba *después* de éxito; metadata pasa por `redact()`.
+- 16 endpoints admin instrumentados: ban/unban/delete user, points, role, post approve/reject/bulk, report resolve, gdpr export/deletion process, push broadcast, feature flag toggle, review moderate.
+- `GET /admin/audit` (SUPER_ADMIN) con filtros `action/actorId/targetId`, máx 500.
+
+### Rate-limit
+- `throttle-custom.decorator.ts` corregido: ya no leaks `limit:1000` a producción. `isDev` guard real.
+- `ThrottlerGuard` registrado **solo en producción** (`NODE_ENV==='production'`); dev queda libre.
+- Aplicado por endpoint: `@ThrottleAuth/Otp/Write/Push` en auth, otp, community (post/comment/story/report), messages (sendMessage), push (register).
+
+### 2FA SUPER_ADMIN
+- `auth.service.login()` ahora puede devolver `{ requires2FA, identifier, expiresIn }` cuando el rol es `SUPER_ADMIN`. Dispara OTP por email (`OtpType.LOGIN_2FA`).
+- Nuevo endpoint `POST /auth/login/2fa { identifier, code, deviceToken? }` valida el OTP y emite tokens.
+- Admin web: store maneja `pendingTwoFactor`, `Login.tsx` renderiza paso de OTP con countdown de expiración.
+
+### Session timeout admin web
+- Nuevo `useIdleLogout` hook: 5 min de inactividad → logout + redirect; banner de aviso en el minuto final con "Sigo aquí" para reset.
+- Login muestra notice cuando la sesión cerró por inactividad.
+
+### GDPR export real
+- `DataExportRequest.payloadJson` (nueva columna JSONB, migración `20260427010000_gdpr_export_payload`).
+- Approve construye bundle JSON con perfil, posts, comments, reservaciones, reviews, follows, sesiones, puntos, notificaciones; firma URL con HMAC-SHA256 (`JWT_ACCESS_SECRET`); expira 7 días.
+- Email transaccional al usuario con el link, vía nuevo `OtpService.sendEmail()` (transport SMTP reutilizado).
+- Endpoint público firmado: `GET /users/me/export/download/:id?token=...` (`GdprDownloadController`).
+
+### Docs
+- Nueva [docs/08-RUNBOOK.md](08-RUNBOOK.md): topología, severidades P0–P3, playbooks (API caída, Postgres/Redis, push FCM, 2FA admin, GDPR, audit).
+- [docs/05-ROADMAP.md](05-ROADMAP.md) actualizado: Fase 4 P0/P1/P2 marcados ✅ excepto APNs/iOS y Sentry mobile (bloqueados por Apple).
+
+---
+
 ## 2026-04-26 — Comunidad madura
 
 | Commit | Cambio |

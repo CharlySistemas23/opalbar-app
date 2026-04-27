@@ -5,6 +5,7 @@ import { StoryScope, User, UserRole } from '@prisma/client';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { ThrottleWrite } from '../../common/decorators/throttle-custom.decorator';
 import { CommunityService } from './community.service';
 import {
   CreatePostDto, UpdatePostDto, CreateCommentDto, UpdateCommentDto,
@@ -28,7 +29,7 @@ export class CommunityController {
     return this.communityService.getPost(id, user?.id);
   }
 
-  @Post('posts') @HttpCode(HttpStatus.CREATED) @ApiOperation({ summary: 'Create a new post' })
+  @Post('posts') @HttpCode(HttpStatus.CREATED) @ThrottleWrite() @ApiOperation({ summary: 'Create a new post' })
   createPost(@CurrentUser() user: User, @Body() dto: CreatePostDto) {
     return this.communityService.createPost(user.id, dto);
   }
@@ -48,7 +49,7 @@ export class CommunityController {
     return this.communityService.getComments(id, user?.id);
   }
 
-  @Post('posts/:id/comments') @HttpCode(HttpStatus.CREATED) @ApiOperation({ summary: 'Comment on a post' })
+  @Post('posts/:id/comments') @HttpCode(HttpStatus.CREATED) @ThrottleWrite() @ApiOperation({ summary: 'Comment on a post' })
   createComment(@Param('id') id: string, @CurrentUser() user: User, @Body() dto: CreateCommentDto) {
     return this.communityService.createComment(id, user.id, dto);
   }
@@ -83,17 +84,17 @@ export class CommunityController {
     return this.communityService.togglePostEmojiReaction(id, user.id, body.emoji);
   }
 
-  @Post('posts/:id/report') @HttpCode(HttpStatus.CREATED) @ApiOperation({ summary: 'Report a post' })
+  @Post('posts/:id/report') @HttpCode(HttpStatus.CREATED) @ThrottleWrite() @ApiOperation({ summary: 'Report a post' })
   reportPost(@Param('id') id: string, @CurrentUser() user: User, @Body() dto: CreateReportDto) {
     return this.communityService.reportContent('POST', id, user.id, dto);
   }
 
-  @Post('comments/:id/report') @HttpCode(HttpStatus.CREATED) @ApiOperation({ summary: 'Report a comment' })
+  @Post('comments/:id/report') @HttpCode(HttpStatus.CREATED) @ThrottleWrite() @ApiOperation({ summary: 'Report a comment' })
   reportComment(@Param('id') id: string, @CurrentUser() user: User, @Body() dto: CreateReportDto) {
     return this.communityService.reportContent('COMMENT', id, user.id, dto);
   }
 
-  @Post('users/:id/report') @HttpCode(HttpStatus.CREATED) @ApiOperation({ summary: 'Report a user' })
+  @Post('users/:id/report') @HttpCode(HttpStatus.CREATED) @ThrottleWrite() @ApiOperation({ summary: 'Report a user' })
   reportUser(@Param('id') id: string, @CurrentUser() user: User, @Body() dto: CreateReportDto) {
     return this.communityService.reportContent('USER', id, user.id, dto);
   }
@@ -114,7 +115,7 @@ export class CommunityController {
     return this.communityService.getUserStories(id, user?.id);
   }
 
-  @Post('stories') @HttpCode(HttpStatus.CREATED) @ApiOperation({ summary: 'Create a personal story' })
+  @Post('stories') @HttpCode(HttpStatus.CREATED) @ThrottleWrite() @ApiOperation({ summary: 'Create a personal story' })
   createStory(@CurrentUser() user: User, @Body() dto: CreateStoryDto) {
     return this.communityService.createStory(user.id, dto);
   }

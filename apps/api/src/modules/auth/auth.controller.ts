@@ -70,6 +70,29 @@ export class AuthController {
     return this.authService.login(dto, ip, userAgent);
   }
 
+  // ── 2FA second step (SUPER_ADMIN) ─────────
+
+  @Post('login/2fa')
+  @Public()
+  @ThrottleAuth()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Complete SUPER_ADMIN login with email OTP' })
+  @ApiResponse({ status: 200, description: 'Returns access + refresh tokens' })
+  @ApiResponse({ status: 400, description: 'Invalid or expired code' })
+  async loginVerify2FA(
+    @Body() body: { identifier: string; code: string; deviceToken?: string; deviceName?: string; deviceOs?: string },
+    @Ip() ip: string,
+    @Headers('user-agent') userAgent: string,
+  ) {
+    return this.authService.loginVerify2FA(body.identifier, body.code, {
+      deviceToken: body.deviceToken,
+      deviceName: body.deviceName,
+      deviceOs: body.deviceOs,
+      ipAddress: ip,
+      userAgent,
+    });
+  }
+
   // ── Refresh Token ─────────────────────────
 
   @Post('refresh')

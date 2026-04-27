@@ -3,6 +3,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { IsIn, IsString } from 'class-validator';
 import { User } from '@prisma/client';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { ThrottlePush } from '../../common/decorators/throttle-custom.decorator';
 import { PushService } from './push.service';
 
 class RegisterTokenDto {
@@ -27,6 +28,7 @@ export class PushController {
 
   @Post('register')
   @HttpCode(HttpStatus.OK)
+  @ThrottlePush()
   @ApiOperation({ summary: 'Register this device for push notifications' })
   register(@CurrentUser() user: User, @Body() dto: RegisterTokenDto) {
     return this.pushService.register(user.id, dto.token, dto.platform);

@@ -198,6 +198,33 @@ export class OtpService {
   //  EMAIL SENDER
   // ─────────────────────────────────────────
 
+  /**
+   * Generic transactional email sender. Reuses the same SMTP transport as OTP
+   * so any module (admin, GDPR, broadcast follow-ups) can send mail without
+   * standing up its own mailer.
+   */
+  async sendEmail(to: string, subject: string, html: string, text: string): Promise<void> {
+    const fromAddr = this.config.get<string>('email.user');
+    try {
+      const info = await this.transporter.sendMail({
+        from: this.config.get<string>('email.from'),
+        to,
+        replyTo: fromAddr,
+        subject,
+        html,
+        text,
+        headers: {
+          'X-Entity-Ref-ID': `txn-${Date.now()}`,
+          'List-Unsubscribe': `<mailto:${fromAddr}?subject=unsubscribe>`,
+        },
+      });
+      this.logger.log(`[Mail] Sent to ${to} - subject="${subject}" messageId=${info.messageId}`);
+    } catch (error: any) {
+      this.logger.error(`[Mail] Failed to send to ${to}: ${error?.message ?? error}`);
+      throw error;
+    }
+  }
+
   private async sendEmailOtp(
     email: string,
     code: string,

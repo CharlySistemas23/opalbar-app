@@ -297,6 +297,7 @@ model User {
   reports              Report[]              @relation("reporter")
   reportedItems        Report[]              @relation("reportedUser")
   moderationLogs       ModerationLog[]       @relation("moderator")
+  auditLogs            AuditLog[]            @relation("auditActor")
   walletTransactions   WalletTransaction[]
   notifications        Notification[]
   notificationSettings NotificationSettings?
@@ -312,15 +313,15 @@ model User {
   reviews              Review[]
 
   // Follows / Messaging / Saved
-  followers        Follow[]          @relation("following")
-  following        Follow[]          @relation("follower")
-  threadsA         MessageThread[]   @relation("threadUserA")
-  threadsB         MessageThread[]   @relation("threadUserB")
-  messagesSent     Message[]         @relation("messageSender")
-  messageReactions MessageReaction[] @relation("messageReactor")
-  commentReactions CommentReaction[] @relation("commentReactor")
+  followers          Follow[]            @relation("following")
+  following          Follow[]            @relation("follower")
+  threadsA           MessageThread[]     @relation("threadUserA")
+  threadsB           MessageThread[]     @relation("threadUserB")
+  messagesSent       Message[]           @relation("messageSender")
+  messageReactions   MessageReaction[]   @relation("messageReactor")
+  commentReactions   CommentReaction[]   @relation("commentReactor")
   postEmojiReactions PostEmojiReaction[] @relation("postEmojiReactor")
-  savedItems       SavedItem[]
+  savedItems         SavedItem[]
 
   // Friendships (bidirectional)
   friendshipsRequested Friendship[] @relation("friendshipRequester")
@@ -331,9 +332,9 @@ model User {
   mentionsReceived Mention[] @relation("mentionTarget")
 
   // Stories
-  stories         Story[]          @relation("storyAuthor")
-  storyViews      StoryView[]
-  storyReactions  StoryReaction[]  @relation("storyReactor")
+  stories        Story[]         @relation("storyAuthor")
+  storyViews     StoryView[]
+  storyReactions StoryReaction[] @relation("storyReactor")
 
   // Admin audit
   adminActionsReceived  AdminActionLog[] @relation("targetUserAdminActions")
@@ -703,7 +704,7 @@ model Story {
   createdAt  DateTime   @default(now())
   expiresAt  DateTime // createdAt + 24h (set at insert time)
 
-  user      User             @relation("storyAuthor", fields: [userId], references: [id], onDelete: Cascade)
+  user      User            @relation("storyAuthor", fields: [userId], references: [id], onDelete: Cascade)
   views     StoryView[]
   reactions StoryReaction[]
 
@@ -986,6 +987,7 @@ model DataExportRequest {
   processedAt DateTime?
   status      DataRequestStatus @default(PENDING)
   downloadUrl String?
+  payloadJson Json?
   expiresAt   DateTime?
   createdAt   DateTime          @default(now())
 
@@ -1545,4 +1547,32 @@ model Mention {
   @@index([targetType, targetId])
   @@index([authorId])
   @@index([status])
+}
+
+// ─────────────────────────────────────────────
+//  AUDIT LOG — every privileged action by ADMIN/MODERATOR/SUPER_ADMIN
+//  · action: free-form (e.g. "user.ban", "event.delete", "push.send")
+//  · targetType + targetId identify the affected entity (when applicable)
+//  · metadata stores diff / reason / arbitrary context
+//  · separate from ModerationLog (which is content-moderation specific)
+// ─────────────────────────────────────────────
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String
+  actorRole  String   @db.VarChar(20)
+  action     String   @db.VarChar(60)
+  targetType String?  @db.VarChar(40)
+  targetId   String?
+  ipAddress  String?  @db.VarChar(45)
+  userAgent  String?  @db.VarChar(300)
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  actor User @relation("auditActor", fields: [actorId], references: [id], onDelete: Cascade)
+
+  @@index([actorId, createdAt])
+  @@index([action, createdAt])
+  @@index([targetType, targetId])
+  @@index([createdAt])
 }

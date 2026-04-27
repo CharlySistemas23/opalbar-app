@@ -28,9 +28,14 @@
 | Cloudinary uploads | ✅ |
 | OTA EAS canal preview | ✅ |
 | Postgres + Redis Railway | ✅ |
-| Sentry / observabilidad | ⛔ |
-| Audit log de acciones admin | 🟡 parcial |
-| 2FA SUPER_ADMIN | ⛔ |
+| Sentry / observabilidad | ✅ backend + admin web (mobile diferido) |
+| Audit log de acciones admin | ✅ |
+| 2FA SUPER_ADMIN | ✅ |
+| Session timeout admin web (5 min idle) | ✅ |
+| Health enriquecido (DB+Redis+FCM) | ✅ |
+| Rate-limit per-endpoint + ThrottlerGuard global prod | ✅ |
+| GDPR export real con email | ✅ |
+| Runbook on-call | ✅ ([08-RUNBOOK.md](08-RUNBOOK.md)) |
 
 ---
 
@@ -60,25 +65,26 @@
 
 ---
 
-## Fase 4 — Hardening pre-store (en curso)
+## Fase 4 — Hardening pre-store
 
 ### P0 — Bloqueantes para iOS Store
-1. **APNs** — registrar app en Apple Developer Program y configurar APNs key
-2. **Mode production EAS** — `eas build --profile production` (canal `production`)
-3. **Sentry** — instalar `@sentry/react-native` + `@sentry/node`, DSN por entorno
-4. **Audit log completo** — toda acción admin (ban/delete/approve/reject) graba en `ModerationLog`
+1. **APNs** — registrar app en Apple Developer Program y configurar APNs key — ⛔ pendiente verificación Apple
+2. **Mode production EAS** — `eas build --profile production` (canal `production`) — ⛔ pendiente Apple
+3. **Sentry backend + admin** — `@sentry/nestjs` + `@sentry/react`, DSN por entorno, redact PII — ✅
+4. **Sentry mobile** — `@sentry/react-native` — ⛔ diferido (requiere prebuilt + EAS rebuild + iOS pendiente)
+5. **Audit log completo** — toda acción admin (ban/delete/approve/reject/role/points/broadcast/gdpr/flag/review) graba en `AuditLog` con actor + IP + UA + metadata redactada; lectura `GET /admin/audit` SUPER_ADMIN — ✅
 
 ### P1 — Seguridad y compliance
-- 2FA email obligatorio para SUPER_ADMIN
-- Session timeout idle 5min en admin web
-- IP allowlist Cloudflare para `admin.opalbar.com` (opcional)
-- Rate-limit refinado por endpoint (no solo global)
-- GDPR export real con email link (hoy queda en BD pero no notifica)
+- ✅ 2FA email obligatorio para SUPER_ADMIN (`POST /auth/login` devuelve `requires2FA` → `POST /auth/login/2fa`)
+- ✅ Session timeout idle 5 min en admin web (banner de aviso al minuto final, "Sigo aquí" para reset)
+- ✅ Rate-limit refinado por endpoint (`@ThrottleAuth/Otp/Write/Push`) + `ThrottlerGuard` global solo en producción
+- ✅ GDPR export real: bundle JSON inline en Postgres + URL firmada HMAC + email transaccional al usuario, expira 7 días
+- ⏭ IP allowlist Cloudflare para `admin.opalbar.com` (opcional, requiere Cloudflare)
 
 ### P2 — Observabilidad
-- Health check enriquecido (Postgres, Redis, FCM reachable)
-- Métricas Prometheus o uptimerobot
-- Log estructurado (Pino) con redacción de tokens
+- ✅ Health check enriquecido: `GET /health` (liveness) + `GET /health/ready` (DB + Redis + FCM con latencias)
+- ✅ Logs con redact + tag `userId` por request; PII redactada en Sentry `beforeSend`
+- ⏭ Métricas Prometheus / uptimerobot (siguiente sprint)
 
 ---
 

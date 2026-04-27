@@ -19,6 +19,8 @@ Estado actual del proyecto (al 2026-04-27):
 - **Fase 2 COMPLETADA** — Base técnica e infraestructura (NestJS + Postgres + Redis + EAS + Vercel + Railway + FCM).
 - **Fase 3 COMPLETADA** — Reservaciones, soporte, content monitor, reviews, panel admin web, friendships, DMs IG/FB-style, stories con reactions, push end-to-end.
 - **Fase 4 EN CURSO** — Hardening pre-store: APNs iOS, Sentry, audit logs admin, optimizaciones a 10K usuarios.
+  - ✅ 2026-04-27 entregado: Sentry backend + admin web, audit log + decorator + endpoint lectura, health enriquecido (DB+Redis+FCM), rate-limit per-endpoint + ThrottlerGuard global en prod, 2FA email para SUPER_ADMIN, session-timeout idle 5 min en admin web, GDPR export real con email firmado, runbook on-call ([08-RUNBOOK.md](08-RUNBOOK.md)).
+  - ⛔ Pendiente: APNs iOS, EAS production y Sentry mobile — bloqueados por verificación Apple Developer.
 
 ---
 
@@ -931,6 +933,7 @@ Cualquier decisión que impacte producto, seguridad o arquitectura debe registra
 | 2026-04-26 | Stories: ring de progreso, reacciones rápidas, reply por DM, comments con threads | Reddit-style threads en comentarios + edit + reaction notifications + deep-link highlight | Comunidad madura | Community |
 | 2026-04-27 | Consolidación de docs en `/docs` | Maestro + stack + infra + design system + roadmap + changelog + admin; legacy en `archive/` | Una sola fuente ordenada | Docs |
 | 2026-04-27 | Fase 2 y Fase 3 declaradas COMPLETADAS | Todo lo listado para fase 2/3 está en producción y verificado en commits | Paso a Fase 4: hardening pre-store + APNs + Sentry + audit logs admin | Equipo |
+| 2026-04-27 | Fase 4 hardening (todo lo no-Apple) entregado | Sentry backend + admin web con redact PII; AuditLog + @Audit decorator + interceptor + endpoint lectura SUPER_ADMIN; health enriquecido (DB+Redis+FCM); rate-limit per-endpoint + ThrottlerGuard global solo en prod; 2FA email para SUPER_ADMIN; session-timeout idle 5 min en admin web; GDPR export real (bundle JSON inline + URL firmada HMAC + email); runbook on-call en `docs/08-RUNBOOK.md` | App segura y observable; queda solo Apple (APNs/iOS/Sentry mobile) | Seguridad |
 
 ---
 

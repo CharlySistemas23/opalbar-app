@@ -5,6 +5,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { SentryModule } from '@sentry/nestjs/setup';
 
 // Config
 import configuration from '../config/configuration';
@@ -44,9 +45,13 @@ import { VenuesModule } from '../modules/venues/venues.module';
 import { PushModule } from '../modules/push/push.module';
 import { MarketingModule } from '../modules/marketing/marketing.module';
 import { RealtimeModule } from '../modules/realtime/realtime.module';
+import { AuditModule } from '../modules/audit/audit.module';
 
 @Module({
   imports: [
+    // ── Sentry (no-op when SENTRY_DSN unset) ──
+    SentryModule.forRoot(),
+
     // ── Config ────────────────────────────────
     ConfigModule.forRoot({
       isGlobal: true,
@@ -103,6 +108,7 @@ import { RealtimeModule } from '../modules/realtime/realtime.module';
     VenuesModule,
     PushModule,
     MarketingModule,
+    AuditModule,
   ],
 
   providers: [
@@ -116,9 +122,13 @@ import { RealtimeModule } from '../modules/realtime/realtime.module';
     // Global guards (JWT on all routes — @Public() to bypass)
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
-    // Throttle Guard DISABLED in development to allow unlimited testing
-    // Re-enable in production by uncommenting the line below
-    // { provide: APP_GUARD, useClass: ThrottlerGuard },
+
+    // Throttle: enabled in production, skipped in development.
+    // Per-endpoint @Throttle*() decorators tighten limits further.
+    // Admin controllers carry @SkipThrottle() since auth+role guards already gate them.
+    ...(process.env.NODE_ENV === 'production'
+      ? [{ provide: APP_GUARD, useClass: ThrottlerGuard }]
+      : []),
   ],
 })
 export class AppModule {}

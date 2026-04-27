@@ -64,4 +64,13 @@ export const validationSchema = Joi.object({
   // GDPR
   DATA_RETENTION_DAYS: Joi.number().default(730),
   GDPR_DELETION_DELAY_DAYS: Joi.number().default(30),
+
+  // Sentry (all optional — no-op when DSN unset)
+  SENTRY_DSN: Joi.string().uri().optional().allow(''),
+  SENTRY_ENVIRONMENT: Joi.string().optional(),
+  SENTRY_TRACES_SAMPLE_RATE: Joi.number().min(0).max(1).default(0.2),
+  SENTRY_PROFILES_SAMPLE_RATE: Joi.number().min(0).max(1).default(0.1),
+
+  // FCM (used by health check + push)
+  FCM_SERVER_KEY: Joi.string().optional().allow(''),
 });

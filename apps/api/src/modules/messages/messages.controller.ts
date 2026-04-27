@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Post, Query
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { User } from '@prisma/client';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { ThrottleWrite } from '../../common/decorators/throttle-custom.decorator';
 import { MessagesService } from './messages.service';
 
 @ApiTags('Messages')
@@ -74,6 +75,7 @@ export class MessagesController {
 
   @Post('threads/:id/messages')
   @HttpCode(HttpStatus.CREATED)
+  @ThrottleWrite()
   @ApiOperation({ summary: 'Send a message (text, image, sticker, voice, or reply)' })
   sendMessage(
     @CurrentUser() me: User,
