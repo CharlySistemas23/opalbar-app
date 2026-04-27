@@ -13,6 +13,7 @@ export type RealtimeResource =
   | 'story'
   | 'comment'
   | 'message'
+  | 'mention'
   | 'notification'
   | 'report'
   | 'reservation'
@@ -40,7 +41,8 @@ export type RealtimeAction =
   | 'reacted'
   | 'commented'
   | 'read'
-  | 'sent';
+  | 'sent'
+  | 'pending';
 
 export interface RealtimeEnvelope {
   resource: RealtimeResource;

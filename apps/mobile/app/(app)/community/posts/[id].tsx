@@ -32,6 +32,7 @@ import { sharePost } from '@/utils/share';
 import { ErrorState } from '@/components/ErrorState';
 import { useMentionAutocomplete } from '@/hooks/useMentionAutocomplete';
 import { MentionSuggestions } from '@/components/MentionSuggestions';
+import { MentionText } from '@/components/MentionText';
 
 // ─────────────────────────────────────────────
 //  Post Detail — Instagram × Facebook hybrid
@@ -810,6 +811,7 @@ function CommentBubble({
   liked,
   likes,
   createdAt,
+  mentions,
   onLike,
   onReply,
   onOptions,
@@ -822,6 +824,7 @@ function CommentBubble({
   isAuthor: boolean;
   liked: boolean;
   likes: number;
+  mentions?: any[] | null;
   createdAt?: string;
   onLike: () => void;
   onReply: () => void;
@@ -883,7 +886,7 @@ function CommentBubble({
               </View>
             )}
           </View>
-          <Text style={styles.bubbleText}>{content}</Text>
+          <MentionText content={content} mentions={mentions} style={styles.bubbleText} />
 
           {likes > 0 && (
             <View style={styles.bubbleLikeChip}>
@@ -1013,6 +1016,7 @@ function CommentItem({
         liked={liked}
         likes={likes}
         createdAt={comment.createdAt}
+        mentions={comment.mentions}
         onLike={() => onLike(comment.id)}
         onReply={() => onReply(comment)}
         onOptions={() => onOptions(comment)}

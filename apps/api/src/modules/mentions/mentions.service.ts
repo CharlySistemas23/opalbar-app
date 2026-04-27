@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import {
   MentionPolicy,
   MentionStatus,
@@ -46,8 +46,9 @@ export class MentionsService {
     targetType: MentionTargetType;
     targetId: string;
     mentions: MentionInput[];
+    preview?: string;
   }) {
-    const { authorId, targetType, targetId, mentions } = opts;
+    const { authorId, targetType, targetId, mentions, preview } = opts;
     if (!mentions || mentions.length === 0) return [];
 
     // Dedupe by userId and drop self-mention.
@@ -142,7 +143,7 @@ export class MentionsService {
       },
     });
 
-    this.notifyTargets(authorId, targetType, targetId, created).catch(() => {});
+    this.notifyTargets(authorId, targetType, targetId, created, preview).catch(() => {});
 
     return created;
   }
@@ -152,6 +153,7 @@ export class MentionsService {
     targetType: MentionTargetType,
     targetId: string,
     mentions: { id: string; targetUserId: string; status: MentionStatus }[],
+    preview?: string,
   ) {
     if (mentions.length === 0) return;
     const actor = await this.prisma.userProfile.findUnique({
@@ -188,14 +190,15 @@ export class MentionsService {
       const title = isApproved ? approvedTitleEs : 'Solicitud de etiqueta';
       const titleEn = isApproved ? approvedTitleEn : 'Tag request';
       const isComment = targetType === MentionTargetType.COMMENT;
+      const snippet = preview ? `: "${preview.slice(0, 80)}${preview.length > 80 ? '…' : ''}"` : '.';
       const body = isApproved
         ? isComment
-          ? `${actorName} te mencionó en un comentario.`
+          ? `${actorName} te mencionó en un comentario${snippet}`
           : `${actorName} te etiquetó.`
         : `${actorName} quiere etiquetarte. Aprueba para que sea visible.`;
       const bodyEn = isApproved
         ? isComment
-          ? `${actorName} mentioned you in a comment.`
+          ? `${actorName} mentioned you in a comment${snippet}`
           : `${actorName} tagged you.`
         : `${actorName} wants to tag you. Approve to make it visible.`;
 

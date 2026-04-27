@@ -247,9 +247,42 @@ export class CommunityService {
       likedSet = new Set(mine.map((m) => m.commentId));
     }
 
+    // Hydrate resolved mentions per comment so the renderer can map @handle
+    // → userId for tappable highlights. One bulk query keeps this cheap.
+    const mentionRows = ids.length
+      ? await this.prisma.mention.findMany({
+          where: {
+            targetType: MentionTargetType.COMMENT,
+            targetId: { in: ids },
+            status: 'APPROVED',
+          },
+          select: {
+            targetId: true,
+            targetUserId: true,
+            targetUser: {
+              select: {
+                id: true,
+                profile: { select: { firstName: true, lastName: true } },
+              },
+            },
+          },
+        })
+      : [];
+    const mentionsByComment = new Map<string, any[]>();
+    for (const m of mentionRows) {
+      const arr = mentionsByComment.get(m.targetId) ?? [];
+      arr.push({
+        userId: m.targetUserId,
+        firstName: m.targetUser?.profile?.firstName ?? null,
+        lastName: m.targetUser?.profile?.lastName ?? null,
+      });
+      mentionsByComment.set(m.targetId, arr);
+    }
+
     const nodes = flatComments.map((c: any) => ({
       ...c,
       hasLiked: likedSet.has(c.id),
+      mentions: mentionsByComment.get(c.id) ?? [],
       replies: [],
     }));
 
@@ -383,6 +416,7 @@ export class CommunityService {
           targetType: MentionTargetType.COMMENT,
           targetId: comment.id,
           mentions: dto.mentions,
+          preview: dto.content,
         })
         .catch(() => {});
     }
