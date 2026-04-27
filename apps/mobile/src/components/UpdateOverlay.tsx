@@ -121,10 +121,11 @@ export function UpdateOverlay() {
         setReloadError(err?.message ?? 'reload failed');
       });
     }, delayMs);
-    // Safety net: if we're still showing "reloading" 6s after we asked the
-    // bridge to reload, assume something went wrong and let the user dismiss.
+    // Safety net: if reload didn't happen in 6s, AUTO-CLOSE the modal so the
+    // app is usable. The user can keep working; next cold start will pick it up.
     safetyTimeoutRef.current = setTimeout(() => {
-      setReloadError('Reinicio sin respuesta. Cierra y abre la app manualmente.');
+      setReloadError(t ? 'No se pudo reiniciar. Se aplicará la próxima vez que abras la app.' : 'Could not restart. Will apply next time you open the app.');
+      setTimeout(() => cancelReload(), 1800);
     }, delayMs + 6000);
   };
 
@@ -135,8 +136,16 @@ export function UpdateOverlay() {
     };
   }, []);
 
+  // Track whether isUpdatePending was true on first mount. If it was, that
+  // means a previous session left an update committed but never reloaded —
+  // we DON'T want to auto-trigger reload (it would just loop again). Just
+  // show the user the option to restart manually.
+  const wasPendingOnMount = useRef(isUpdatePending);
+
   useEffect(() => {
-    if (isUpdatePending) triggerReload(900);
+    // Skip auto-reload if pending was already true at mount (previous cycle
+    // failed → would just loop). User has manual restart + close buttons.
+    if (isUpdatePending && !wasPendingOnMount.current) triggerReload(900);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isUpdatePending]);
 
@@ -162,6 +171,14 @@ export function UpdateOverlay() {
     <Modal visible transparent animationType="fade" statusBarTranslucent>
       <View style={styles.backdrop}>
         <Animated.View style={[styles.card, { opacity: cardOpacity, transform: [{ scale: cardScale }] }]}>
+          {/* Always-available escape hatch — top-right close X */}
+          <Pressable
+            onPress={cancelReload}
+            hitSlop={12}
+            style={({ pressed }) => [styles.closeX, pressed && { opacity: 0.6 }]}
+          >
+            <Feather name="x" size={18} color={Colors.textSecondary} />
+          </Pressable>
           <View style={styles.iconStack}>
             {!ready ? (
               <Animated.View
@@ -343,6 +360,20 @@ const styles = StyleSheet.create({
     fontFamily: Typography.fontFamily.sans,
     fontSize: Typography.fontSize.xs,
     marginTop: Spacing[3],
+  },
+  closeX: {
+    position: 'absolute',
+    top: Spacing[3],
+    right: Spacing[3],
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.bgElevated,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+    zIndex: 10,
   },
   actionsRow: {
     marginTop: Spacing[4],
