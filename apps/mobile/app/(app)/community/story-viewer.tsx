@@ -7,14 +7,20 @@ import {
   Dimensions,
   ActivityIndicator,
   StatusBar,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
+  Keyboard,
 } from 'react-native';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
-import { communityApi } from '@/api/client';
+import { communityApi, messagesApi } from '@/api/client';
 import { useAuthStore } from '@/stores/auth.store';
 import { Colors } from '@/constants/tokens';
+
+const QUICK_REACTIONS = ['❤️', '🔥', '😂', '😮', '😢', '👏'];
 
 // ─────────────────────────────────────────────
 //  Story Viewer — IG-style fullscreen
@@ -91,6 +97,20 @@ export default function StoryViewer() {
   const startedAtRef = useRef<number>(0);
   const elapsedAtPauseRef = useRef<number>(0);
 
+  // Reply / reactions state
+  const [replyText, setReplyText] = useState('');
+  const [sending, setSending] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+  const [replyFocused, setReplyFocused] = useState(false);
+  const [reactedEmoji, setReactedEmoji] = useState<string | null>(null);
+  const toastTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  function flashToast(msg: string) {
+    setToast(msg);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToast(null), 1800);
+  }
+
   useEffect(() => {
     let alive = true;
 
@@ -144,6 +164,8 @@ export default function StoryViewer() {
     elapsedAtPauseRef.current = 0;
     startedAtRef.current = Date.now();
     setImageReady(false);
+    setReplyText('');
+    setReactedEmoji(null);
     // Mark viewed in background
     if (currentStory.id && !currentStory.seen) {
       communityApi.viewStory(currentStory.id).catch(() => {});
@@ -151,11 +173,14 @@ export default function StoryViewer() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [groupIdx, storyIdx]);
 
+  // Pause auto-advance while the user is composing a reply
+  const effectivePaused = paused || replyFocused;
+
   // Drive the progress bar (setInterval-based — reliable across platforms)
   useEffect(() => {
     if (!currentStory) return;
     if (!imageReady) return;
-    if (paused) {
+    if (effectivePaused) {
       // Preserve elapsed time so resume continues from current progress
       elapsedAtPauseRef.current = Date.now() - startedAtRef.current;
       if (tickRef.current) clearInterval(tickRef.current);
@@ -176,7 +201,7 @@ export default function StoryViewer() {
       if (tickRef.current) clearInterval(tickRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [groupIdx, storyIdx, paused, imageReady]);
+  }, [groupIdx, storyIdx, effectivePaused, imageReady]);
 
   function advance() {
     if (!currentGroup) return;
@@ -230,6 +255,40 @@ export default function StoryViewer() {
     : ((author?.profile?.firstName?.[0] || '') + (author?.profile?.lastName?.[0] || ''))
         .toUpperCase() || 'U';
   const isMine = !isVenueGroup && author.id === me?.id;
+  const canReply = !isMine && !isVenueGroup && !!author.id;
+
+  async function handleQuickReact(emoji: string) {
+    if (!currentStory || !canReply) return;
+    setReactedEmoji(emoji);
+    flashToast(`Reaccionaste ${emoji}`);
+    try {
+      await communityApi.reactStory(currentStory.id, emoji);
+    } catch {
+      setReactedEmoji(null);
+    }
+  }
+
+  async function handleSendReply() {
+    const text = replyText.trim();
+    if (!text || !canReply || !currentStory || sending) return;
+    setSending(true);
+    try {
+      const tr = await messagesApi.createThread(author.id);
+      const threadId = (tr.data?.data ?? tr.data)?.id;
+      if (!threadId) throw new Error('no thread');
+      // Prefix lets the recipient know which surface the message references.
+      // Lightweight quote — no schema changes needed for chunk 3.
+      const quoted = `↪️ Respuesta a tu historia:\n${text}`;
+      await messagesApi.send(threadId, { content: quoted });
+      setReplyText('');
+      Keyboard.dismiss();
+      flashToast('Mensaje enviado');
+    } catch {
+      flashToast('No se pudo enviar');
+    } finally {
+      setSending(false);
+    }
+  }
 
   return (
     <View style={styles.root}>
@@ -341,6 +400,68 @@ export default function StoryViewer() {
             <Feather name="eye" size={14} color="#fff" />
             <Text style={styles.viewsText}>{(currentStory as any).viewsCount ?? 0}</Text>
           </View>
+        </View>
+      )}
+
+      {/* Reply + quick reactions — only for personal stories that aren't mine */}
+      {canReply && (
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={[styles.replyWrap, { paddingBottom: Math.max(insets.bottom, 12) }]}
+          pointerEvents="box-none"
+        >
+          <View style={styles.quickRow}>
+            {QUICK_REACTIONS.map((emoji) => {
+              const mine = reactedEmoji === emoji;
+              return (
+                <Pressable
+                  key={emoji}
+                  onPress={() => handleQuickReact(emoji)}
+                  style={({ pressed }) => [
+                    styles.quickEmojiBtn,
+                    mine && styles.quickEmojiBtnMine,
+                    pressed && { transform: [{ scale: 1.15 }] },
+                  ]}
+                  hitSlop={6}
+                >
+                  <Text style={styles.quickEmoji}>{emoji}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <View style={styles.replyRow}>
+            <TextInput
+              style={styles.replyInput}
+              value={replyText}
+              onChangeText={setReplyText}
+              onFocus={() => setReplyFocused(true)}
+              onBlur={() => setReplyFocused(false)}
+              placeholder={`Enviar mensaje a ${name.split(' ')[0] || 'usuario'}…`}
+              placeholderTextColor="rgba(255,255,255,0.55)"
+              multiline
+              maxLength={500}
+              editable={!sending}
+              returnKeyType="send"
+              blurOnSubmit
+              onSubmitEditing={handleSendReply}
+            />
+            {replyText.trim().length > 0 && (
+              <Pressable
+                onPress={handleSendReply}
+                disabled={sending}
+                style={[styles.replySendBtn, sending && { opacity: 0.5 }]}
+                hitSlop={8}
+              >
+                <Feather name="send" size={18} color="#fff" />
+              </Pressable>
+            )}
+          </View>
+        </KeyboardAvoidingView>
+      )}
+
+      {toast && (
+        <View style={[styles.toast, { bottom: Math.max(insets.bottom, 12) + (canReply ? 110 : 60) }]} pointerEvents="none">
+          <Text style={styles.toastText}>{toast}</Text>
         </View>
       )}
     </View>
@@ -496,4 +617,72 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.5)',
   },
   viewsText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+
+  replyWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 14,
+    paddingTop: 10,
+    gap: 10,
+    zIndex: 10,
+  },
+  quickRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'center',
+    paddingVertical: 6,
+  },
+  quickEmojiBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.35)',
+  },
+  quickEmojiBtnMine: {
+    backgroundColor: 'rgba(255,255,255,0.25)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.6)',
+  },
+  quickEmoji: { fontSize: 22 },
+  replyRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 8,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderRadius: 24,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.25)',
+  },
+  replyInput: {
+    flex: 1,
+    color: '#fff',
+    fontSize: 14,
+    maxHeight: 100,
+    paddingVertical: 4,
+  },
+  replySendBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.accentPrimary,
+  },
+
+  toast: {
+    position: 'absolute',
+    alignSelf: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 16,
+    backgroundColor: 'rgba(0,0,0,0.75)',
+    zIndex: 12,
+  },
+  toastText: { color: '#fff', fontSize: 13, fontWeight: '600' },
 });

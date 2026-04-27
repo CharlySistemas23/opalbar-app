@@ -936,6 +936,54 @@ export class CommunityService {
     return { data: rows };
   }
 
+  async toggleStoryReaction(storyId: string, userId: string, emoji: string) {
+    const clean = (emoji ?? '').trim();
+    if (!clean) throw new BadRequestException('Emoji required');
+    const story = await this.prisma.story.findUnique({ where: { id: storyId } });
+    if (!story) throw new NotFoundException('Story not found');
+
+    const existing = await this.prisma.storyReaction.findUnique({
+      where: { storyId_userId_emoji: { storyId, userId, emoji: clean } },
+    });
+    if (existing) {
+      await this.prisma.storyReaction.delete({ where: { id: existing.id } });
+      return { reacted: false, emoji: clean };
+    }
+
+    await this.prisma.storyReaction.create({ data: { storyId, userId, emoji: clean } });
+
+    // Notify story owner (skip own reactions and venue stories — venue has no
+    // single human author to notify)
+    if (story.scope === StoryScope.PERSONAL && story.userId !== userId) {
+      const actor = await this.prisma.userProfile.findUnique({
+        where: { userId },
+        select: { firstName: true, lastName: true, avatarUrl: true },
+      });
+      const actorName =
+        `${actor?.firstName ?? ''} ${actor?.lastName ?? ''}`.trim() || 'Alguien';
+      this.notifications
+        .createNotification({
+          userId: story.userId,
+          type: NotificationType.COMMUNITY_REACTION,
+          title: 'Nueva reacción',
+          titleEn: 'New reaction',
+          body: `${actorName} reaccionó ${clean} a tu historia.`,
+          bodyEn: `${actorName} reacted ${clean} to your story.`,
+          data: {
+            storyId,
+            actorId: userId,
+            actorName,
+            actorAvatarUrl: actor?.avatarUrl ?? null,
+            emoji: clean,
+          },
+          imageUrl: actor?.avatarUrl ?? undefined,
+        })
+        .catch(() => {});
+    }
+
+    return { reacted: true, emoji: clean };
+  }
+
   async markStoryViewed(storyId: string, userId: string) {
     const story = await this.prisma.story.findUnique({ where: { id: storyId } });
     if (!story) throw new NotFoundException('Story not found');

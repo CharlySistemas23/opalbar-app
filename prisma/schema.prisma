@@ -331,8 +331,9 @@ model User {
   mentionsReceived Mention[] @relation("mentionTarget")
 
   // Stories
-  stories    Story[]     @relation("storyAuthor")
-  storyViews StoryView[]
+  stories         Story[]          @relation("storyAuthor")
+  storyViews      StoryView[]
+  storyReactions  StoryReaction[]  @relation("storyReactor")
 
   // Admin audit
   adminActionsReceived  AdminActionLog[] @relation("targetUserAdminActions")
@@ -702,13 +703,28 @@ model Story {
   createdAt  DateTime   @default(now())
   expiresAt  DateTime // createdAt + 24h (set at insert time)
 
-  user  User        @relation("storyAuthor", fields: [userId], references: [id], onDelete: Cascade)
-  views StoryView[]
+  user      User             @relation("storyAuthor", fields: [userId], references: [id], onDelete: Cascade)
+  views     StoryView[]
+  reactions StoryReaction[]
 
   @@index([userId])
   @@index([expiresAt])
   @@index([createdAt])
   @@index([scope, expiresAt])
+}
+
+model StoryReaction {
+  id        String   @id @default(cuid())
+  storyId   String
+  userId    String
+  emoji     String
+  createdAt DateTime @default(now())
+
+  story Story @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  user  User  @relation("storyReactor", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([storyId, userId, emoji])
+  @@index([storyId])
 }
 
 model StoryView {

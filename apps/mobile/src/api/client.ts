@@ -323,6 +323,7 @@ export const communityApi = {
     apiClientUpload.post('/community/stories', data),
   deleteStory: (id: string) => apiClient.delete(`/community/stories/${id}`),
   viewStory: (id: string) => apiClient.post(`/community/stories/${id}/view`),
+  reactStory: (id: string, emoji: string) => apiClient.post(`/community/stories/${id}/react`, { emoji }),
 };
 
 export const walletApi = {

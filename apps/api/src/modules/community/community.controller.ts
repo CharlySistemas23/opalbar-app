@@ -129,6 +129,11 @@ export class CommunityController {
   viewStory(@Param('id') id: string, @CurrentUser() user: User) {
     return this.communityService.markStoryViewed(id, user.id);
   }
+
+  @Post('stories/:id/react') @HttpCode(HttpStatus.OK) @ApiOperation({ summary: 'Toggle emoji reaction on a story' })
+  reactToStory(@Param('id') id: string, @CurrentUser() user: User, @Body() body: { emoji: string }) {
+    return this.communityService.toggleStoryReaction(id, user.id, body.emoji);
+  }
 }
 
 @ApiTags('Admin Community')
