@@ -299,7 +299,7 @@ const styles = StyleSheet.create({
   rowDesc: { fontSize: Typography.fontSize.xs, color: Colors.textSecondary, marginTop: 2 },
   sectionTitle: {
     fontSize: Typography.fontSize.xs,
-    color: Colors.textTertiary,
+    color: Colors.textMuted,
     textTransform: 'uppercase',
     letterSpacing: 1,
     marginTop: Spacing[2],

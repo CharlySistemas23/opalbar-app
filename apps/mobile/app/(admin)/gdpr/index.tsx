@@ -153,7 +153,7 @@ export default function GdprRequests() {
             const isProcessing = processingId === item.id;
 
             let countdownText = '';
-            let countdownColor = Colors.textMuted;
+            let countdownColor: string = Colors.textMuted;
             if (tab === 'deletion' && item.scheduledFor) {
               const daysUntilScheduled = Math.floor((new Date(item.scheduledFor).getTime() - Date.now()) / (24*60*60*1000));
               if (isPending && daysUntilScheduled > 0) {

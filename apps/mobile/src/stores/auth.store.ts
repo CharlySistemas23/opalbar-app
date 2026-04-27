@@ -91,6 +91,13 @@ export const useAuthStore = create<AuthState>()(
         set({ isLoading: true, error: null });
         try {
           const { data: response } = await authApi.login(credentials);
+
+          if (response?.data?.requires2FA) {
+            const msg = 'Esta cuenta requiere 2FA. Inicia sesión desde el panel admin web.';
+            set({ isLoading: false, error: msg });
+            throw new Error(msg);
+          }
+
           const { user, tokens } = response.data;
 
           // Store tokens in memory (interceptor uses these)

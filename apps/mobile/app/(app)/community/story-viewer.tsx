@@ -93,7 +93,7 @@ export default function StoryViewer() {
   // Progress 0-100 for the active bar. Simple setInterval-based to avoid
   // RN Animated edge cases with string-interpolated percent widths.
   const [progressPct, setProgressPct] = useState(0);
-  const tickRef = useRef<NodeJS.Timeout | null>(null);
+  const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startedAtRef = useRef<number>(0);
   const elapsedAtPauseRef = useRef<number>(0);
 
@@ -103,7 +103,7 @@ export default function StoryViewer() {
   const [toast, setToast] = useState<string | null>(null);
   const [replyFocused, setReplyFocused] = useState(false);
   const [reactedEmoji, setReactedEmoji] = useState<string | null>(null);
-  const toastTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   function flashToast(msg: string) {
     setToast(msg);

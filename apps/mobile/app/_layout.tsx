@@ -118,7 +118,8 @@ function SessionGuard() {
 
     const timer = setTimeout(() => {
       const inAuth = segments[0] === '(auth)';
-      const inIndex = segments.length === 0 || segments[0] === 'index';
+      const seg0 = segments[0] as string | undefined;
+      const inIndex = (segments as unknown as string[]).length === 0 || seg0 === 'index';
       const hasAccess = isAuthenticated || isGuest;
 
       // Onboarding screens live inside (auth) but REQUIRE the user to already

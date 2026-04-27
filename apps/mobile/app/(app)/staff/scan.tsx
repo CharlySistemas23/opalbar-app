@@ -117,7 +117,7 @@ export default function StaffScan() {
             <Text style={styles.primaryBtnLbl}>{t ? 'Permitir cámara' : 'Allow camera'}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.secondaryBtn} onPress={() => setManualMode(true)}>
-            <Feather name="keyboard" size={16} color={Colors.accentPrimary} />
+            <Feather name="edit-3" size={16} color={Colors.accentPrimary} />
             <Text style={styles.secondaryBtnLbl}>{t ? 'Ingresar código manualmente' : 'Enter code manually'}</Text>
           </TouchableOpacity>
         </View>
@@ -141,7 +141,7 @@ export default function StaffScan() {
         </TouchableOpacity>
         <Text style={styles.title}>{t ? 'Escanear QR' : 'Scan QR'}</Text>
         <TouchableOpacity onPress={() => setManualMode(true)} style={styles.iconBtn} hitSlop={10}>
-          <Feather name="keyboard" size={18} color={Colors.textPrimary} />
+          <Feather name="edit-3" size={18} color={Colors.textPrimary} />
         </TouchableOpacity>
       </View>
 

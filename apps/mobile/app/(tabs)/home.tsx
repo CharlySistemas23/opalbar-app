@@ -16,7 +16,7 @@ interface EventItem {
   title?: string;
   startDate?: string;
   imageUrl?: string;
-  category?: string;
+  category?: { name?: string; color?: string };
   spotsLeft?: number;
   isLive?: boolean;
   badge?: string;

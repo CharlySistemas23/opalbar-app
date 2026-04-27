@@ -159,6 +159,8 @@ export const authApi = {
   logoutAll: () => apiClient.post('/auth/logout-all'),
   me: () => apiClient.get('/auth/me'),
   changePassword: (data: unknown) => apiClient.post('/auth/change-password', data),
+  resetPassword: (data: { identifier: string; otpCode: string; newPassword: string }) =>
+    apiClient.post('/auth/reset-password', data),
   sessions: () => apiClient.get('/auth/sessions'),
   revokeSession: (id: string) => apiClient.delete(`/auth/sessions/${id}`),
 };

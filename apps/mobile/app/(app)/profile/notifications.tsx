@@ -50,6 +50,7 @@ type Notif = {
     threadId?: string;
     venueId?: string;
     reservationId?: string;
+    commentId?: string;
   };
 };
 
