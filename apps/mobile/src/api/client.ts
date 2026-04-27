@@ -303,6 +303,7 @@ export const communityApi = {
   deletePost: (id: string) => apiClient.delete(`/community/posts/${id}`),
   comments: (postId: string) => apiClient.get(`/community/posts/${postId}/comments`),
   addComment: (postId: string, data: unknown) => apiClient.post(`/community/posts/${postId}/comments`, data),
+  updateComment: (id: string, content: string) => apiClient.patch(`/community/comments/${id}`, { content }),
   deleteComment: (id: string) => apiClient.delete(`/community/comments/${id}`),
   likeComment: (id: string) => apiClient.post(`/community/comments/${id}/like`),
   reactComment: (id: string, emoji: string) => apiClient.post(`/community/comments/${id}/react`, { emoji }),

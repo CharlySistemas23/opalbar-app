@@ -8,6 +8,7 @@ export type CommunityChangeType =
   | 'post_deleted'
   | 'post_reacted'
   | 'comment_created'
+  | 'comment_updated'
   | 'comment_deleted'
   | 'comment_liked'
   | 'comment_reacted';

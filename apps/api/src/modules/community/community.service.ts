@@ -381,6 +381,35 @@ export class CommunityService {
       postId: comment.postId,
       commentId,
     });
+
+    if (comment.userId !== userId) {
+      const actor = await this.prisma.userProfile.findUnique({
+        where: { userId },
+        select: { firstName: true, lastName: true, avatarUrl: true },
+      });
+      const actorName =
+        `${actor?.firstName ?? ''} ${actor?.lastName ?? ''}`.trim() || 'Alguien';
+      this.notifications
+        .createNotification({
+          userId: comment.userId,
+          type: NotificationType.COMMUNITY_REACTION,
+          title: 'Nueva reacción',
+          titleEn: 'New reaction',
+          body: `${actorName} reaccionó ${clean} a tu comentario.`,
+          bodyEn: `${actorName} reacted ${clean} to your comment.`,
+          data: {
+            postId: comment.postId,
+            commentId,
+            actorId: userId,
+            actorName,
+            actorAvatarUrl: actor?.avatarUrl ?? null,
+            emoji: clean,
+          },
+          imageUrl: actor?.avatarUrl ?? undefined,
+        })
+        .catch(() => {});
+    }
+
     return { reacted: true, emoji: clean };
   }
 
@@ -473,6 +502,22 @@ export class CommunityService {
     }
 
     return comment;
+  }
+
+  async updateComment(commentId: string, userId: string, content: string) {
+    const comment = await this.prisma.comment.findUnique({ where: { id: commentId } });
+    if (!comment || comment.deletedAt) throw new NotFoundException('Comment not found');
+    if (comment.userId !== userId) throw new ForbiddenException('Not authorized');
+    const updated = await this.prisma.comment.update({
+      where: { id: commentId },
+      data: { content },
+    });
+    this.communityGateway.emitChanged({
+      type: 'comment_updated',
+      postId: comment.postId,
+      commentId,
+    });
+    return updated;
   }
 
   async deleteComment(commentId: string, userId: string) {

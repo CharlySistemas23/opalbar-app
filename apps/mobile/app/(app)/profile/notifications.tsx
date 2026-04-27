@@ -185,7 +185,13 @@ export default function Notifications() {
     const target = n.targetId || d.targetId || d.eventId || postId;
 
     if (type.includes('REACTION') || type.includes('REPLY') || type.includes('MENTION') || type.includes('COMMENT') || type.includes('POST')) {
-      if (postId) return router.push(`/(app)/community/posts/${postId}` as never);
+      if (postId) {
+        const commentId = d.commentId;
+        const path = commentId
+          ? `/(app)/community/posts/${postId}?focusComment=${encodeURIComponent(commentId)}`
+          : `/(app)/community/posts/${postId}`;
+        return router.push(path as never);
+      }
     }
     if (type.includes('EVENT') && target) return router.push(`/(app)/events/${target}` as never);
     if (type.includes('OFFER') && target) return router.push(`/(app)/offers/${target}` as never);

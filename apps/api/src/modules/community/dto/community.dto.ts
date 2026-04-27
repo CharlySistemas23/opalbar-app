@@ -70,6 +70,10 @@ export class CreateCommentDto {
   mentions?: MentionInputDto[];
 }
 
+export class UpdateCommentDto {
+  @ApiProperty({ maxLength: 1000 }) @IsString() @MinLength(1) @MaxLength(1000) content: string;
+}
+
 export class ReactDto {
   @ApiProperty({ enum: ReactionType }) @IsEnum(ReactionType) type: ReactionType;
 }

@@ -71,7 +71,7 @@ function commentScore(c: any, mode: CommentSort): number {
 }
 
 export default function PostDetail() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, focusComment } = useLocalSearchParams<{ id: string; focusComment?: string }>();
   const router = useRouter();
   const { isAuthenticated, user: me } = useAuthStore();
   const { language } = useAppStore();
@@ -94,6 +94,8 @@ export default function PostDetail() {
   const [hideThreads, setHideThreads] = useState(false);
   const [collapsedThreads, setCollapsedThreads] = useState<Record<string, boolean>>({});
   const [reactPickerFor, setReactPickerFor] = useState<string | null>(null);
+  const [editingComment, setEditingComment] = useState<{ id: string } | null>(null);
+  const [highlightedCommentId, setHighlightedCommentId] = useState<string | null>(null);
   const [showLikeBurst, setShowLikeBurst] = useState(false);
   const lastTap = useRef<number>(0);
   const pendingOpen = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -142,6 +144,25 @@ export default function PostDetail() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (!focusComment || comments.length === 0) return;
+    const findRoot = (nodes: any[], targetId: string): string | null => {
+      for (const n of nodes) {
+        if (n.id === targetId) return n.id;
+        const inner = findRoot(n.replies || [], targetId);
+        if (inner) return n.id;
+      }
+      return null;
+    };
+    const rootId = findRoot(comments, focusComment);
+    if (rootId) {
+      setCollapsedThreads((prev) => ({ ...prev, [rootId]: false }));
+    }
+    setHighlightedCommentId(focusComment);
+    const timer = setTimeout(() => setHighlightedCommentId(null), 3500);
+    return () => clearTimeout(timer);
+  }, [focusComment, comments]);
 
   useCommunityRealtime(
     () => {
@@ -223,6 +244,25 @@ export default function PostDetail() {
     const body = (overrideText ?? comment).trim();
     if (!body) return;
     if (!isAuthenticated) return router.push('/(auth)/login' as never);
+
+    if (editingComment) {
+      const editingId = editingComment.id;
+      setSending(true);
+      try {
+        await communityApi.updateComment(editingId, body);
+        setEditingComment(null);
+        if (!overrideText) setComment('');
+        fb.send();
+        await load();
+      } catch (err: any) {
+        fb.error();
+        Alert.alert(t ? 'Error' : 'Error', apiError(err));
+      } finally {
+        setSending(false);
+      }
+      return;
+    }
+
     const parentId = replyTo?.id;
     const mentions = overrideText ? [] : mention.buildMentions();
     if (!overrideText) mention.reset();
@@ -314,6 +354,14 @@ export default function PostDetail() {
     const mine = c.user?.id === me?.id;
     const buttons: any[] = [];
     if (mine) {
+      buttons.push({
+        text: t ? 'Editar' : 'Edit',
+        onPress: () => {
+          setEditingComment({ id: c.id });
+          setReplyTo(null);
+          setComment(c.content ?? '');
+        },
+      });
       buttons.push({
         text: t ? 'Borrar' : 'Delete',
         style: 'destructive' as const,
@@ -676,6 +724,7 @@ export default function PostDetail() {
                 onToggleThread={toggleThread}
                 onOpenReactions={openReactionPicker}
                 onReactQuick={onReactToComment}
+                highlightedId={highlightedCommentId}
               />
             )}
             ListEmptyComponent={
@@ -689,8 +738,28 @@ export default function PostDetail() {
             contentContainerStyle={{ paddingBottom: 12 }}
           />
 
+          {/* ── Editing banner ──────────────────── */}
+          {editingComment && (
+            <View style={[styles.replyBanner, styles.editBanner]}>
+              <Feather name="edit-2" size={13} color={Colors.accentPrimary} />
+              <Text style={styles.replyBannerText} numberOfLines={1}>
+                {t ? 'Editando comentario' : 'Editing comment'}
+              </Text>
+              <Pressable
+                onPress={() => {
+                  setEditingComment(null);
+                  setComment('');
+                }}
+                hitSlop={8}
+                style={({ pressed }) => pressed && styles.pressed}
+              >
+                <Feather name="x" size={16} color={Colors.textSecondary} />
+              </Pressable>
+            </View>
+          )}
+
           {/* ── Reply banner ────────────────────── */}
-          {replyTo && (
+          {replyTo && !editingComment && (
             <View style={styles.replyBanner}>
               <View style={styles.replyDotLine} />
               <Text style={styles.replyBannerText} numberOfLines={1}>
@@ -784,7 +853,9 @@ export default function PostDetail() {
               {sending ? (
                 <ActivityIndicator color={Colors.accentPrimary} size="small" />
               ) : (
-                <Text style={styles.sendBtnText}>{t ? 'Publicar' : 'Post'}</Text>
+                <Text style={styles.sendBtnText}>
+                  {editingComment ? (t ? 'Guardar' : 'Save') : t ? 'Publicar' : 'Post'}
+                </Text>
               )}
             </Pressable>
           </View>
@@ -895,6 +966,7 @@ function CommentBubble({
   onReactQuick,
   small,
   t,
+  highlighted,
 }: {
   user: any;
   content: string;
@@ -912,6 +984,7 @@ function CommentBubble({
   onReactQuick?: (emoji: string) => void;
   small?: boolean;
   t: boolean;
+  highlighted?: boolean;
 }) {
   const [pulse, setPulse] = useState(false);
   const lastTap = useRef(0);
@@ -954,6 +1027,7 @@ function CommentBubble({
           style={({ pressed }) => [
             styles.bubble,
             isAuthor && styles.bubbleAuthor,
+            highlighted && styles.bubbleHighlighted,
             pressed && { opacity: 0.85 },
           ]}
         >
@@ -1063,6 +1137,7 @@ function CommentItem({
   onToggleThread,
   onOpenReactions,
   onReactQuick,
+  highlightedId,
 }: {
   comment: any;
   t: boolean;
@@ -1077,6 +1152,7 @@ function CommentItem({
   onToggleThread: (commentId: string) => void;
   onOpenReactions: (c: any) => void;
   onReactQuick: (commentId: string, emoji: string) => void;
+  highlightedId?: string | null;
 }) {
   const user = comment.user;
   const name =
@@ -1143,6 +1219,7 @@ function CommentItem({
               onReactQuick={(emoji) => onReactQuick(r.id, emoji)}
               small
               t={t}
+              highlighted={highlightedId === r.id}
             />
           </View>
           {childCount > 0 && showCollapseToggle ? (
@@ -1188,6 +1265,7 @@ function CommentItem({
         onOpenReactions={() => onOpenReactions(comment)}
         onReactQuick={(emoji) => onReactQuick(comment.id, emoji)}
         t={t}
+        highlighted={highlightedId === comment.id}
       />
 
       {!hideThreads && hasReplies ? (
@@ -1638,6 +1716,17 @@ const styles = StyleSheet.create({
   emptyText: { color: Colors.textMuted, fontSize: 13 },
 
   // Reply banner
+  bubbleHighlighted: {
+    borderWidth: 2,
+    borderColor: Colors.accentPrimary,
+    shadowColor: Colors.accentPrimary,
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+  },
+  editBanner: {
+    borderColor: Colors.accentPrimary + '55',
+    backgroundColor: Colors.accentPrimary + '10',
+  },
   replyBanner: {
     flexDirection: 'row',
     alignItems: 'center',

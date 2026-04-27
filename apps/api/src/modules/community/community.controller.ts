@@ -7,7 +7,7 @@ import { Public } from '../../common/decorators/public.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CommunityService } from './community.service';
 import {
-  CreatePostDto, UpdatePostDto, CreateCommentDto,
+  CreatePostDto, UpdatePostDto, CreateCommentDto, UpdateCommentDto,
   ReactDto, CreateReportDto, PostFilterDto,
   CreateStoryDto, StoryFeedFilterDto,
 } from './dto/community.dto';
@@ -51,6 +51,11 @@ export class CommunityController {
   @Post('posts/:id/comments') @HttpCode(HttpStatus.CREATED) @ApiOperation({ summary: 'Comment on a post' })
   createComment(@Param('id') id: string, @CurrentUser() user: User, @Body() dto: CreateCommentDto) {
     return this.communityService.createComment(id, user.id, dto);
+  }
+
+  @Patch('comments/:id') @ApiOperation({ summary: 'Edit my comment' })
+  updateComment(@Param('id') id: string, @CurrentUser() user: User, @Body() dto: UpdateCommentDto) {
+    return this.communityService.updateComment(id, user.id, dto.content);
   }
 
   @Delete('comments/:id') @HttpCode(HttpStatus.NO_CONTENT) @ApiOperation({ summary: 'Delete a comment' })
