@@ -39,7 +39,9 @@ const STICKER_PACK = [
   '🕺', '🎶', '🎵', '🎁', '💋', '😘',
   '😭', '🤣', '😅', '🫶', '❤️‍🔥', '💕',
 ];
-const QUICK_REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏'];
+// Reactions use the shared <ReactionPicker /> with the canonical FB-style set.
+import { ReactionPicker, REACTION_EMOJIS } from '@/components/ui/ReactionPicker';
+const QUICK_REACTIONS = REACTION_EMOJIS;
 
 // Public Giphy beta key — fine for dev / preview channel.
 const GIPHY_KEY = process.env['EXPO_PUBLIC_GIPHY_KEY'] ?? 'dc6zaTOxFJmzC';
@@ -319,6 +321,8 @@ export default function MessageThread() {
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [replyTo, setReplyTo] = useState<any>(null);
   const [actionMsg, setActionMsg] = useState<any>(null);
+  const [reactPicker, setReactPicker] = useState<{ msg: any; x: number; y: number } | null>(null);
+  const lastPressPos = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const [gifOpen, setGifOpen] = useState(false);
   const [gifQuery, setGifQuery] = useState('');
   const [gifs, setGifs] = useState<any[]>([]);
@@ -649,6 +653,10 @@ export default function MessageThread() {
   const openMenu = useCallback((msg: any) => {
     if (msg._status === 'sending' || msg._status === 'failed') return;
     fb.tap();
+    // Open BOTH the floating reaction picker (above) and the action sheet (below).
+    // Position picker at the captured press Y so it floats just above the message.
+    const { x, y } = lastPressPos.current;
+    setReactPicker({ msg, x, y });
     setActionMsg(msg);
   }, [fb]);
 
@@ -961,6 +969,7 @@ export default function MessageThread() {
                       {isSticker ? (
                         <Pressable
                           onPress={() => handleBubbleTap(m)}
+                          onPressIn={(e) => { lastPressPos.current = { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY }; }}
                           onLongPress={() => openMenu(m)}
                           delayLongPress={280}
                           style={[styles.stickerWrap, isMe ? { alignItems: 'flex-end' } : { alignItems: 'flex-start' }]}
@@ -984,13 +993,14 @@ export default function MessageThread() {
                       ) : (
                         <Pressable
                           onPress={() => handleBubbleTap(m)}
+                          onPressIn={(e) => { lastPressPos.current = { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY }; }}
                           onLongPress={() => openMenu(m)}
                           delayLongPress={280}
                           style={bubbleStyle}
                         >
                           {m.replyTo && <ReplyQuote q={m.replyTo} isMe={isMe} />}
                           {isImage ? (
-                            <Pressable onPress={() => setLightboxUrl(m.imageUrl)} onLongPress={() => openMenu(m)}>
+                            <Pressable onPress={() => setLightboxUrl(m.imageUrl)} onPressIn={(e) => { lastPressPos.current = { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY }; }} onLongPress={() => openMenu(m)}>
                               <Image
                                 source={{ uri: m.imageUrl }}
                                 style={styles.imageThumb}
@@ -1333,22 +1343,24 @@ export default function MessageThread() {
         </Pressable>
       </Modal>
 
+      {/* Floating reaction picker (above the message) */}
+      <ReactionPicker
+        visible={!!reactPicker}
+        anchorY={reactPicker?.y ?? 0}
+        anchorX={reactPicker?.x || undefined}
+        onSelect={(emoji) => {
+          if (reactPicker) reactToMessage(reactPicker.msg, emoji);
+          setReactPicker(null);
+          setActionMsg(null);
+        }}
+        onClose={() => setReactPicker(null)}
+      />
+
       {/* Long-press action menu */}
       <Modal visible={!!actionMsg} transparent animationType="fade" onRequestClose={() => setActionMsg(null)}>
         <Pressable style={styles.sheetBackdrop} onPress={() => setActionMsg(null)}>
           <Pressable style={[styles.sheet, { paddingBottom: 24 }]}>
             <View style={styles.sheetHandle} />
-            <View style={styles.quickReactions}>
-              {QUICK_REACTIONS.map((emoji) => (
-                <Pressable
-                  key={emoji}
-                  onPress={() => { if (actionMsg) reactToMessage(actionMsg, emoji); setActionMsg(null); }}
-                  style={({ pressed }) => [styles.quickReactionBtn, pressed && { transform: [{ scale: 0.85 }] }]}
-                >
-                  <Text style={styles.quickReactionEmoji}>{emoji}</Text>
-                </Pressable>
-              ))}
-            </View>
             <Pressable style={({ pressed }) => [styles.sheetRow, pressed && { opacity: 0.7 }]} onPress={menuReply}>
               <View style={[styles.sheetIcon, { backgroundColor: Colors.accentPrimary + '14', borderColor: Colors.accentPrimary + '33' }]}>
                 <Feather name="corner-up-left" size={18} color={Colors.accentPrimary} />

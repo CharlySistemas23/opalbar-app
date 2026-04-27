@@ -20,7 +20,9 @@ import { communityApi, messagesApi } from '@/api/client';
 import { useAuthStore } from '@/stores/auth.store';
 import { Colors } from '@/constants/tokens';
 
-const QUICK_REACTIONS = ['❤️', '🔥', '😂', '😮', '😢', '👏'];
+// Use the canonical FB-style reaction set (single source of truth).
+import { REACTION_EMOJIS } from '@/components/ui/ReactionPicker';
+const QUICK_REACTIONS = REACTION_EMOJIS;
 
 // ─────────────────────────────────────────────
 //  Story Viewer — IG-style fullscreen

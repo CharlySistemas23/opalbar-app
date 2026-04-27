@@ -4,6 +4,7 @@ import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import {
   useFonts as useFraunces,
   Fraunces_400Regular,
@@ -182,6 +183,7 @@ export default function RootLayout() {
 
   return (
     <ErrorBoundary>
+      <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider style={{ flex: 1, backgroundColor: '#0F0D0C' }}>
         <StatusBar style="light" />
         <OfflineBanner />
@@ -201,6 +203,7 @@ export default function RootLayout() {
         <NotificationBannerHost />
         <UpdateOverlay />
       </SafeAreaProvider>
+      </GestureHandlerRootView>
     </ErrorBoundary>
   );
 }

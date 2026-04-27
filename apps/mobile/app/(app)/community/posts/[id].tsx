@@ -43,7 +43,9 @@ import { MentionText } from '@/components/MentionText';
 // ─────────────────────────────────────────────
 
 const AVATAR_COLORS = ['#F4A340', '#60A5FA', '#A855F7', '#38C793', '#E45858', '#EC4899'];
-const QUICK_EMOJI = ['❤️', '🙌', '🔥', '👏', '😢', '😮', '😂'];
+// Reactions now use the shared <ReactionPicker /> with the canonical FB-style set.
+import { ReactionPicker, REACTION_EMOJIS } from '@/components/ui/ReactionPicker';
+const QUICK_EMOJI = REACTION_EMOJIS;
 
 function colorFor(id: string) {
   const idx = Math.abs([...id].reduce((a, c) => a + c.charCodeAt(0), 0)) % AVATAR_COLORS.length;
@@ -93,11 +95,19 @@ export default function PostDetail() {
   const [commentSort, setCommentSort] = useState<CommentSort>('recent');
   const [hideThreads, setHideThreads] = useState(false);
   const [collapsedThreads, setCollapsedThreads] = useState<Record<string, boolean>>({});
-  const [reactPickerFor, setReactPickerFor] = useState<string | null>(null);
+  const [reactPickerFor, setReactPickerFor] = useState<{ id: string; y: number; x: number } | null>(null);
   const [editingComment, setEditingComment] = useState<{ id: string } | null>(null);
   const [highlightedCommentId, setHighlightedCommentId] = useState<string | null>(null);
   const [postEmojiReactions, setPostEmojiReactions] = useState<Array<{ emoji: string; count: number; mine: boolean }>>([]);
-  const [postReactPickerOpen, setPostReactPickerOpen] = useState(false);
+  const [postReactPicker, setPostReactPicker] = useState<{ x: number; y: number } | null>(null);
+  const postLikeBtnRef = useRef<View>(null);
+  const postReactPickerOpen = !!postReactPicker;
+  function setPostReactPickerOpen(open: boolean) {
+    if (!open) return setPostReactPicker(null);
+    postLikeBtnRef.current?.measureInWindow((x, y, w) => {
+      setPostReactPicker({ x: x + w / 2, y });
+    });
+  }
   const [showLikeBurst, setShowLikeBurst] = useState(false);
   const lastTap = useRef<number>(0);
   const pendingOpen = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -376,8 +386,8 @@ export default function PostDetail() {
     }
   }
 
-  function openReactionPicker(c: any) {
-    setReactPickerFor(c.id);
+  function openReactionPicker(c: any, anchor?: { x: number; y: number }) {
+    setReactPickerFor({ id: c.id, x: anchor?.x ?? 0, y: anchor?.y ?? 0 });
   }
 
   function onCommentOptions(c: any) {
@@ -609,6 +619,7 @@ export default function PostDetail() {
                 {/* ── Actions Bar (FB 3-column with counters) ──────── */}
                 <View style={styles.actionsBar}>
                   <Pressable
+                    ref={postLikeBtnRef}
                     style={({ pressed }) => [styles.actionCol, pressed && styles.pressed]}
                     onPress={toggleLike}
                     onLongPress={() => setPostReactPickerOpen(true)}
@@ -942,70 +953,23 @@ export default function PostDetail() {
         />
       </SafeAreaView>
 
-      <Modal
+      <ReactionPicker
         visible={postReactPickerOpen}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setPostReactPickerOpen(false)}
-      >
-        <Pressable style={styles.reactPickerBackdrop} onPress={() => setPostReactPickerOpen(false)}>
-          <View style={styles.reactPickerCard}>
-            <Text style={styles.reactPickerTitle}>
-              {t ? 'Reacciona a la publicación' : 'React to the post'}
-            </Text>
-            <View style={styles.reactPickerRow}>
-              {QUICK_EMOJI.map((e) => (
-                <Pressable
-                  key={e}
-                  onPress={() => {
-                    setPostReactPickerOpen(false);
-                    togglePostEmojiReaction(e);
-                  }}
-                  style={({ pressed }) => [
-                    styles.reactPickerEmojiBtn,
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  <Text style={styles.reactPickerEmoji}>{e}</Text>
-                </Pressable>
-              ))}
-            </View>
-          </View>
-        </Pressable>
-      </Modal>
+        anchorY={postReactPicker?.y ?? 0}
+        anchorX={postReactPicker?.x || undefined}
+        onSelect={(emoji) => togglePostEmojiReaction(emoji)}
+        onClose={() => setPostReactPicker(null)}
+      />
 
-      <Modal
+      <ReactionPicker
         visible={!!reactPickerFor}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setReactPickerFor(null)}
-      >
-        <Pressable style={styles.reactPickerBackdrop} onPress={() => setReactPickerFor(null)}>
-          <View style={styles.reactPickerCard}>
-            <Text style={styles.reactPickerTitle}>
-              {t ? 'Elige una reacción' : 'Pick a reaction'}
-            </Text>
-            <View style={styles.reactPickerRow}>
-              {QUICK_EMOJI.map((e) => (
-                <Pressable
-                  key={e}
-                  onPress={() => {
-                    const id = reactPickerFor;
-                    setReactPickerFor(null);
-                    if (id) onReactToComment(id, e);
-                  }}
-                  style={({ pressed }) => [
-                    styles.reactPickerEmojiBtn,
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  <Text style={styles.reactPickerEmoji}>{e}</Text>
-                </Pressable>
-              ))}
-            </View>
-          </View>
-        </Pressable>
-      </Modal>
+        anchorY={reactPickerFor?.y ?? 0}
+        anchorX={reactPickerFor?.x || undefined}
+        onSelect={(emoji) => {
+          if (reactPickerFor) onReactToComment(reactPickerFor.id, emoji);
+        }}
+        onClose={() => setReactPickerFor(null)}
+      />
 
       {post?.imageUrl && (
         <Modal
@@ -1079,7 +1043,7 @@ function CommentBubble({
   onLike: () => void;
   onReply: () => void;
   onOptions: () => void;
-  onOpenReactions?: () => void;
+  onOpenReactions?: (anchor: { x: number; y: number }) => void;
   onReactQuick?: (emoji: string) => void;
   small?: boolean;
   t: boolean;
@@ -1087,6 +1051,14 @@ function CommentBubble({
 }) {
   const [pulse, setPulse] = useState(false);
   const lastTap = useRef(0);
+  const bubbleRef = useRef<View>(null);
+
+  function openReactionsFromBubble() {
+    if (!onOpenReactions) return onOptions();
+    bubbleRef.current?.measureInWindow((x, y, w) => {
+      onOpenReactions({ x: x + w / 2, y });
+    });
+  }
 
   function handleBubbleTap() {
     const now = Date.now();
@@ -1120,8 +1092,9 @@ function CommentBubble({
 
       <View style={styles.bubbleCol}>
         <Pressable
+          ref={bubbleRef}
           onPress={handleBubbleTap}
-          onLongPress={onOpenReactions ?? onOptions}
+          onLongPress={openReactionsFromBubble}
           delayLongPress={320}
           style={({ pressed }) => [
             styles.bubble,
@@ -1207,7 +1180,7 @@ function CommentBubble({
           </Pressable>
           {onOpenReactions && (
             <Pressable
-              onPress={onOpenReactions}
+              onPress={openReactionsFromBubble}
               hitSlop={6}
               style={({ pressed }) => pressed && styles.pressed}
             >
@@ -1249,7 +1222,7 @@ function CommentItem({
   onOptions: (c: any) => void;
   onReply: (c: any) => void;
   onToggleThread: (commentId: string) => void;
-  onOpenReactions: (c: any) => void;
+  onOpenReactions: (c: any, anchor?: { x: number; y: number }) => void;
   onReactQuick: (commentId: string, emoji: string) => void;
   highlightedId?: string | null;
 }) {
@@ -1314,7 +1287,7 @@ function CommentItem({
               onLike={() => onLike(r.id)}
               onReply={() => onReply(r)}
               onOptions={() => onOptions(r)}
-              onOpenReactions={() => onOpenReactions(r)}
+              onOpenReactions={(anchor) => onOpenReactions(r, anchor)}
               onReactQuick={(emoji) => onReactQuick(r.id, emoji)}
               small
               t={t}
@@ -1361,7 +1334,7 @@ function CommentItem({
         onLike={() => onLike(comment.id)}
         onReply={() => onReply(comment)}
         onOptions={() => onOptions(comment)}
-        onOpenReactions={() => onOpenReactions(comment)}
+        onOpenReactions={(anchor) => onOpenReactions(comment, anchor)}
         onReactQuick={(emoji) => onReactQuick(comment.id, emoji)}
         t={t}
         highlighted={highlightedId === comment.id}
