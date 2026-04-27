@@ -1,8 +1,14 @@
-# OPALBAR — Premium Design System
+# OPALBAR — Design System
 
 > Cómo lograr que toda la app se sienta elegante y premium sin tocar 100 archivos.
 
-## Arquitectura (3 capas)
+Este documento fusiona el sistema visual ([PREMIUM](#parte-1--premium-design-system)) y el sistema de iconos ([ICONS](#parte-2--icon-system)).
+
+---
+
+## Parte 1 — Premium Design System
+
+### Arquitectura (3 capas)
 
 ```
 ┌──────────────────────────────────────────────────────────┐
@@ -25,21 +31,21 @@
 **Regla #2 — Nunca usar `<Text>` crudo.** Siempre un primitivo tipográfico.
 **Regla #3 — Nunca usar `<Pressable>` crudo.** Usar `Pressy` (haptic + scale built-in).
 
-## Tipografía
+### Tipografía
 
-Dos familias cargadas en [_layout.tsx](apps/mobile/app/_layout.tsx):
+Dos familias cargadas en [_layout.tsx](../apps/mobile/app/_layout.tsx):
 
 | Familia    | Uso                                  | Primitivos                  |
 |------------|--------------------------------------|-----------------------------|
 | Fraunces   | Display, headlines, titulares serif  | `<Display>`, `<Heading>`    |
 | Inter      | Body, UI text, data, números         | `<Subhead>`, `<Body>`, `<Caption>`, `<Label>` |
 
-### Cuándo usar qué
+#### Cuándo usar qué
 
 ```tsx
 import { Display, Heading, Subhead, Body, Caption, Label } from '@/components/ui';
 
-// Hero (pantalla de bienvenida, números grandes de stats)
+// Hero
 <Display size="xl">OPAL BAR</Display>
 <Display size="lg">1,284</Display>
 
@@ -47,135 +53,95 @@ import { Display, Heading, Subhead, Body, Caption, Label } from '@/components/ui
 <Heading size="lg">Tu perfil</Heading>
 <Heading size="md">Eventos destacados</Heading>
 
-// Título de bloque / fila importante
+// Bloque / fila importante
 <Subhead>Viernes 25 de abril</Subhead>
 
-// Texto del cuerpo
+// Cuerpo
 <Body>Disfruta la noche con amigos en el mejor ambiente.</Body>
 <Body size="lg" weight="semiBold">Título de card</Body>
 
-// Metadata, horarios, detalles secundarios
+// Metadata
 <Caption>hace 3h</Caption>
 <Caption weight="semiBold">12 asistentes</Caption>
 
-// Tags, badges, overlines
+// Tags / badges / overlines
 <Label tone="champagne">VIP</Label>
 <Label>EVENTO EXCLUSIVO</Label>
 ```
 
-### Tone prop (color)
+#### Tone prop
 
-Todos los primitivos aceptan `tone`:
-- `primary` (default) — texto principal
-- `secondary` — texto secundario
-- `muted` — texto terciario / metadata
-- `accent` — naranja `accentPrimary`, CTAs
-- `champagne` — dorado premium, para VIP / loyalty / verified
-- `danger` — rojo, para errores
-- `inverse` — negro sobre fondo claro
+- `primary` (default), `secondary`, `muted`, `accent`, `champagne`, `danger`, `inverse`
 
-## Paleta premium
+### Paleta premium
 
-### Fondos (warm off-black)
+#### Fondos (warm off-black)
 ```ts
 Colors.bgPrimary      // #0F0D0C — base warm
 Colors.bgCard         // #17141A — cards
 Colors.bgElevated     // #1E1A20 — overlays, sheets
-Colors.bgSubtle       // rgba(255,255,255,0.03) — tint sobre bg
+Colors.bgSubtle       // rgba(255,255,255,0.03)
 ```
 
-### Hairlines con alpha (NO gris sólido)
+#### Hairlines con alpha (NO gris sólido)
 ```ts
-Colors.borderSubtle   // rgba(255,255,255,0.04) — casi invisible
-Colors.border         // rgba(255,255,255,0.06) — default
-Colors.borderStrong   // rgba(255,255,255,0.10) — énfasis
-Colors.highlightTop   // rgba(255,255,255,0.04) — simula luz desde arriba en cards
+Colors.borderSubtle   // rgba(255,255,255,0.04)
+Colors.border         // rgba(255,255,255,0.06)
+Colors.borderStrong   // rgba(255,255,255,0.10)
+Colors.highlightTop   // rgba(255,255,255,0.04) — luz desde arriba en cards
 ```
 
-### Acentos
-- `accentPrimary` (naranja `#F4A340`) — CTAs, like activo, estados activos
-- `accentChampagne` (dorado `#D4B88C`) — loyalty, VIP, verified, badges premium
-- `accentSuccess`, `accentDanger`, `accentInfo` — semánticos suavizados
+#### Acentos
+- `accentPrimary` (`#F4A340`) — CTAs, like activo
+- `accentChampagne` (`#D4B88C`) — loyalty, VIP, verified, badges premium
+- `accentSuccess`, `accentDanger`, `accentInfo` — semánticos
 
-## Superficies premium (Card)
+### Superficies (Card)
 
 ```tsx
-import { Card } from '@/components/ui';
-
-// Flat (default) — borde sutil, sin sombra, para contenido plano
-<Card>...</Card>
-
-// Elevated — borde superior iluminado + sombra suave
-// Úsalo en cards flotantes (eventos, ofertas en home)
-<Card variant="elevated">...</Card>
-
-// Glass — fondo elevated con borde subtle, para overlays/sheets
-<Card variant="glass">...</Card>
+<Card>...</Card>                      // Flat: borde sutil, sin sombra
+<Card variant="elevated">...</Card>   // Elevated: borde superior + sombra
+<Card variant="glass">...</Card>      // Glass: fondo elevated + borde subtle
 ```
 
-El borde superior iluminado (`highlightTop`) simula luz desde arriba. Es el detalle que separa UIs dark "planas" de UIs dark "premium".
-
-## Separadores (Hairline)
-
-Reemplaza líneas grises sólidas:
+### Separadores (Hairline)
 
 ```tsx
-import { Hairline } from '@/components/ui';
-
-<Hairline />                       // normal
-<Hairline variant="subtle" />      // casi invisible (entre secciones)
-<Hairline variant="strong" />      // énfasis (antes de CTA principal)
+<Hairline />
+<Hairline variant="subtle" />
+<Hairline variant="strong" />
 <Hairline marginVertical={16} />
 ```
 
-## Loading (Skeleton en lugar de ActivityIndicator)
+### Loading (Skeleton vs ActivityIndicator)
 
 ```tsx
-import { Skeleton, SkeletonList } from '@/components/ui';
-
-// Placeholder individual
 <Skeleton width={120} height={16} />
-
-// Placeholder de lista
 <SkeletonList count={6} itemHeight={72} />
 ```
 
-**Regla**: `ActivityIndicator` solo cuando la carga es <500ms (botones, acciones). Listas siempre con Skeleton.
+`ActivityIndicator` solo cuando la carga es <500ms (botones). Listas siempre con Skeleton.
 
-## Interacciones (Pressy)
+### Interacciones (Pressy)
 
 ```tsx
-import { Pressy } from '@/components/ui';
-
-// Drop-in replacement de Pressable
 <Pressy onPress={handle} haptic="tap">...</Pressy>
 <Pressy onPress={like}  haptic="like">...</Pressy>
 <Pressy onPress={save}  haptic="success">...</Pressy>
 ```
 
-Haptics disponibles (vía `useFeedback`): `tap` · `select` · `success` · `error` · `warning` · `destructive` · `like` · `send`.
+Haptics disponibles: `tap` · `select` · `success` · `error` · `warning` · `destructive` · `like` · `send`.
 
-## Fases de migración
+### Checklist al tocar cualquier pantalla
 
-1. **F1 ✅ (hecha)** — Tokens + fuentes + primitivos.
-2. **F2** — Migrar pantallas top-5 a primitivos (home, profile propio, perfil ajeno, post detail, community).
-3. **F3** — Sustituir `<Pressable>` → `Pressy` en todos los CTAs y rows.
-4. **F4** — Sustituir `<ActivityIndicator>` de listas por `Skeleton`.
-5. **F5** — `expo-blur` en tabbar + modals.
-6. **F6 (opcional)** — Migración Feather → Phosphor Icons.
-
-## Checklist al tocar cualquier pantalla
-
-Al abrir un archivo para editar, revisa:
-
-- [ ] ¿Todos los `<Text>` están migrados a primitivos (`Display`/`Heading`/`Body`/`Caption`/`Label`)?
-- [ ] ¿Los `<Pressable>` son `Pressy` con haptic apropiado?
+- [ ] ¿`<Text>` migrados a primitivos (`Display`/`Heading`/`Body`/`Caption`/`Label`)?
+- [ ] ¿`<Pressable>` son `Pressy` con haptic apropiado?
 - [ ] ¿Las líneas grises son `<Hairline>`?
-- [ ] ¿Los colores vienen de `Colors.*`, nunca hardcode hex?
+- [ ] ¿Colores vienen de `Colors.*`, nunca hex hardcoded?
 - [ ] ¿`ActivityIndicator` solo para acciones cortas, `Skeleton` para listas?
 - [ ] ¿Cards elevadas usan `variant="elevated"`?
 
-## Anti-patrones
+### Anti-patrones
 
 ❌ `<Text style={{ fontSize: 16, fontWeight: '700' }}>…</Text>`
 ✅ `<Body size="lg" weight="bold">…</Body>`
@@ -191,3 +157,69 @@ Al abrir un archivo para editar, revisa:
 
 ❌ `borderColor: '#333'`
 ✅ `borderColor: Colors.border`
+
+---
+
+## Parte 2 — Icon System
+
+### Overview
+OPALBAR usa **Feather Icons** para iconografía consistente. **No emojis en el código**.
+
+### Implementación
+
+#### Mobile (React Native)
+Usa `expo-vector-icons` (Feather nativo):
+
+```tsx
+import { Feather } from '@expo/vector-icons';
+
+<Feather name="award" size={24} color={Colors.accentChampagne} />
+```
+
+#### Admin Web (React)
+Usa `react-feather` o `lucide-react` (drop-in):
+
+```tsx
+import { Award, Shield, Star } from 'react-feather';
+
+<Award size={24} />
+```
+
+#### API/Backend
+Iconos se guardan como string identifiers en DB. El cliente decide la librería para renderizar.
+
+### Catálogo por módulo
+
+#### Loyalty Levels
+- **award** — Bronze
+- **shield** — Silver
+- **star** — Gold
+- **hexagon** — Diamond
+
+#### Event Categories
+- **music** — Live Music
+- **disc** — DJ Set
+- **mic** — Karaoke
+- **wine** — Wine Tasting
+- **help-circle** — Trivia
+- **star** — Special
+
+### Reglas
+
+✅ **DO**: usar nombres oficiales de Feather Icons
+✅ **DO**: guardar nombres como strings en DB
+✅ **DO**: format `[STATUS]` para logging (`[OK]`, `[ERROR]`)
+
+❌ **DON'T**: emojis en código o logs
+❌ **DON'T**: inventar nombres de icono
+❌ **DON'T**: mezclar librerías de iconos en una vista
+
+### Convención de nombres
+- **kebab-case** (e.g., `help-circle`, no `help_circle`)
+- Deben existir en Feather Icons
+- Agregar nuevos vía migrations, no hardcoded en services
+
+### Recursos
+- Feather Icons: https://feathericons.com
+- expo-vector-icons: https://docs.expo.dev/guides/icons/
+- react-feather: https://github.com/feathericons/react-feather

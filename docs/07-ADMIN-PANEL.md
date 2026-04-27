@@ -1,16 +1,17 @@
-# OPALBAR Admin Panel — Plan de implementación
+# OPALBAR Admin Panel
 
-Panel web separado en `apps/admin/` que consume el backend existente (rutas `/admin/*`, `/content-monitor/*`, etc., ya documentadas en el README).
+> **Estado: ✅ ENVIADO A PRODUCCIÓN** (commits `f1dee2d` 2026-04-23 → `1e3a63d` 2026-04-24).
+> Vive en `apps/admin/`, deploy automático en Vercel desde `main`, consume API en Railway vía rewrite.
 
 ---
 
-## Arquitectura propuesta
+## Arquitectura
 
 ```
 apps/
-├── api/            ← backend actual (NestJS) — ya tiene todos los endpoints admin
-├── mobile/         ← app usuario final (Expo)
-└── admin/          ← NUEVO: panel web React + Vite + Tailwind
+├── api/            ← NestJS (Railway) — endpoints admin completos
+├── mobile/         ← Expo (usuario final + admin mobile fallback)
+└── admin/          ← Panel web React + Vite + TanStack Query (Vercel)
 ```
 
 ### Stack
@@ -31,13 +32,17 @@ apps/
 
 Mismo `/auth/login` del backend. Solo usuarios con `role === 'ADMIN'` o `'SUPER_ADMIN'` pueden acceder. El frontend rechaza en la ruta guard.
 
-### Despliegue
+### Despliegue (real)
 
-Vite build → archivos estáticos → servido desde un subdominio `admin.opalbar.com` o `/admin` path detrás de Nginx. Autenticación obligatoria + IP allowlist opcional.
+- **Hosting**: Vercel (Hobby plan)
+- **Auto-deploy**: cada push a `main`
+- **API rewrite**: `/api/*` proxy → `https://opalbar-app-api.up.railway.app/api/v1/*` (configurado en `vercel.json`) para evitar CORS y cookies cross-site
+- **Auth**: login con cuenta `ADMIN`/`SUPER_ADMIN`/`MODERATOR`. JWT + refresh persistido en `localStorage`
+- **IP allowlist**: pendiente (Cloudflare)
 
 ---
 
-## Pantallas requeridas (79 totales según Pencil: 39 ES + 40 EN)
+## Pantallas (79 según Pencil: 39 ES + 40 EN — todas implementadas en `apps/admin/`)
 
 ### 🏠 Dashboard
 - **A01 Dashboard** (`/admin`) — KPI cards + charts (signups 30d, redemptions por día, tickets abiertos, flags pendientes)
@@ -104,41 +109,47 @@ Vite build → archivos estáticos → servido desde un subdominio `admin.opalba
 
 ---
 
-## Orden de implementación recomendado
+## Orden de implementación (HISTÓRICO — ya ejecutado)
 
-### Fase C1 — Infraestructura (1 día)
-- [ ] `npx nx g @nx/react:app admin --bundler=vite --routing=true`
-- [ ] Instalar Tailwind, TanStack Query, Zustand, react-router-dom, recharts, react-hook-form, zod, lucide-react
-- [ ] Copy `apps/mobile/src/api/client.ts` → `apps/admin/src/api/client.ts` (adaptar para localStorage)
-- [ ] Layout: sidebar + topbar + content + auth guard
-- [ ] Login page (`/admin/login`)
+### Fase C1 — Infraestructura (1 día) ✅
 
-### Fase C2 — Core (2 días)
-- [ ] A01 Dashboard (stats cards + charts básicos)
-- [ ] H01–H02 Users (list + detail)
-- [ ] B01–B03 Events (list + crear + detalle)
-- [ ] C01–C03 Offers
-- [ ] E01–E03 Community moderación
+- [x] `npx nx g @nx/react:app admin --bundler=vite --routing=true`
+- [x] Instalar Tailwind, TanStack Query, Zustand, react-router-dom, recharts, react-hook-form, zod, lucide-react
+- [x] Copy `apps/mobile/src/api/client.ts` → `apps/admin/src/api/client.ts` (adaptar para localStorage)
+- [x] Layout: sidebar + topbar + content + auth guard
+- [x] Login page (`/admin/login`)
 
-### Fase C3 — Ops (1.5 días)
-- [ ] D01–D02 Reservations Kanban
-- [ ] G01–G02 Support chat
-- [ ] L01 QR Check-in con `react-qr-reader`
+### Fase C2 — Core (2 días) ✅
 
-### Fase C4 — Growth (1 día)
-- [ ] I01–I02 Push notifications
-- [ ] J01 Analytics básico
-- [ ] H03 GDPR
+- [x] A01 Dashboard (stats cards + charts básicos)
+- [x] H01–H02 Users (list + detail)
+- [x] B01–B03 Events (list + crear + detalle)
+- [x] C01–C03 Offers
+- [x] E01–E03 Community moderación
 
-### Fase C5 — Config (0.5 días)
-- [ ] K01–K05 Config app, levels, rules, staff, permisos
-- [ ] B04 Categorías eventos
+### Fase C3 — Ops (1.5 días) ✅
 
-### Fase C6 — Resto (1 día)
-- [ ] H04–H06 Security + staff management
-- [ ] E04–E06 Cola comentarios/reseñas/reportes
-- [ ] F01–F03 Content monitor detalle
-- [ ] G03 Quick replies
+- [x] D01–D02 Reservations Kanban
+- [x] G01–G02 Support chat
+- [x] L01 QR Check-in con `react-qr-reader`
+
+### Fase C4 — Growth (1 día) ✅
+
+- [x] I01–I02 Push notifications
+- [x] J01 Analytics básico
+- [x] H03 GDPR
+
+### Fase C5 — Config (0.5 días) ✅
+
+- [x] K01–K05 Config app, levels, rules, staff, permisos
+- [x] B04 Categorías eventos
+
+### Fase C6 — Resto (1 día) ✅
+
+- [x] H04–H06 Security + staff management
+- [x] E04–E06 Cola comentarios/reseñas/reportes
+- [x] F01–F03 Content monitor detalle
+- [x] G03 Quick replies
 
 **Total estimado: ~6-7 días de trabajo**
 
@@ -178,12 +189,14 @@ Todos ya implementados en `apps/api/src/modules/admin/` y módulos relacionados.
 
 ## Seguridad
 
-- ✅ JWT guard con role check (`@Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)`) en backend
-- ⚠️ Agregar audit log: cada acción admin graba en `ModerationLog` con userId + action + targetType + targetId
-- ⚠️ 2FA obligatorio para SUPER_ADMIN (OTP email en cada login)
-- ⚠️ Session timeout agresivo (5 min idle → auto logout)
-- ⚠️ IP allowlist a nivel Nginx/CloudFlare (opcional)
-- ⚠️ Todas las actions destructivas (ban, delete) piden confirmación con motivo
+Estado real (2026-04-27):
+
+- ✅ JWT guard con role check (`@Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.MODERATOR)`) en backend
+- 🟡 Audit log: existe `ModerationLog`, pero no todas las acciones admin lo graban consistentemente — **gap a cerrar en Fase 4**
+- ⛔ 2FA obligatorio para SUPER_ADMIN — **pendiente Fase 4**
+- ⛔ Session timeout agresivo idle (5 min) en admin web — **pendiente Fase 4**
+- ⛔ IP allowlist Cloudflare — opcional, no priorizado
+- ✅ Confirmación con motivo en ban/delete (modales custom en admin web)
 
 ---
 
@@ -199,4 +212,4 @@ Todos ya implementados en `apps/api/src/modules/admin/` y módulos relacionados.
 
 ---
 
-*Última actualización: auto-generada*
+*Última actualización: 2026-04-27 — admin panel ya en producción.*
