@@ -32,6 +32,7 @@ import Animated, {
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
+  withDelay,
   withSpring,
   withTiming,
   type SharedValue,
@@ -110,7 +111,7 @@ export function ReactionPicker({
       focusedIdx.value = -1;
       lastFiredIdx.current = -1;
       setShowTip(-1);
-      enter.value = withSpring(1, { damping: 14, stiffness: 220, mass: 0.7 });
+      enter.value = withTiming(1, { duration: 140, easing: Easing.out(Easing.quad) });
       fb.tap();
     } else {
       enter.value = withTiming(0, { duration: 140, easing: Easing.in(Easing.cubic) });
@@ -177,14 +178,13 @@ export function ReactionPicker({
 
   const composed = Gesture.Simultaneous(pan, tap);
 
-  // Container style
+  // Container style — bar fades in fast, emojis cascade from below
   const barStyle = useAnimatedStyle(() => {
     const opacity = enter.value;
-    const scale = interpolate(enter.value, [0, 1], [0.86, 1]);
-    const translateY = interpolate(enter.value, [0, 1], [10, 0]);
+    const translateY = interpolate(enter.value, [0, 1], [8, 0]);
     return {
       opacity,
-      transform: [{ scale }, { translateY }],
+      transform: [{ translateY }],
     };
   });
 
@@ -213,7 +213,7 @@ export function ReactionPicker({
                   key={emoji + i}
                   emoji={emoji}
                   index={i}
-                  enter={enter}
+                  visible={visible}
                   focusedIdx={focusedIdx}
                   isActive={emoji === activeEmoji}
                 />
@@ -246,32 +246,43 @@ export function ReactionPicker({
 interface EmojiCellProps {
   emoji: string;
   index: number;
-  enter: SharedValue<number>;
+  visible: boolean;
   focusedIdx: SharedValue<number>;
   isActive?: boolean;
 }
 
-function EmojiCell({ emoji, index, enter, focusedIdx, isActive }: EmojiCellProps) {
-  const cellStyle = useAnimatedStyle(() => {
-    // Stagger entrance (each emoji 30ms after previous)
-    const delayedEnter = interpolate(
-      enter.value,
-      [0, 0.3 + index * 0.04, 1],
-      [0, 0.4, 1],
-      'clamp',
-    );
-    const baseScale = interpolate(delayedEnter, [0, 1], [0.4, 1]);
-    const opacity = delayedEnter;
+function EmojiCell({ emoji, index, visible, focusedIdx, isActive }: EmojiCellProps) {
+  // Each cell has its own spring → true FB-style cascade with overshoot landing
+  const cellEnter = useSharedValue(0);
 
-    // Focus scale (when finger hovers)
+  useEffect(() => {
+    if (visible) {
+      cellEnter.value = 0;
+      cellEnter.value = withDelay(
+        index * 45,
+        withSpring(1, { damping: 11, stiffness: 220, mass: 0.6 }),
+      );
+    } else {
+      cellEnter.value = withTiming(0, { duration: 120 });
+    }
+  }, [visible, index, cellEnter]);
+
+  const cellStyle = useAnimatedStyle(() => {
+    // Slide UP from below the bar + scale up (FB style)
+    const t = cellEnter.value;
+    const baseScale = interpolate(t, [0, 1], [0.3, 1]);
+    const baseLift = interpolate(t, [0, 1], [28, 0]);
+    const opacity = interpolate(t, [0, 0.6, 1], [0, 1, 1]);
+
+    // Focus scale (when finger hovers) — adds on top of base
     const focused = focusedIdx.value === index ? 1 : 0;
     const focusScale = focused === 1 ? 1.55 : 1;
-    const lift = focused === 1 ? -14 : 0;
+    const focusLift = focused === 1 ? -14 : 0;
 
     return {
       opacity,
       transform: [
-        { translateY: lift },
+        { translateY: baseLift + focusLift },
         { scale: baseScale * focusScale },
       ],
     };
