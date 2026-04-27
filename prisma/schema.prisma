@@ -319,6 +319,7 @@ model User {
   messagesSent     Message[]         @relation("messageSender")
   messageReactions MessageReaction[] @relation("messageReactor")
   commentReactions CommentReaction[] @relation("commentReactor")
+  postEmojiReactions PostEmojiReaction[] @relation("postEmojiReactor")
   savedItems       SavedItem[]
 
   // Friendships (bidirectional)
@@ -671,10 +672,11 @@ model Post {
   updatedAt       DateTime   @updatedAt
   deletedAt       DateTime?
 
-  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  comments  Comment[]
-  reactions Reaction[]
-  reports   Report[]   @relation("postReports")
+  user           User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  comments       Comment[]
+  reactions      Reaction[]
+  emojiReactions PostEmojiReaction[]
+  reports        Report[]            @relation("postReports")
 
   @@index([userId])
   @@index([status])
@@ -799,6 +801,20 @@ model Reaction {
   post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
 
   @@unique([userId, postId])
+  @@index([postId])
+}
+
+model PostEmojiReaction {
+  id        String   @id @default(cuid())
+  postId    String
+  userId    String
+  emoji     String
+  createdAt DateTime @default(now())
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user User @relation("postEmojiReactor", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, userId, emoji])
   @@index([postId])
 }
 

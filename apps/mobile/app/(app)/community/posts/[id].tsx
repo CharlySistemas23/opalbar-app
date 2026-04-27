@@ -96,6 +96,8 @@ export default function PostDetail() {
   const [reactPickerFor, setReactPickerFor] = useState<string | null>(null);
   const [editingComment, setEditingComment] = useState<{ id: string } | null>(null);
   const [highlightedCommentId, setHighlightedCommentId] = useState<string | null>(null);
+  const [postEmojiReactions, setPostEmojiReactions] = useState<Array<{ emoji: string; count: number; mine: boolean }>>([]);
+  const [postReactPickerOpen, setPostReactPickerOpen] = useState(false);
   const [showLikeBurst, setShowLikeBurst] = useState(false);
   const lastTap = useRef<number>(0);
   const pendingOpen = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -131,6 +133,7 @@ export default function PostDetail() {
       setPost(p);
       setLikeCount(p?.likesCount ?? p?._count?.reactions ?? 0);
       setLiked(!!p?.hasReacted);
+      setPostEmojiReactions(Array.isArray(p?.emojiReactions) ? p.emojiReactions : []);
       const c = commentsRes.data?.data;
       setComments(Array.isArray(c) ? c : c?.data ?? []);
     } catch (err) {
@@ -170,6 +173,33 @@ export default function PostDetail() {
     },
     { postId: id },
   );
+
+  async function togglePostEmojiReaction(emoji: string) {
+    if (!isAuthenticated) return router.push('/(auth)/login' as never);
+    setPostEmojiReactions((prev) => {
+      const arr = [...prev];
+      const idx = arr.findIndex((r) => r.emoji === emoji);
+      if (idx >= 0) {
+        const cur = arr[idx];
+        if (cur.mine) {
+          const nextCount = cur.count - 1;
+          if (nextCount <= 0) arr.splice(idx, 1);
+          else arr[idx] = { ...cur, count: nextCount, mine: false };
+        } else {
+          arr[idx] = { ...cur, count: cur.count + 1, mine: true };
+        }
+      } else {
+        arr.push({ emoji, count: 1, mine: true });
+      }
+      return arr;
+    });
+    fb.tap();
+    try {
+      await communityApi.emojiReact(id, emoji);
+    } catch {
+      load();
+    }
+  }
 
   async function toggleLike() {
     if (!isAuthenticated) return router.push('/(auth)/login' as never);
@@ -581,6 +611,8 @@ export default function PostDetail() {
                   <Pressable
                     style={({ pressed }) => [styles.actionCol, pressed && styles.pressed]}
                     onPress={toggleLike}
+                    onLongPress={() => setPostReactPickerOpen(true)}
+                    delayLongPress={280}
                     hitSlop={4}
                   >
                     <Heart
@@ -621,6 +653,41 @@ export default function PostDetail() {
                     />
                   </Pressable>
                 </View>
+
+                {/* ── Post emoji reactions chips ──── */}
+                {postEmojiReactions.length > 0 && (
+                  <View style={styles.postReactionsRow}>
+                    {postEmojiReactions.map((r) => (
+                      <Pressable
+                        key={r.emoji}
+                        onPress={() => togglePostEmojiReaction(r.emoji)}
+                        style={({ pressed }) => [
+                          styles.reactionChip,
+                          r.mine && styles.reactionChipMine,
+                          pressed && styles.pressed,
+                        ]}
+                        hitSlop={4}
+                      >
+                        <Text style={styles.reactionChipEmoji}>{r.emoji}</Text>
+                        <Text
+                          style={[
+                            styles.reactionChipCount,
+                            r.mine && styles.reactionChipCountMine,
+                          ]}
+                        >
+                          {r.count}
+                        </Text>
+                      </Pressable>
+                    ))}
+                    <Pressable
+                      onPress={() => setPostReactPickerOpen(true)}
+                      style={({ pressed }) => [styles.reactionChipAdd, pressed && styles.pressed]}
+                      hitSlop={4}
+                    >
+                      <Feather name="plus" size={12} color={Colors.textSecondary} />
+                    </Pressable>
+                  </View>
+                )}
 
                 {/* ── Empty likes hint (IG) ─────── */}
                 {likeCount === 0 && (
@@ -874,6 +941,38 @@ export default function PostDetail() {
           }}
         />
       </SafeAreaView>
+
+      <Modal
+        visible={postReactPickerOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPostReactPickerOpen(false)}
+      >
+        <Pressable style={styles.reactPickerBackdrop} onPress={() => setPostReactPickerOpen(false)}>
+          <View style={styles.reactPickerCard}>
+            <Text style={styles.reactPickerTitle}>
+              {t ? 'Reacciona a la publicación' : 'React to the post'}
+            </Text>
+            <View style={styles.reactPickerRow}>
+              {QUICK_EMOJI.map((e) => (
+                <Pressable
+                  key={e}
+                  onPress={() => {
+                    setPostReactPickerOpen(false);
+                    togglePostEmojiReaction(e);
+                  }}
+                  style={({ pressed }) => [
+                    styles.reactPickerEmojiBtn,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Text style={styles.reactPickerEmoji}>{e}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        </Pressable>
+      </Modal>
 
       <Modal
         visible={!!reactPickerFor}
@@ -1828,6 +1927,26 @@ const styles = StyleSheet.create({
     zIndex: 2,
   },
   previewImage: { width: '100%', height: '100%' },
+
+  // Post emoji reactions
+  postReactionsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingTop: 6,
+    paddingBottom: 4,
+  },
+  reactionChipAdd: {
+    width: 28,
+    height: 26,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.bgElevated,
+    borderWidth: 1,
+    borderColor: Colors.borderSubtle,
+  },
 
   // Comment reactions
   reactionChipsRow: {

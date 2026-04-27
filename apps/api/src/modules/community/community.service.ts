@@ -31,6 +31,24 @@ const CACHE_TTL_FEED = 20;
 const CACHE_TTL_POST = 30;
 const WALL_MARKER = '__WALL__';
 
+function aggregateEmojiReactions(
+  rows: Array<{ emoji: string; userId: string }> | undefined | null,
+  viewerId?: string,
+): Array<{ emoji: string; count: number; mine: boolean }> {
+  if (!Array.isArray(rows) || rows.length === 0) return [];
+  const out: Array<{ emoji: string; count: number; mine: boolean }> = [];
+  for (const r of rows) {
+    const hit = out.find((x) => x.emoji === r.emoji);
+    if (hit) {
+      hit.count += 1;
+      if (viewerId && r.userId === viewerId) hit.mine = true;
+    } else {
+      out.push({ emoji: r.emoji, count: 1, mine: !!viewerId && r.userId === viewerId });
+    }
+  }
+  return out;
+}
+
 @Injectable()
 export class CommunityService {
   constructor(
@@ -106,6 +124,7 @@ export class CommunityService {
             reactions: currentUserId
               ? { where: { userId: currentUserId }, select: { id: true }, take: 1 }
               : false,
+            emojiReactions: { select: { emoji: true, userId: true } },
           },
           orderBy: [{ isPinned: 'desc' }, { createdAt: 'desc' }],
         }),
@@ -117,6 +136,7 @@ export class CommunityService {
         ...p,
         hasReacted: Array.isArray(p.reactions) && p.reactions.length > 0,
         reactions: undefined,
+        emojiReactions: aggregateEmojiReactions(p.emojiReactions, currentUserId),
       }));
 
       return paginate(decorated, total, page, limit);
@@ -135,12 +155,18 @@ export class CommunityService {
           reactions: currentUserId
             ? { where: { userId: currentUserId }, select: { id: true }, take: 1 }
             : false,
+          emojiReactions: { select: { emoji: true, userId: true } },
         },
       });
       if (!post || post.deletedAt) throw new NotFoundException('Post not found');
       const hasReacted =
         Array.isArray((post as any).reactions) && (post as any).reactions.length > 0;
-      return { ...post, reactions: undefined, hasReacted };
+      return {
+        ...post,
+        reactions: undefined,
+        hasReacted,
+        emojiReactions: aggregateEmojiReactions((post as any).emojiReactions, currentUserId),
+      };
     });
   }
 
@@ -599,6 +625,57 @@ export class CommunityService {
     }
 
     return { reacted: true, type: dto.type };
+  }
+
+  async togglePostEmojiReaction(postId: string, userId: string, emoji: string) {
+    const clean = (emoji ?? '').trim();
+    if (!clean) throw new BadRequestException('Emoji required');
+    const post = await this.prisma.post.findUnique({ where: { id: postId } });
+    if (!post || post.deletedAt) throw new NotFoundException('Post not found');
+
+    const existing = await this.prisma.postEmojiReaction.findUnique({
+      where: { postId_userId_emoji: { postId, userId, emoji: clean } },
+    });
+
+    if (existing) {
+      await this.prisma.postEmojiReaction.delete({ where: { id: existing.id } });
+      await this.invalidatePostCache(postId);
+      this.communityGateway.emitChanged({ type: 'post_reacted', postId });
+      return { reacted: false, emoji: clean };
+    }
+
+    await this.prisma.postEmojiReaction.create({ data: { postId, userId, emoji: clean } });
+    await this.invalidatePostCache(postId);
+    this.communityGateway.emitChanged({ type: 'post_reacted', postId });
+
+    if (post.userId !== userId) {
+      const actor = await this.prisma.userProfile.findUnique({
+        where: { userId },
+        select: { firstName: true, lastName: true, avatarUrl: true },
+      });
+      const actorName =
+        `${actor?.firstName ?? ''} ${actor?.lastName ?? ''}`.trim() || 'Alguien';
+      this.notifications
+        .createNotification({
+          userId: post.userId,
+          type: NotificationType.COMMUNITY_REACTION,
+          title: 'Nueva reacción',
+          titleEn: 'New reaction',
+          body: `${actorName} reaccionó ${clean} a tu publicación.`,
+          bodyEn: `${actorName} reacted ${clean} to your post.`,
+          data: {
+            postId,
+            actorId: userId,
+            actorName,
+            actorAvatarUrl: actor?.avatarUrl ?? null,
+            emoji: clean,
+          },
+          imageUrl: actor?.avatarUrl ?? undefined,
+        })
+        .catch(() => {});
+    }
+
+    return { reacted: true, emoji: clean };
   }
 
   private async invalidatePostCache(_postId: string): Promise<void> {
