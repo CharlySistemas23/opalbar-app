@@ -23,6 +23,7 @@ import { Colors, Radius } from '@/constants/tokens';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { Heart } from '@/components/Heart';
+import { LikeButton } from '@/components/ui/LikeButton';
 import { useFeedback } from '@/hooks/useFeedback';
 import { useCommunityRealtime } from '@/hooks/useCommunityRealtime';
 import { useRealtime } from '@/hooks/useRealtime';
@@ -690,13 +691,16 @@ function PostCard({
         {/* Actions: heart / comment / share — bookmark on right */}
         <View style={styles.actionsBar}>
           <View style={styles.actionsLeft}>
-            <TouchableOpacity style={styles.actionBtn} onPress={onLike} hitSlop={8} activeOpacity={0.6}>
-              <Heart
+            <View style={styles.actionBtn}>
+              <LikeButton
+                liked={!!post.hasReacted}
                 size={24}
-                filled={!!post.hasReacted}
-                color={post.hasReacted ? Colors.accentDanger : Colors.textPrimary}
+                color={Colors.accentDanger}
+                inactiveColor={Colors.textPrimary}
+                showCount={false}
+                onToggle={() => onLike()}
               />
-            </TouchableOpacity>
+            </View>
             <TouchableOpacity style={styles.actionBtn} onPress={onPress} hitSlop={8} activeOpacity={0.6}>
               <Feather name="message-circle" size={24} color={Colors.textPrimary} />
             </TouchableOpacity>

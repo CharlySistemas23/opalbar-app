@@ -1,9 +1,12 @@
 import { Tabs } from 'expo-router';
-import { View, Text, StyleSheet, Pressable } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Animated, { useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
+import { useEffect } from 'react';
 import { Colors } from '@/constants/tokens';
 import { useAppStore } from '@/stores/app.store';
+import { Pressy } from '@/components/ui/Pressy';
 
 type FeatherIcon = React.ComponentProps<typeof Feather>['name'];
 
@@ -44,27 +47,62 @@ function PillTabBar({ state, navigation }: any) {
           };
 
           return (
-            <Pressable
+            <TabItem
               key={route.key}
-              accessibilityRole="button"
-              accessibilityState={focused ? { selected: true } : {}}
+              focused={focused}
+              icon={def.icon}
+              label={def.label[language]}
               onPress={onPress}
-              style={styles.tab}
-            >
-              <Feather
-                name={def.icon}
-                size={focused ? 22 : 20}
-                color={focused ? Colors.accentPrimary : Colors.textMuted}
-              />
-              <Text style={[styles.label, focused && styles.labelActive]}>
-                {def.label[language]}
-              </Text>
-              <View style={[styles.dot, focused && styles.dotActive]} />
-            </Pressable>
+            />
           );
         })}
       </View>
     </SafeAreaView>
+  );
+}
+
+function TabItem({
+  focused,
+  icon,
+  label,
+  onPress,
+}: {
+  focused: boolean;
+  icon: FeatherIcon;
+  label: string;
+  onPress: () => void;
+}) {
+  // Smoothly animate the active indicator + icon size on focus change.
+  const focus = useSharedValue(focused ? 1 : 0);
+  useEffect(() => {
+    focus.value = withSpring(focused ? 1 : 0, { damping: 14, stiffness: 220 });
+  }, [focused, focus]);
+
+  const dotStyle = useAnimatedStyle(() => ({
+    transform: [{ scaleX: 1 + focus.value * 4 }, { scaleY: 1 + focus.value * 0.4 }],
+    opacity: 0.2 + focus.value * 0.8,
+  }));
+  const iconStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: -focus.value * 2 }, { scale: 1 + focus.value * 0.08 }],
+  }));
+
+  return (
+    <Pressy
+      haptic={focused ? 'none' : 'select'}
+      scaleTo={0.92}
+      onPress={onPress}
+      style={styles.tab}
+    >
+      <Animated.View style={iconStyle}>
+        <Feather
+          name={icon}
+          size={focused ? 22 : 20}
+          color={focused ? Colors.accentPrimary : Colors.textMuted}
+        />
+      </Animated.View>
+      <Text style={[styles.label, focused && styles.labelActive]}>{label}</Text>
+      <Animated.View style={[styles.dot, focused && styles.dotActive, dotStyle]} />
+    </Pressy>
   );
 }
 

@@ -13,10 +13,14 @@ export { Hairline } from './Hairline';
 // Interactions
 export { Button } from './Button';
 export { Pressy } from './Pressy';
+export { LikeButton } from './LikeButton';
+export { ReactionPicker, REACTION_EMOJIS } from './ReactionPicker';
+export type { ReactionEmoji } from './ReactionPicker';
 
 // Feedback / state
 export { Skeleton, SkeletonList } from './Skeleton';
 export { FadeIn } from './FadeIn';
+export { Confetti } from './Confetti';
 
 // Data display
 export { Badge } from './Badge';

@@ -8,6 +8,7 @@ import { apiError } from '@/api/errors';
 import { useAppStore } from '@/stores/app.store';
 import { Colors, Radius } from '@/constants/tokens';
 import { useFeedback } from '@/hooks/useFeedback';
+import { Confetti } from '@/components/ui';
 
 const PARTY_SIZES = [1, 2, 3, 4, 5, 6, 7, 8];
 const DEFAULT_TIME_SLOTS = ['18:00', '18:30', '19:00', '19:30', '20:00', '20:30', '21:00', '21:30', '22:00', '22:30', '23:00'];
@@ -80,6 +81,7 @@ export default function NewReservation() {
   const [loading, setLoading] = useState(false);
   const [event, setEvent] = useState<any>(null);
   const [timeSlots, setTimeSlots] = useState<string[]>(DEFAULT_TIME_SLOTS);
+  const [party, setParty] = useState(false);
   // When coming from an event we pre-fill date + time but keep them EDITABLE.
   // Users often want an earlier/later seating; forcing them to back out of the
   // screen to change it was confusing. `dateLocked` is no longer set to true.
@@ -151,11 +153,14 @@ export default function NewReservation() {
         specialRequests: notes.trim() || undefined,
       });
       fb.success();
-      Alert.alert(
-        t ? '¡Reserva creada!' : 'Reservation created!',
-        t ? 'Te esperamos. Revisa tus reservas.' : 'We look forward to seeing you.',
-        [{ text: 'OK', onPress: () => router.replace('/(app)/reservations/my') }],
-      );
+      setParty(true);
+      setTimeout(() => {
+        Alert.alert(
+          t ? '¡Reserva creada!' : 'Reservation created!',
+          t ? 'Te esperamos. Revisa tus reservas.' : 'We look forward to seeing you.',
+          [{ text: 'OK', onPress: () => router.replace('/(app)/reservations/my') }],
+        );
+      }, 350);
     } catch (err: any) {
       fb.error();
       Alert.alert(t ? 'Error' : 'Error', apiError(err));
@@ -168,6 +173,7 @@ export default function NewReservation() {
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
+      <Confetti visible={party} onDone={() => setParty(false)} />
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
