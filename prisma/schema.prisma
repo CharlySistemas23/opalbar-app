@@ -318,6 +318,7 @@ model User {
   threadsB         MessageThread[]   @relation("threadUserB")
   messagesSent     Message[]         @relation("messageSender")
   messageReactions MessageReaction[] @relation("messageReactor")
+  commentReactions CommentReaction[] @relation("commentReactor")
   savedItems       SavedItem[]
 
   // Friendships (bidirectional)
@@ -734,12 +735,13 @@ model Comment {
   updatedAt  DateTime   @updatedAt
   deletedAt  DateTime?
 
-  user    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  post    Post          @relation(fields: [postId], references: [id], onDelete: Cascade)
-  parent  Comment?      @relation("CommentReplies", fields: [parentId], references: [id])
-  replies Comment[]     @relation("CommentReplies")
-  reports Report[]      @relation("commentReports")
-  likes   CommentLike[]
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post      Post              @relation(fields: [postId], references: [id], onDelete: Cascade)
+  parent    Comment?          @relation("CommentReplies", fields: [parentId], references: [id])
+  replies   Comment[]         @relation("CommentReplies")
+  reports   Report[]          @relation("commentReports")
+  likes     CommentLike[]
+  reactions CommentReaction[]
 
   @@index([postId])
   @@index([userId])
@@ -756,6 +758,20 @@ model CommentLike {
   comment Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
 
   @@unique([userId, commentId])
+  @@index([commentId])
+}
+
+model CommentReaction {
+  id        String   @id @default(cuid())
+  commentId String
+  userId    String
+  emoji     String
+  createdAt DateTime @default(now())
+
+  comment Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  user    User    @relation("commentReactor", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([commentId, userId, emoji])
   @@index([commentId])
 }
 

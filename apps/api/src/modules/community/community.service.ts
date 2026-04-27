@@ -247,6 +247,27 @@ export class CommunityService {
       likedSet = new Set(mine.map((m) => m.commentId));
     }
 
+    // Aggregate emoji reactions by comment so the renderer shows chips with
+    // counts + whether the current user already reacted with each emoji.
+    const reactionRows = ids.length
+      ? await this.prisma.commentReaction.findMany({
+          where: { commentId: { in: ids } },
+          select: { commentId: true, emoji: true, userId: true },
+        })
+      : [];
+    const reactionsByComment = new Map<string, Array<{ emoji: string; count: number; mine: boolean }>>();
+    for (const r of reactionRows) {
+      const arr = reactionsByComment.get(r.commentId) ?? [];
+      const hit = arr.find((x) => x.emoji === r.emoji);
+      if (hit) {
+        hit.count += 1;
+        if (currentUserId && r.userId === currentUserId) hit.mine = true;
+      } else {
+        arr.push({ emoji: r.emoji, count: 1, mine: !!currentUserId && r.userId === currentUserId });
+      }
+      reactionsByComment.set(r.commentId, arr);
+    }
+
     // Hydrate resolved mentions per comment so the renderer can map @handle
     // → userId for tappable highlights. One bulk query keeps this cheap.
     const mentionRows = ids.length
@@ -283,6 +304,7 @@ export class CommunityService {
       ...c,
       hasLiked: likedSet.has(c.id),
       mentions: mentionsByComment.get(c.id) ?? [],
+      reactions: reactionsByComment.get(c.id) ?? [],
       replies: [],
     }));
 
@@ -331,6 +353,35 @@ export class CommunityService {
       commentId,
     });
     return { liked: true };
+  }
+
+  async toggleCommentReaction(commentId: string, userId: string, emoji: string) {
+    const clean = (emoji ?? '').trim();
+    if (!clean) throw new NotFoundException('Emoji required');
+    const comment = await this.prisma.comment.findUnique({ where: { id: commentId } });
+    if (!comment || comment.deletedAt) throw new NotFoundException('Comment not found');
+
+    const existing = await this.prisma.commentReaction.findUnique({
+      where: { commentId_userId_emoji: { commentId, userId, emoji: clean } },
+    });
+
+    if (existing) {
+      await this.prisma.commentReaction.delete({ where: { id: existing.id } });
+      this.communityGateway.emitChanged({
+        type: 'comment_reacted',
+        postId: comment.postId,
+        commentId,
+      });
+      return { reacted: false, emoji: clean };
+    }
+
+    await this.prisma.commentReaction.create({ data: { commentId, userId, emoji: clean } });
+    this.communityGateway.emitChanged({
+      type: 'comment_reacted',
+      postId: comment.postId,
+      commentId,
+    });
+    return { reacted: true, emoji: clean };
   }
 
   async createComment(postId: string, userId: string, dto: CreateCommentDto) {

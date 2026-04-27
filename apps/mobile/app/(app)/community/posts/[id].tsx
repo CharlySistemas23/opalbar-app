@@ -93,6 +93,7 @@ export default function PostDetail() {
   const [commentSort, setCommentSort] = useState<CommentSort>('recent');
   const [hideThreads, setHideThreads] = useState(false);
   const [collapsedThreads, setCollapsedThreads] = useState<Record<string, boolean>>({});
+  const [reactPickerFor, setReactPickerFor] = useState<string | null>(null);
   const [showLikeBurst, setShowLikeBurst] = useState(false);
   const lastTap = useRef<number>(0);
   const pendingOpen = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -268,6 +269,45 @@ export default function PostDetail() {
     } catch {
       load();
     }
+  }
+
+  async function onReactToComment(commentId: string, emoji: string) {
+    if (!isAuthenticated) return router.push('/(auth)/login' as never);
+    const toggleReactionInTree = (nodes: any[]): any[] =>
+      nodes.map((n) => {
+        if (n.id === commentId) {
+          const arr: Array<{ emoji: string; count: number; mine: boolean }> = [
+            ...(n.reactions ?? []),
+          ];
+          const idx = arr.findIndex((r) => r.emoji === emoji);
+          if (idx >= 0) {
+            const cur = arr[idx];
+            if (cur.mine) {
+              const nextCount = cur.count - 1;
+              if (nextCount <= 0) arr.splice(idx, 1);
+              else arr[idx] = { ...cur, count: nextCount, mine: false };
+            } else {
+              arr[idx] = { ...cur, count: cur.count + 1, mine: true };
+            }
+          } else {
+            arr.push({ emoji, count: 1, mine: true });
+          }
+          return { ...n, reactions: arr };
+        }
+        return { ...n, replies: toggleReactionInTree(n.replies || []) };
+      });
+
+    setComments((prev) => toggleReactionInTree(prev));
+    fb.tap();
+    try {
+      await communityApi.reactComment(commentId, emoji);
+    } catch {
+      load();
+    }
+  }
+
+  function openReactionPicker(c: any) {
+    setReactPickerFor(c.id);
   }
 
   function onCommentOptions(c: any) {
@@ -634,6 +674,8 @@ export default function PostDetail() {
                 onOptions={onCommentOptions}
                 onReply={startReply}
                 onToggleThread={toggleThread}
+                onOpenReactions={openReactionPicker}
+                onReactQuick={onReactToComment}
               />
             )}
             ListEmptyComponent={
@@ -762,6 +804,39 @@ export default function PostDetail() {
         />
       </SafeAreaView>
 
+      <Modal
+        visible={!!reactPickerFor}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setReactPickerFor(null)}
+      >
+        <Pressable style={styles.reactPickerBackdrop} onPress={() => setReactPickerFor(null)}>
+          <View style={styles.reactPickerCard}>
+            <Text style={styles.reactPickerTitle}>
+              {t ? 'Elige una reacción' : 'Pick a reaction'}
+            </Text>
+            <View style={styles.reactPickerRow}>
+              {QUICK_EMOJI.map((e) => (
+                <Pressable
+                  key={e}
+                  onPress={() => {
+                    const id = reactPickerFor;
+                    setReactPickerFor(null);
+                    if (id) onReactToComment(id, e);
+                  }}
+                  style={({ pressed }) => [
+                    styles.reactPickerEmojiBtn,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Text style={styles.reactPickerEmoji}>{e}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        </Pressable>
+      </Modal>
+
       {post?.imageUrl && (
         <Modal
           visible={previewVisible}
@@ -812,9 +887,12 @@ function CommentBubble({
   likes,
   createdAt,
   mentions,
+  reactions,
   onLike,
   onReply,
   onOptions,
+  onOpenReactions,
+  onReactQuick,
   small,
   t,
 }: {
@@ -825,10 +903,13 @@ function CommentBubble({
   liked: boolean;
   likes: number;
   mentions?: any[] | null;
+  reactions?: Array<{ emoji: string; count: number; mine: boolean }> | null;
   createdAt?: string;
   onLike: () => void;
   onReply: () => void;
   onOptions: () => void;
+  onOpenReactions?: () => void;
+  onReactQuick?: (emoji: string) => void;
   small?: boolean;
   t: boolean;
 }) {
@@ -868,7 +949,7 @@ function CommentBubble({
       <View style={styles.bubbleCol}>
         <Pressable
           onPress={handleBubbleTap}
-          onLongPress={onOptions}
+          onLongPress={onOpenReactions ?? onOptions}
           delayLongPress={320}
           style={({ pressed }) => [
             styles.bubble,
@@ -902,6 +983,33 @@ function CommentBubble({
           )}
         </Pressable>
 
+        {Array.isArray(reactions) && reactions.length > 0 && (
+          <View style={styles.reactionChipsRow}>
+            {reactions.map((r) => (
+              <Pressable
+                key={r.emoji}
+                onPress={() => onReactQuick?.(r.emoji)}
+                style={({ pressed }) => [
+                  styles.reactionChip,
+                  r.mine && styles.reactionChipMine,
+                  pressed && styles.pressed,
+                ]}
+                hitSlop={4}
+              >
+                <Text style={styles.reactionChipEmoji}>{r.emoji}</Text>
+                <Text
+                  style={[
+                    styles.reactionChipCount,
+                    r.mine && styles.reactionChipCountMine,
+                  ]}
+                >
+                  {r.count}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        )}
+
         <View style={styles.commentActions}>
           <Text style={styles.commentTime}>{relTime(createdAt)}</Text>
           <Pressable
@@ -924,6 +1032,17 @@ function CommentBubble({
               {t ? 'Responder' : 'Reply'}
             </Text>
           </Pressable>
+          {onOpenReactions && (
+            <Pressable
+              onPress={onOpenReactions}
+              hitSlop={6}
+              style={({ pressed }) => pressed && styles.pressed}
+            >
+              <Text style={[styles.commentActionLabel, styles.commentActionBold]}>
+                {t ? 'Reaccionar' : 'React'}
+              </Text>
+            </Pressable>
+          )}
         </View>
       </View>
     </View>
@@ -942,6 +1061,8 @@ function CommentItem({
   onOptions,
   onReply,
   onToggleThread,
+  onOpenReactions,
+  onReactQuick,
 }: {
   comment: any;
   t: boolean;
@@ -954,13 +1075,20 @@ function CommentItem({
   onOptions: (c: any) => void;
   onReply: (c: any) => void;
   onToggleThread: (commentId: string) => void;
+  onOpenReactions: (c: any) => void;
+  onReactQuick: (commentId: string, emoji: string) => void;
 }) {
   const user = comment.user;
   const name =
     `${user?.profile?.firstName ?? ''} ${user?.profile?.lastName ?? ''}`.trim() || 'Usuario';
+  const rootFirstName = (user?.profile?.firstName ?? '').trim();
   const likes = comment.likesCount ?? 0;
   const liked = !!comment.hasLiked;
   const hasReplies = (comment.replies || []).length > 0;
+  const [collapsedBranches, setCollapsedBranches] = useState<Record<string, boolean>>({});
+  const onToggleBranch = useCallback((id: string) => {
+    setCollapsedBranches((prev) => ({ ...prev, [id]: !prev[id] }));
+  }, []);
 
   function sortByDateAsc(nodes: any[]) {
     return [...(nodes || [])].sort((a, b) => {
@@ -970,9 +1098,9 @@ function CommentItem({
     });
   }
 
-  function renderReplyTree(nodes: any[], depth: number) {
+  function renderReplyTree(nodes: any[], depth: number, parentName?: string) {
     const ordered = sortByDateAsc(nodes);
-    return ordered.map((r: any) => {
+    return ordered.map((r: any, idx: number) => {
       const rUser = r.user;
       const rName =
         `${rUser?.profile?.firstName ?? ''} ${rUser?.profile?.lastName ?? ''}`.trim() || 'Usuario';
@@ -980,11 +1108,24 @@ function CommentItem({
       const rLiked = !!r.hasLiked;
       const childReplies = sortByDateAsc(r.replies || []);
       const indent = Math.min((depth - 1) * 16, 32);
+      const isLast = idx === ordered.length - 1;
+      const branchCollapsed = !!collapsedBranches[r.id];
+      const childCount = childReplies.length;
+      const showCollapseToggle = childCount >= 3;
 
       return (
         <View key={r.id} style={[styles.replyWrap, { marginLeft: indent }]}>
-          <View style={styles.replyConnector} />
+          <View style={[styles.replyConnector, isLast && styles.replyConnectorLast]} />
           <View style={styles.replyBubbleContainer}>
+            {parentName && (
+              <View style={styles.replyingToTag}>
+                <Feather name="corner-down-right" size={11} color={Colors.textMuted} />
+                <Text style={styles.replyingToText} numberOfLines={1}>
+                  {t ? 'respondiendo a' : 'replying to'}{' '}
+                  <Text style={styles.replyingToName}>@{parentName}</Text>
+                </Text>
+              </View>
+            )}
             <CommentBubble
               user={rUser}
               content={r.content}
@@ -993,14 +1134,37 @@ function CommentItem({
               liked={rLiked}
               likes={rLikes}
               createdAt={r.createdAt}
+              mentions={r.mentions}
+              reactions={r.reactions}
               onLike={() => onLike(r.id)}
               onReply={() => onReply(r)}
               onOptions={() => onOptions(r)}
+              onOpenReactions={() => onOpenReactions(r)}
+              onReactQuick={(emoji) => onReactQuick(r.id, emoji)}
               small
               t={t}
             />
           </View>
-          {childReplies.length > 0 ? renderReplyTree(childReplies, depth + 1) : null}
+          {childCount > 0 && showCollapseToggle ? (
+            <Pressable
+              onPress={() => onToggleBranch(r.id)}
+              style={({ pressed }) => [styles.branchToggle, pressed && styles.pressed]}
+            >
+              <View style={styles.threadLine} />
+              <Text style={styles.threadToggleText}>
+                {branchCollapsed
+                  ? t
+                    ? `Ver ${childCount} respuestas más`
+                    : `Show ${childCount} more replies`
+                  : t
+                    ? 'Ocultar respuestas'
+                    : 'Hide replies'}
+              </Text>
+            </Pressable>
+          ) : null}
+          {childCount > 0 && !branchCollapsed
+            ? renderReplyTree(childReplies, depth + 1, rName.split(' ')[0])
+            : null}
         </View>
       );
     });
@@ -1017,9 +1181,12 @@ function CommentItem({
         likes={likes}
         createdAt={comment.createdAt}
         mentions={comment.mentions}
+        reactions={comment.reactions}
         onLike={() => onLike(comment.id)}
         onReply={() => onReply(comment)}
         onOptions={() => onOptions(comment)}
+        onOpenReactions={() => onOpenReactions(comment)}
+        onReactQuick={(emoji) => onReactQuick(comment.id, emoji)}
         t={t}
       />
 
@@ -1040,7 +1207,9 @@ function CommentItem({
                   : 'Hide replies'}
             </Text>
           </Pressable>
-          {!isThreadCollapsed ? renderReplyTree(comment.replies || [], 1) : null}
+          {!isThreadCollapsed
+            ? renderReplyTree(comment.replies || [], 1, rootFirstName || name.split(' ')[0])
+            : null}
         </>
       ) : null}
     </View>
@@ -1406,10 +1575,37 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 16,
     top: 0,
-    bottom: 24,
+    bottom: 0,
     width: 2,
     backgroundColor: Colors.border,
+  },
+  replyConnectorLast: {
+    bottom: 24,
     borderBottomLeftRadius: 10,
+  },
+  replyingToTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingLeft: 36,
+    paddingBottom: 2,
+    marginTop: -2,
+  },
+  replyingToText: {
+    color: Colors.textMuted,
+    fontSize: 11,
+    fontWeight: '500',
+  },
+  replyingToName: {
+    color: Colors.accentPrimary,
+    fontWeight: '700',
+  },
+  branchToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingLeft: 30,
+    paddingVertical: 6,
   },
   replyBubbleContainer: {
     paddingLeft: 0,
@@ -1543,6 +1739,79 @@ const styles = StyleSheet.create({
     zIndex: 2,
   },
   previewImage: { width: '100%', height: '100%' },
+
+  // Comment reactions
+  reactionChipsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 6,
+    marginLeft: 2,
+  },
+  reactionChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+    backgroundColor: Colors.bgElevated,
+    borderWidth: 1,
+    borderColor: Colors.borderSubtle,
+  },
+  reactionChipMine: {
+    backgroundColor: Colors.accentPrimary + '22',
+    borderColor: Colors.accentPrimary,
+  },
+  reactionChipEmoji: { fontSize: 13 },
+  reactionChipCount: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: Colors.textSecondary,
+  },
+  reactionChipCountMine: { color: Colors.accentPrimary },
+
+  reactPickerBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  reactPickerCard: {
+    backgroundColor: Colors.bgPrimary,
+    borderRadius: 18,
+    paddingVertical: 16,
+    paddingHorizontal: 14,
+    width: '100%',
+    maxWidth: 360,
+    borderWidth: 1,
+    borderColor: Colors.borderSubtle,
+  },
+  reactPickerTitle: {
+    color: Colors.textSecondary,
+    fontSize: 12,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginBottom: 10,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  reactPickerRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  reactPickerEmojiBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.bgElevated,
+  },
+  reactPickerEmoji: { fontSize: 24 },
 
   // Filters dropdown
   filterModalBackdrop: { flex: 1 },

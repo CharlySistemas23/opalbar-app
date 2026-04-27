@@ -305,6 +305,7 @@ export const communityApi = {
   addComment: (postId: string, data: unknown) => apiClient.post(`/community/posts/${postId}/comments`, data),
   deleteComment: (id: string) => apiClient.delete(`/community/comments/${id}`),
   likeComment: (id: string) => apiClient.post(`/community/comments/${id}/like`),
+  reactComment: (id: string, emoji: string) => apiClient.post(`/community/comments/${id}/react`, { emoji }),
   reportComment: (id: string, data: unknown) => apiClient.post(`/community/comments/${id}/report`, data),
   react: (postId: string, type: string) => apiClient.post(`/community/posts/${postId}/react`, { type }),
   // Backend's react endpoint toggles when called with the same type again —

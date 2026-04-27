@@ -63,6 +63,11 @@ export class CommunityController {
     return this.communityService.toggleCommentLike(id, user.id);
   }
 
+  @Post('comments/:id/react') @HttpCode(HttpStatus.OK) @ApiOperation({ summary: 'Toggle emoji reaction on a comment' })
+  reactToComment(@Param('id') id: string, @CurrentUser() user: User, @Body() body: { emoji: string }) {
+    return this.communityService.toggleCommentReaction(id, user.id, body.emoji);
+  }
+
   @Post('posts/:id/react') @HttpCode(HttpStatus.OK) @ApiOperation({ summary: 'React to a post' })
   reactToPost(@Param('id') id: string, @CurrentUser() user: User, @Body() dto: ReactDto) {
     return this.communityService.reactToPost(id, user.id, dto);

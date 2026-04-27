@@ -9,7 +9,8 @@ export type CommunityChangeType =
   | 'post_reacted'
   | 'comment_created'
   | 'comment_deleted'
-  | 'comment_liked';
+  | 'comment_liked'
+  | 'comment_reacted';
 
 @WebSocketGateway({
   namespace: '/community',
