@@ -91,19 +91,49 @@ export function UpdateOverlay() {
   const reloadScheduledRef = useRef(false);
   const [reloadError, setReloadError] = useState<string | null>(null);
 
+  const reloadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const safetyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const cancelReload = () => {
+    if (reloadTimeoutRef.current) clearTimeout(reloadTimeoutRef.current);
+    if (safetyTimeoutRef.current) clearTimeout(safetyTimeoutRef.current);
+    reloadTimeoutRef.current = null;
+    safetyTimeoutRef.current = null;
+    reloadScheduledRef.current = false;
+    setReloading(false);
+    setReloadError(null);
+  };
+
   const triggerReload = (delayMs = 900) => {
+    // In dev / Expo Go reloadAsync is a no-op → would leave the modal stuck.
+    if (__DEV__) {
+      cancelReload();
+      return;
+    }
     if (reloadScheduledRef.current) return;
     reloadScheduledRef.current = true;
     setReloading(true);
     setReloadError(null);
-    setTimeout(() => {
+    reloadTimeoutRef.current = setTimeout(() => {
       Updates.reloadAsync().catch((err: any) => {
         reloadScheduledRef.current = false;
         setReloading(false);
         setReloadError(err?.message ?? 'reload failed');
       });
     }, delayMs);
+    // Safety net: if we're still showing "reloading" 6s after we asked the
+    // bridge to reload, assume something went wrong and let the user dismiss.
+    safetyTimeoutRef.current = setTimeout(() => {
+      setReloadError('Reinicio sin respuesta. Cierra y abre la app manualmente.');
+    }, delayMs + 6000);
   };
+
+  useEffect(() => {
+    return () => {
+      if (reloadTimeoutRef.current) clearTimeout(reloadTimeoutRef.current);
+      if (safetyTimeoutRef.current) clearTimeout(safetyTimeoutRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (isUpdatePending) triggerReload(900);
@@ -165,16 +195,25 @@ export function UpdateOverlay() {
           ) : null}
 
           {ready ? (
-            <Pressable
-              onPress={() => {
-                reloadScheduledRef.current = false;
-                triggerReload(0);
-              }}
-              style={({ pressed }) => [styles.reloadBtn, pressed && { opacity: 0.85 }]}
-            >
-              <Feather name="refresh-cw" size={14} color={Colors.textInverse} />
-              <Text style={styles.reloadBtnText}>{t ? 'Reiniciar ahora' : 'Restart now'}</Text>
-            </Pressable>
+            <View style={styles.actionsRow}>
+              <Pressable
+                onPress={() => {
+                  reloadScheduledRef.current = false;
+                  triggerReload(0);
+                }}
+                style={({ pressed }) => [styles.reloadBtn, pressed && { opacity: 0.85 }]}
+              >
+                <Feather name="refresh-cw" size={14} color={Colors.textInverse} />
+                <Text style={styles.reloadBtnText}>{t ? 'Reiniciar ahora' : 'Restart now'}</Text>
+              </Pressable>
+              <Pressable
+                onPress={cancelReload}
+                style={({ pressed }) => [styles.cancelBtn, pressed && { opacity: 0.7 }]}
+                hitSlop={8}
+              >
+                <Text style={styles.cancelBtnText}>{t ? 'Cerrar' : 'Close'}</Text>
+              </Pressable>
+            </View>
           ) : null}
 
           {reloadError ? (
@@ -305,8 +344,13 @@ const styles = StyleSheet.create({
     fontSize: Typography.fontSize.xs,
     marginTop: Spacing[3],
   },
-  reloadBtn: {
+  actionsRow: {
     marginTop: Spacing[4],
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing[3],
+  },
+  reloadBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing[2],
@@ -317,6 +361,15 @@ const styles = StyleSheet.create({
   },
   reloadBtnText: {
     color: Colors.textInverse,
+    fontFamily: Typography.fontFamily.sansSemiBold,
+    fontSize: Typography.fontSize.sm,
+  },
+  cancelBtn: {
+    paddingHorizontal: Spacing[3],
+    paddingVertical: Spacing[3],
+  },
+  cancelBtnText: {
+    color: Colors.textSecondary,
     fontFamily: Typography.fontFamily.sansSemiBold,
     fontSize: Typography.fontSize.sm,
   },
