@@ -39,8 +39,8 @@ const STICKER_PACK = [
   '🕺', '🎶', '🎵', '🎁', '💋', '😘',
   '😭', '🤣', '😅', '🫶', '❤️‍🔥', '💕',
 ];
-// Reactions use the shared <ReactionPicker /> with the canonical FB-style set.
-import { ReactionPicker, REACTION_EMOJIS } from '@/components/ui/ReactionPicker';
+// Reactions render INLINE inside the long-press action sheet (no second modal).
+import { REACTION_EMOJIS } from '@/components/ui/ReactionPicker';
 const QUICK_REACTIONS = REACTION_EMOJIS;
 
 // Public Giphy beta key — fine for dev / preview channel.
@@ -321,8 +321,6 @@ export default function MessageThread() {
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [replyTo, setReplyTo] = useState<any>(null);
   const [actionMsg, setActionMsg] = useState<any>(null);
-  const [reactPicker, setReactPicker] = useState<{ msg: any; x: number; y: number } | null>(null);
-  const lastPressPos = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const [gifOpen, setGifOpen] = useState(false);
   const [gifQuery, setGifQuery] = useState('');
   const [gifs, setGifs] = useState<any[]>([]);
@@ -653,10 +651,9 @@ export default function MessageThread() {
   const openMenu = useCallback((msg: any) => {
     if (msg._status === 'sending' || msg._status === 'failed') return;
     fb.tap();
-    // Open BOTH the floating reaction picker (above) and the action sheet (below).
-    // Position picker at the captured press Y so it floats just above the message.
-    const { x, y } = lastPressPos.current;
-    setReactPicker({ msg, x, y });
+    // Only open the action sheet — reactions render INSIDE it as the top row.
+    // (Opening a second floating <Modal> for the picker would cover this one,
+    // making both Reply and the picker untouchable.)
     setActionMsg(msg);
   }, [fb]);
 
@@ -969,7 +966,6 @@ export default function MessageThread() {
                       {isSticker ? (
                         <Pressable
                           onPress={() => handleBubbleTap(m)}
-                          onPressIn={(e) => { lastPressPos.current = { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY }; }}
                           onLongPress={() => openMenu(m)}
                           delayLongPress={280}
                           style={[styles.stickerWrap, isMe ? { alignItems: 'flex-end' } : { alignItems: 'flex-start' }]}
@@ -993,14 +989,13 @@ export default function MessageThread() {
                       ) : (
                         <Pressable
                           onPress={() => handleBubbleTap(m)}
-                          onPressIn={(e) => { lastPressPos.current = { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY }; }}
                           onLongPress={() => openMenu(m)}
                           delayLongPress={280}
                           style={bubbleStyle}
                         >
                           {m.replyTo && <ReplyQuote q={m.replyTo} isMe={isMe} />}
                           {isImage ? (
-                            <Pressable onPress={() => setLightboxUrl(m.imageUrl)} onPressIn={(e) => { lastPressPos.current = { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY }; }} onLongPress={() => openMenu(m)}>
+                            <Pressable onPress={() => setLightboxUrl(m.imageUrl)} onLongPress={() => openMenu(m)}>
                               <Image
                                 source={{ uri: m.imageUrl }}
                                 style={styles.imageThumb}
@@ -1343,24 +1338,27 @@ export default function MessageThread() {
         </Pressable>
       </Modal>
 
-      {/* Floating reaction picker (above the message) */}
-      <ReactionPicker
-        visible={!!reactPicker}
-        anchorY={reactPicker?.y ?? 0}
-        anchorX={reactPicker?.x || undefined}
-        onSelect={(emoji) => {
-          if (reactPicker) reactToMessage(reactPicker.msg, emoji);
-          setReactPicker(null);
-          setActionMsg(null);
-        }}
-        onClose={() => setReactPicker(null)}
-      />
-
-      {/* Long-press action menu */}
+      {/* Long-press action menu (reactions row INSIDE so they share the same modal layer) */}
       <Modal visible={!!actionMsg} transparent animationType="fade" onRequestClose={() => setActionMsg(null)}>
         <Pressable style={styles.sheetBackdrop} onPress={() => setActionMsg(null)}>
           <Pressable style={[styles.sheet, { paddingBottom: 24 }]}>
             <View style={styles.sheetHandle} />
+            {/* FB-style inline reactions row */}
+            <View style={styles.reactionsPickerRow}>
+              {REACTION_EMOJIS.map((emoji) => (
+                <Pressable
+                  key={emoji}
+                  onPress={() => {
+                    if (actionMsg) reactToMessage(actionMsg, emoji);
+                    setActionMsg(null);
+                  }}
+                  style={({ pressed }) => [styles.reactionPickerCell, pressed && { transform: [{ scale: 1.25 }] }]}
+                  hitSlop={4}
+                >
+                  <Text style={styles.reactionPickerEmoji} allowFontScaling={false}>{emoji}</Text>
+                </Pressable>
+              ))}
+            </View>
             <Pressable style={({ pressed }) => [styles.sheetRow, pressed && { opacity: 0.7 }]} onPress={menuReply}>
               <View style={[styles.sheetIcon, { backgroundColor: Colors.accentPrimary + '14', borderColor: Colors.accentPrimary + '33' }]}>
                 <Feather name="corner-up-left" size={18} color={Colors.accentPrimary} />
@@ -1749,6 +1747,28 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   sheetRow: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 14 },
+  reactionsPickerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    marginBottom: 12,
+    backgroundColor: Colors.bgElevated,
+    borderRadius: 32,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+  },
+  reactionPickerCell: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  reactionPickerEmoji: {
+    fontSize: 30,
+    lineHeight: 34,
+  },
   sheetIcon: {
     width: 44, height: 44, borderRadius: 22,
     alignItems: 'center', justifyContent: 'center',

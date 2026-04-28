@@ -192,53 +192,54 @@ export function ReactionPicker({
 
   return (
     <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose}>
-        <Animated.View
-          style={[
-            styles.bar,
-            {
-              top: barTop,
-              left: barLeft,
-              width: barWidth,
-              height: BAR_HEIGHT,
-            },
-            barStyle,
-          ]}
-          pointerEvents="box-none"
-        >
-          <GestureDetector gesture={composed}>
-            <View style={styles.inner}>
-              {items.map((emoji, i) => (
-                <EmojiCell
-                  key={emoji + i}
-                  emoji={emoji}
-                  index={i}
-                  visible={visible}
-                  focusedIdx={focusedIdx}
-                  isActive={emoji === activeEmoji}
-                />
-              ))}
-            </View>
-          </GestureDetector>
+      {/* Backdrop is a SIBLING of the bar — not its parent. Otherwise the
+          parent Pressable competes with the bar's GestureDetector for the
+          touch and on Android wins, swallowing emoji taps. */}
+      <Pressable style={[StyleSheet.absoluteFill, styles.backdrop]} onPress={onClose} />
+      <Animated.View
+        style={[
+          styles.bar,
+          {
+            top: barTop,
+            left: barLeft,
+            width: barWidth,
+            height: BAR_HEIGHT,
+          },
+          barStyle,
+        ]}
+      >
+        <GestureDetector gesture={composed}>
+          <View style={styles.inner}>
+            {items.map((emoji, i) => (
+              <EmojiCell
+                key={emoji + i}
+                emoji={emoji}
+                index={i}
+                visible={visible}
+                focusedIdx={focusedIdx}
+                isActive={emoji === activeEmoji}
+              />
+            ))}
+          </View>
+        </GestureDetector>
 
-          {/* Tooltip */}
-          {showTip >= 0 && items[showTip] !== '__more__' && (
-            <View
-              pointerEvents="none"
-              style={[
-                styles.tooltip,
-                {
-                  left: PADDING_H + showTip * (EMOJI_SIZE + EMOJI_GAP) + EMOJI_SIZE / 2 - 50,
-                },
-              ]}
-            >
-              <Text style={styles.tooltipText}>
-                {EMOJI_NAME[items[showTip]] ?? items[showTip]}
-              </Text>
-            </View>
-          )}
-        </Animated.View>
-      </Pressable>
+        {/* Tooltip */}
+        {showTip >= 0 && items[showTip] !== '__more__' && (
+          <View
+            pointerEvents="none"
+            style={[
+              styles.tooltip,
+              {
+                left: PADDING_H + showTip * (EMOJI_SIZE + EMOJI_GAP) + EMOJI_SIZE / 2 - 50,
+              },
+            ]}
+          >
+            <Text style={styles.tooltipText}>
+              {EMOJI_NAME[items[showTip]] ?? items[showTip]}
+            </Text>
+          </View>
+        )}
+      </Animated.View>
     </Modal>
   );
 }
@@ -305,7 +306,6 @@ function EmojiCell({ emoji, index, visible, focusedIdx, isActive }: EmojiCellPro
 
 const styles = StyleSheet.create({
   backdrop: {
-    flex: 1,
     backgroundColor: 'rgba(0,0,0,0.36)',
   },
   bar: {

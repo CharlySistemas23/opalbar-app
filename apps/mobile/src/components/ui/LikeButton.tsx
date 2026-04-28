@@ -18,7 +18,7 @@ import Animated, {
   withTiming,
   type SharedValue,
 } from 'react-native-reanimated';
-import Feather from '@expo/vector-icons/Feather';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { Colors } from '@/constants/tokens';
 import { Pressy } from './Pressy';
 import { useFeedback } from '@/hooks/useFeedback';
@@ -120,13 +120,12 @@ export function LikeButton({
         {Array.from({ length: PARTICLE_COUNT }).map((_, i) => (
           <Particle key={i} index={i} progress={burst} color={color} />
         ))}
-        {/* Heart icon */}
+        {/* Heart icon — Ionicons gives us a real filled variant when liked. */}
         <Animated.View style={heartStyle}>
-          <Feather
-            name="heart"
-            size={size}
+          <Ionicons
+            name={liked ? 'heart' : 'heart-outline'}
+            size={size + 2}
             color={liked ? color : inactiveColor}
-            style={liked ? styles.heartFilled : undefined}
           />
         </Animated.View>
       </View>
@@ -188,10 +187,6 @@ const styles = StyleSheet.create({
     width: 5,
     height: 5,
     borderRadius: 2.5,
-  },
-  heartFilled: {
-    // Feather heart isn't filled by default; the color shift + ring + particles
-    // give the perceived "fill" effect without needing a different icon.
   },
   count: {
     fontSize: 13,
