@@ -23,7 +23,9 @@ import { Colors, Radius } from '@/constants/tokens';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { Heart } from '@/components/Heart';
-import { LikeButton } from '@/components/ui/LikeButton';
+import { ReactionPicker, REACTION_EMOJIS } from '@/components/ui/ReactionPicker';
+import { ReactorsModal } from '@/components/ui/ReactorsModal';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useFeedback } from '@/hooks/useFeedback';
 import { useCommunityRealtime } from '@/hooks/useCommunityRealtime';
 import { useRealtime } from '@/hooks/useRealtime';
@@ -56,6 +58,8 @@ interface CommunityPost {
   likes?: number;
   comments?: number;
   hasReacted?: boolean;
+  emojiReactions?: Array<{ emoji: string; count: number; mine: boolean }>;
+  myEmoji?: string | null;
 }
 
 const AVATAR_COLORS = ['#F4A340', '#60A5FA', '#A855F7', '#38C793', '#E45858', '#EC4899'];
@@ -95,6 +99,8 @@ function adaptPost(row: any, t: boolean): CommunityPost {
     likes: row?.likesCount ?? row?._count?.reactions ?? 0,
     comments: row?.commentsCount ?? row?._count?.comments ?? 0,
     hasReacted: !!row?.hasReacted,
+    emojiReactions: Array.isArray(row?.emojiReactions) ? row.emojiReactions : [],
+    myEmoji: (row?.emojiReactions ?? []).find((r: any) => r?.mine)?.emoji ?? null,
   };
 }
 
@@ -116,6 +122,10 @@ export default function Community() {
   const reqIdRef = useRef(0);
   const fb = useFeedback();
   const POSTS_PAGE = 20;
+
+  // FB-style reactions state — picker anchored to button + reactors sheet
+  const [picker, setPicker] = useState<{ postId: string; x: number; y: number } | null>(null);
+  const [reactorsForPost, setReactorsForPost] = useState<string | null>(null);
 
   // Real stories fetched from backend — shape: { venue, personal }
   const [venueGroup, setVenueGroup] = useState<any | null>(null);
@@ -235,30 +245,70 @@ export default function Community() {
     load('more');
   }, [load]);
 
-  async function toggleLike(post: CommunityPost) {
-    const newHas = !post.hasReacted;
-    if (newHas) fb.like();
-    else fb.tap();
+  async function reactWithEmoji(post: CommunityPost, emoji: string) {
+    // FB-style: each user has at most one emoji per post.
+    //  · Tap the SAME emoji you already have → remove it.
+    //  · Tap a DIFFERENT one → swap (server clears prior, sets new).
+    const previousEmoji = post.myEmoji ?? null;
+    const willRemove = previousEmoji === emoji;
+    const nextEmoji = willRemove ? null : emoji;
+    fb.like();
+
+    const buildNextReactions = (prev: CommunityPost['emojiReactions']) => {
+      const arr = (prev ?? []).map((r) => ({ ...r }));
+      // Remove previous mine entry
+      if (previousEmoji) {
+        const i = arr.findIndex((r) => r.emoji === previousEmoji);
+        if (i >= 0) {
+          arr[i].count = Math.max(0, arr[i].count - 1);
+          arr[i].mine = false;
+          if (arr[i].count <= 0) arr.splice(i, 1);
+        }
+      }
+      // Add new mine entry
+      if (nextEmoji) {
+        const i = arr.findIndex((r) => r.emoji === nextEmoji);
+        if (i >= 0) {
+          arr[i].count += 1;
+          arr[i].mine = true;
+        } else {
+          arr.push({ emoji: nextEmoji, count: 1, mine: true });
+        }
+      }
+      return arr;
+    };
+
     setPosts((prev) =>
       prev.map((p) =>
         p.id === post.id
-          ? { ...p, hasReacted: newHas, likes: (p.likes || 0) + (newHas ? 1 : -1) }
+          ? {
+              ...p,
+              myEmoji: nextEmoji,
+              emojiReactions: buildNextReactions(p.emojiReactions),
+            }
           : p,
       ),
     );
+
     try {
-      if (newHas) await communityApi.react(post.id, 'LIKE');
-      else await communityApi.removeReaction(post.id);
+      // If switching emoji, send new emoji (server clears prior + sets new).
+      // If removing, send same emoji (server toggles off).
+      await communityApi.emojiReact(post.id, emoji);
     } catch {
       fb.error();
+      // Revert
       setPosts((prev) =>
         prev.map((p) =>
-          p.id === post.id
-            ? { ...p, hasReacted: !newHas, likes: (p.likes || 0) + (newHas ? -1 : 1) }
-            : p,
+          p.id === post.id ? post : p,
         ),
       );
     }
+  }
+
+  // Quick toggle: if no current reaction → use ❤️. If has one → remove it.
+  async function quickToggle(post: CommunityPost) {
+    const emoji = post.myEmoji ?? '❤️';
+    return reactWithEmoji(post, emoji);
   }
 
   async function deletePost(post: CommunityPost) {
@@ -463,7 +513,9 @@ export default function Community() {
               t={t}
               onPress={() => router.push(`/(app)/community/posts/${item.id}` as never)}
               onAuthorPress={() => item.author.id && router.push(`/(app)/users/${item.author.id}` as never)}
-              onLike={() => toggleLike(item)}
+              onQuickReact={() => quickToggle(item)}
+              onOpenPicker={(x, y) => setPicker({ postId: item.id, x, y })}
+              onOpenReactors={() => setReactorsForPost(item.id)}
               onOptions={() => openPostOptions(item)}
             />
           )}
@@ -560,6 +612,25 @@ export default function Community() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {/* FB-style reaction picker (anchored to the button that triggered it) */}
+      <ReactionPicker
+        visible={!!picker}
+        anchorY={picker?.y ?? 0}
+        anchorX={picker?.x || undefined}
+        onSelect={(emoji) => {
+          const target = posts.find((p) => p.id === picker?.postId);
+          if (target) reactWithEmoji(target, emoji);
+        }}
+        onClose={() => setPicker(null)}
+      />
+
+      {/* Reactors list ("who reacted") sheet */}
+      <ReactorsModal
+        visible={!!reactorsForPost}
+        postId={reactorsForPost}
+        onClose={() => setReactorsForPost(null)}
+      />
     </SafeAreaView>
   );
 }
@@ -575,14 +646,18 @@ function PostCard({
   t,
   onPress,
   onAuthorPress,
-  onLike,
+  onQuickReact,
+  onOpenPicker,
+  onOpenReactors,
   onOptions,
 }: {
   post: CommunityPost;
   t: boolean;
   onPress: () => void;
   onAuthorPress: () => void;
-  onLike: () => void;
+  onQuickReact: () => void;
+  onOpenPicker: (x: number, y: number) => void;
+  onOpenReactors: () => void;
   onOptions: () => void;
 }) {
   const [previewVisible, setPreviewVisible] = useState(false);
@@ -590,6 +665,7 @@ function PostCard({
   const pendingOpen = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showLikeBurst, setShowLikeBurst] = useState(false);
   const [isSaved, setIsSaved] = useState<boolean>(false);
+  const reactBtnRef = useRef<View>(null);
 
   // Single tap → open preview (delayed 280ms to see if second tap comes).
   // Double tap → like + burst (cancels the pending open).
@@ -601,8 +677,8 @@ function PostCard({
         clearTimeout(pendingOpen.current);
         pendingOpen.current = null;
       }
-      if (!post.hasReacted) {
-        onLike();
+      if (!post.myEmoji) {
+        onQuickReact();
         setShowLikeBurst(true);
         setTimeout(() => setShowLikeBurst(false), 700);
       }
@@ -614,6 +690,17 @@ function PostCard({
         pendingOpen.current = null;
         setPreviewVisible(true);
       }, 280);
+    }
+  };
+
+  const handleLongPressReact = () => {
+    if (reactBtnRef.current) {
+      // Measure absolute position so the picker anchors above the button.
+      reactBtnRef.current.measureInWindow((x, y, width) => {
+        onOpenPicker(x + width / 2, y);
+      });
+    } else {
+      onOpenPicker(0, 0);
     }
   };
 
@@ -688,18 +775,25 @@ function PostCard({
           </Pressable>
         ) : null}
 
-        {/* Actions: heart / comment / share — bookmark on right */}
+        {/* Actions: reaction / comment / share — bookmark on right */}
         <View style={styles.actionsBar}>
           <View style={styles.actionsLeft}>
-            <View style={styles.actionBtn}>
-              <LikeButton
-                liked={!!post.hasReacted}
-                size={24}
-                color={Colors.accentDanger}
-                inactiveColor={Colors.textPrimary}
-                showCount={false}
-                onToggle={() => onLike()}
-              />
+            <View ref={reactBtnRef} collapsable={false} style={styles.actionBtn}>
+              <Pressable
+                onPress={onQuickReact}
+                onLongPress={handleLongPressReact}
+                delayLongPress={220}
+                hitSlop={8}
+                style={({ pressed }) => [styles.reactBtn, pressed && { transform: [{ scale: 0.92 }] }]}
+              >
+                {post.myEmoji ? (
+                  <Text style={styles.reactBtnEmoji} allowFontScaling={false}>
+                    {post.myEmoji}
+                  </Text>
+                ) : (
+                  <Ionicons name="heart-outline" size={26} color={Colors.textPrimary} />
+                )}
+              </Pressable>
             </View>
             <TouchableOpacity style={styles.actionBtn} onPress={onPress} hitSlop={8} activeOpacity={0.6}>
               <Feather name="message-circle" size={24} color={Colors.textPrimary} />
@@ -717,8 +811,26 @@ function PostCard({
           </TouchableOpacity>
         </View>
 
-        {/* Stats line (IG) */}
-        {(post.likes ?? 0) > 0 ? (
+        {/* Stats: emoji summary (FB-style) — tap opens reactors sheet. */}
+        {(post.emojiReactions?.length ?? 0) > 0 ? (
+          <Pressable
+            onPress={onOpenReactors}
+            style={({ pressed }) => [styles.reactionsSummary, pressed && { opacity: 0.7 }]}
+          >
+            <View style={styles.reactionsEmojiStack}>
+              {post.emojiReactions!.slice(0, 3).map((r, i) => (
+                <View key={r.emoji} style={[styles.reactionEmojiBubble, { left: i * 14, zIndex: 3 - i }]}>
+                  <Text style={styles.reactionEmojiBubbleText} allowFontScaling={false}>
+                    {r.emoji}
+                  </Text>
+                </View>
+              ))}
+            </View>
+            <Text style={styles.reactionsCountText}>
+              {post.emojiReactions!.reduce((sum, r) => sum + r.count, 0)}
+            </Text>
+          </Pressable>
+        ) : (post.likes ?? 0) > 0 ? (
           <Text style={styles.statsLine}>
             <Text style={styles.statsBold}>{post.likes}</Text>{' '}
             {post.likes === 1 ? (t ? 'me gusta' : 'like') : t ? 'me gustan' : 'likes'}
@@ -1069,6 +1181,54 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   statsBold: { fontWeight: '700' },
+
+  // FB-style reaction summary chip
+  reactionsSummary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    gap: 4,
+  },
+  reactionsEmojiStack: {
+    flexDirection: 'row',
+    height: 22,
+    minWidth: 22,
+  },
+  reactionEmojiBubble: {
+    position: 'absolute',
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: Colors.bgElevated,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: Colors.bgPrimary,
+  },
+  reactionEmojiBubbleText: {
+    fontSize: 13,
+    lineHeight: 14,
+  },
+  reactionsCountText: {
+    color: Colors.textSecondary,
+    fontSize: 13,
+    fontWeight: '600',
+    fontFamily: 'Inter_600SemiBold',
+    marginLeft: 28,
+  },
+
+  // Reaction button (replaces the heart)
+  reactBtn: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  reactBtnEmoji: {
+    fontSize: 26,
+    lineHeight: 30,
+  },
 
   captionBox: {
     paddingHorizontal: 14,

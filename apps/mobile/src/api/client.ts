@@ -312,6 +312,7 @@ export const communityApi = {
   reportComment: (id: string, data: unknown) => apiClient.post(`/community/comments/${id}/report`, data),
   react: (postId: string, type: string) => apiClient.post(`/community/posts/${postId}/react`, { type }),
   emojiReact: (postId: string, emoji: string) => apiClient.post(`/community/posts/${postId}/emoji-react`, { emoji }),
+  getReactors: (postId: string) => apiClient.get(`/community/posts/${postId}/reactors`),
   // Backend's react endpoint toggles when called with the same type again —
   // sending the same type twice is how we "remove" a reaction.
   removeReaction: (postId: string) => apiClient.post(`/community/posts/${postId}/react`, { type: 'LIKE' }),

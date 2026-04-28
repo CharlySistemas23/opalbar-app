@@ -84,6 +84,11 @@ export class CommunityController {
     return this.communityService.togglePostEmojiReaction(id, user.id, body.emoji);
   }
 
+  @Get('posts/:id/reactors') @Public() @SkipThrottle() @ApiOperation({ summary: 'List users who reacted with emojis to a post' })
+  getPostReactors(@Param('id') id: string) {
+    return this.communityService.getPostReactors(id);
+  }
+
   @Post('posts/:id/report') @HttpCode(HttpStatus.CREATED) @ThrottleWrite() @ApiOperation({ summary: 'Report a post' })
   reportPost(@Param('id') id: string, @CurrentUser() user: User, @Body() dto: CreateReportDto) {
     return this.communityService.reportContent('POST', id, user.id, dto);

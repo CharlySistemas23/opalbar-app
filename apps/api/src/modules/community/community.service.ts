@@ -633,15 +633,25 @@ export class CommunityService {
     const post = await this.prisma.post.findUnique({ where: { id: postId } });
     if (!post || post.deletedAt) throw new NotFoundException('Post not found');
 
-    const existing = await this.prisma.postEmojiReaction.findUnique({
-      where: { postId_userId_emoji: { postId, userId, emoji: clean } },
+    // FB-style: each user has AT MOST one emoji on a post. Tap same → remove.
+    // Tap different → swap.
+    const mine = await this.prisma.postEmojiReaction.findMany({
+      where: { postId, userId },
     });
+    const sameEmoji = mine.find((r) => r.emoji === clean);
 
-    if (existing) {
-      await this.prisma.postEmojiReaction.delete({ where: { id: existing.id } });
+    if (sameEmoji) {
+      await this.prisma.postEmojiReaction.delete({ where: { id: sameEmoji.id } });
       await this.invalidatePostCache(postId);
       this.communityGateway.emitChanged({ type: 'post_reacted', postId });
       return { reacted: false, emoji: clean };
+    }
+
+    // Drop any prior emoji from this user, then add the new one.
+    if (mine.length > 0) {
+      await this.prisma.postEmojiReaction.deleteMany({
+        where: { id: { in: mine.map((r) => r.id) } },
+      });
     }
 
     await this.prisma.postEmojiReaction.create({ data: { postId, userId, emoji: clean } });
@@ -676,6 +686,40 @@ export class CommunityService {
     }
 
     return { reacted: true, emoji: clean };
+  }
+
+  async getPostReactors(postId: string) {
+    const post = await this.prisma.post.findUnique({
+      where: { id: postId },
+      select: { id: true, deletedAt: true },
+    });
+    if (!post || post.deletedAt) throw new NotFoundException('Post not found');
+
+    const rows = await this.prisma.postEmojiReaction.findMany({
+      where: { postId },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        user: {
+          select: {
+            id: true,
+            profile: { select: { firstName: true, lastName: true, avatarUrl: true } },
+          },
+        },
+      },
+    });
+
+    return rows.map((r) => {
+      const first = r.user?.profile?.firstName ?? '';
+      const last = r.user?.profile?.lastName ?? '';
+      const name = `${first} ${last}`.trim() || 'Usuario';
+      return {
+        userId: r.userId,
+        name,
+        avatarUrl: r.user?.profile?.avatarUrl ?? null,
+        emoji: r.emoji,
+        createdAt: r.createdAt,
+      };
+    });
   }
 
   private async invalidatePostCache(_postId: string): Promise<void> {
