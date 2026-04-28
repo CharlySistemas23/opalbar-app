@@ -17,7 +17,7 @@
 //
 //  The picker auto-centers horizontally and clamps within screen edges.
 // ─────────────────────────────────────────────
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Dimensions,
   Modal,
@@ -29,15 +29,12 @@ import {
 import Animated, {
   Easing,
   interpolate,
-  runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withDelay,
   withSpring,
   withTiming,
-  type SharedValue,
 } from 'react-native-reanimated';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Feather from '@expo/vector-icons/Feather';
 import { Colors } from '@/constants/tokens';
 import { useFeedback } from '@/hooks/useFeedback';
@@ -99,18 +96,14 @@ export function ReactionPicker({
   // Place above the anchor with a comfy gap; clamp to top.
   const barTop = Math.max(60, anchorY - BAR_HEIGHT - 16);
 
-  // shared values
-  const enter = useSharedValue(0);            // 0 → 1 entrance
-  const focusedIdx = useSharedValue(-1);      // which emoji is under finger
-  const lastFiredIdx = useRef(-1);
-  const [showTip, setShowTip] = useState<number>(-1);
+  // shared values — only for entrance animation now
+  const enter = useSharedValue(0);
+  const [pressedIdx, setPressedIdx] = useState<number>(-1);
 
   useEffect(() => {
     if (visible) {
       enter.value = 0;
-      focusedIdx.value = -1;
-      lastFiredIdx.current = -1;
-      setShowTip(-1);
+      setPressedIdx(-1);
       enter.value = withTiming(1, { duration: 140, easing: Easing.out(Easing.quad) });
       fb.tap();
     } else {
@@ -119,64 +112,16 @@ export function ReactionPicker({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
-  const fireFocusHaptic = () => fb.select();
-  const fireSelectHaptic = (e: string) => {
-    if (e === '__more__') fb.tap();
-    else fb.like();
-  };
-
-  const handleSelectFromJS = (emoji: string) => {
+  const handleSelect = (emoji: string) => {
     if (emoji === '__more__') {
       onClose();
       requestAnimationFrame(() => onMore?.());
       return;
     }
-    fireSelectHaptic(emoji);
+    fb.like();
     onSelect(emoji);
     onClose();
   };
-
-  // Pan gesture: figure out which emoji index is under the finger.
-  const pan = Gesture.Pan()
-    .activateAfterLongPress(0)
-    .onUpdate((e) => {
-      'worklet';
-      const localX = e.absoluteX - barLeft - PADDING_H;
-      const cell = EMOJI_SIZE + EMOJI_GAP;
-      const idx = Math.floor(localX / cell);
-      const clamped = Math.max(-1, Math.min(items.length - 1, idx));
-      // Only react when finger is roughly inside the bar's vertical band
-      const insideY = e.absoluteY > barTop - 28 && e.absoluteY < barTop + BAR_HEIGHT + 28;
-      const next = insideY ? clamped : -1;
-      if (next !== focusedIdx.value) {
-        focusedIdx.value = next;
-        runOnJS(setShowTip)(next);
-        if (next >= 0) runOnJS(fireFocusHaptic)();
-      }
-    })
-    .onEnd(() => {
-      'worklet';
-      const idx = focusedIdx.value;
-      if (idx >= 0) {
-        runOnJS(handleSelectFromJS)(items[idx]);
-      }
-    });
-
-  // Tap gesture (single quick tap on emoji): also selects.
-  const tap = Gesture.Tap()
-    .maxDuration(280)
-    .onEnd((e) => {
-      'worklet';
-      const localX = e.absoluteX - barLeft - PADDING_H;
-      const cell = EMOJI_SIZE + EMOJI_GAP;
-      const idx = Math.floor(localX / cell);
-      const insideY = e.absoluteY > barTop - 28 && e.absoluteY < barTop + BAR_HEIGHT + 28;
-      if (insideY && idx >= 0 && idx < items.length) {
-        runOnJS(handleSelectFromJS)(items[idx]);
-      }
-    });
-
-  const composed = Gesture.Simultaneous(pan, tap);
 
   // Container style — bar fades in fast, emojis cascade from below
   const barStyle = useAnimatedStyle(() => {
@@ -193,8 +138,7 @@ export function ReactionPicker({
   return (
     <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
       {/* Backdrop is a SIBLING of the bar — not its parent. Otherwise the
-          parent Pressable competes with the bar's GestureDetector for the
-          touch and on Android wins, swallowing emoji taps. */}
+          parent Pressable swallows taps that should reach the emojis. */}
       <Pressable style={[StyleSheet.absoluteFill, styles.backdrop]} onPress={onClose} />
       <Animated.View
         style={[
@@ -208,34 +152,40 @@ export function ReactionPicker({
           barStyle,
         ]}
       >
-        <GestureDetector gesture={composed}>
-          <View style={styles.inner}>
-            {items.map((emoji, i) => (
+        <View style={styles.inner}>
+          {items.map((emoji, i) => (
+            <Pressable
+              key={emoji + i}
+              onPressIn={() => setPressedIdx(i)}
+              onPressOut={() => setPressedIdx((p) => (p === i ? -1 : p))}
+              onPress={() => handleSelect(emoji)}
+              hitSlop={6}
+              style={styles.cellWrap}
+            >
               <EmojiCell
-                key={emoji + i}
                 emoji={emoji}
                 index={i}
                 visible={visible}
-                focusedIdx={focusedIdx}
+                isFocused={pressedIdx === i}
                 isActive={emoji === activeEmoji}
               />
-            ))}
-          </View>
-        </GestureDetector>
+            </Pressable>
+          ))}
+        </View>
 
         {/* Tooltip */}
-        {showTip >= 0 && items[showTip] !== '__more__' && (
+        {pressedIdx >= 0 && items[pressedIdx] !== '__more__' && (
           <View
             pointerEvents="none"
             style={[
               styles.tooltip,
               {
-                left: PADDING_H + showTip * (EMOJI_SIZE + EMOJI_GAP) + EMOJI_SIZE / 2 - 50,
+                left: PADDING_H + pressedIdx * (EMOJI_SIZE + EMOJI_GAP) + EMOJI_SIZE / 2 - 50,
               },
             ]}
           >
             <Text style={styles.tooltipText}>
-              {EMOJI_NAME[items[showTip]] ?? items[showTip]}
+              {EMOJI_NAME[items[pressedIdx]] ?? items[pressedIdx]}
             </Text>
           </View>
         )}
@@ -248,13 +198,14 @@ interface EmojiCellProps {
   emoji: string;
   index: number;
   visible: boolean;
-  focusedIdx: SharedValue<number>;
+  isFocused?: boolean;
   isActive?: boolean;
 }
 
-function EmojiCell({ emoji, index, visible, focusedIdx, isActive }: EmojiCellProps) {
+function EmojiCell({ emoji, index, visible, isFocused, isActive }: EmojiCellProps) {
   // Each cell has its own spring → true FB-style cascade with overshoot landing
   const cellEnter = useSharedValue(0);
+  const focus = useSharedValue(0);
 
   useEffect(() => {
     if (visible) {
@@ -268,6 +219,10 @@ function EmojiCell({ emoji, index, visible, focusedIdx, isActive }: EmojiCellPro
     }
   }, [visible, index, cellEnter]);
 
+  useEffect(() => {
+    focus.value = withSpring(isFocused ? 1 : 0, { damping: 12, stiffness: 260 });
+  }, [isFocused, focus]);
+
   const cellStyle = useAnimatedStyle(() => {
     // Slide UP from below the bar + scale up (FB style)
     const t = cellEnter.value;
@@ -275,10 +230,9 @@ function EmojiCell({ emoji, index, visible, focusedIdx, isActive }: EmojiCellPro
     const baseLift = interpolate(t, [0, 1], [28, 0]);
     const opacity = interpolate(t, [0, 0.6, 1], [0, 1, 1]);
 
-    // Focus scale (when finger hovers) — adds on top of base
-    const focused = focusedIdx.value === index ? 1 : 0;
-    const focusScale = focused === 1 ? 1.55 : 1;
-    const focusLift = focused === 1 ? -14 : 0;
+    // Focus scale (when pressed) — adds on top of base
+    const focusScale = interpolate(focus.value, [0, 1], [1, 1.4]);
+    const focusLift = interpolate(focus.value, [0, 1], [0, -10]);
 
     return {
       opacity,
@@ -329,10 +283,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     height: '100%',
   },
-  cell: {
+  cellWrap: {
     width: EMOJI_SIZE,
     height: EMOJI_SIZE,
     marginRight: EMOJI_GAP,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cell: {
+    width: EMOJI_SIZE,
+    height: EMOJI_SIZE,
     alignItems: 'center',
     justifyContent: 'center',
   },
