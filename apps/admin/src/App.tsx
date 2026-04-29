@@ -20,6 +20,17 @@ import { PushBroadcast } from '@/pages/PushBroadcast';
 import { Analytics } from '@/pages/Analytics';
 import { Venues } from '@/pages/Venues';
 import { Config } from '@/pages/Config';
+import { Activity } from '@/pages/Activity';
+import { Staff } from '@/pages/Staff';
+import { Flags } from '@/pages/Flags';
+import { Gdpr } from '@/pages/Gdpr';
+import { Loyalty } from '@/pages/Loyalty';
+import { Stories } from '@/pages/Stories';
+import { Reviews } from '@/pages/Reviews';
+import { Marketing } from '@/pages/Marketing';
+import { EventCategories } from '@/pages/EventCategories';
+import { ReservationConfig } from '@/pages/ReservationConfig';
+import { QuickReplies } from '@/pages/QuickReplies';
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 15_000, refetchOnWindowFocus: false } },
@@ -68,6 +79,17 @@ export function App() {
             <Route path="admin/users" element={<Users />} />
             <Route path="admin/users/:id" element={<UserDetailRoute />} />
             <Route path="admin/config" element={<Config />} />
+            <Route path="admin/activity" element={<Activity />} />
+            <Route path="admin/staff" element={<Staff />} />
+            <Route path="admin/flags" element={<Flags />} />
+            <Route path="admin/gdpr" element={<Gdpr />} />
+            <Route path="admin/loyalty" element={<Loyalty />} />
+            <Route path="admin/stories" element={<Stories />} />
+            <Route path="admin/reviews" element={<Reviews />} />
+            <Route path="admin/marketing" element={<Marketing />} />
+            <Route path="admin/event-categories" element={<EventCategories />} />
+            <Route path="admin/reservations/config" element={<ReservationConfig />} />
+            <Route path="admin/support/quick-replies" element={<QuickReplies />} />
           </Route>
           <Route path="*" element={<Navigate to="/admin" replace />} />
         </Routes>

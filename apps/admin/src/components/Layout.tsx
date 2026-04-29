@@ -1,25 +1,64 @@
 import { useCallback } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Users, Calendar, Tag, MessageSquare, MessagesSquare, Flag, Inbox, Bell, BarChart3, Settings, Shield, LogOut, Home, MapPin, Clock } from 'lucide-react';
+import { LayoutDashboard, Users, Calendar, Tag, MessageSquare, MessagesSquare, Flag, Inbox, Bell, BarChart3, Settings, Shield, LogOut, Home, MapPin, Clock, Activity as ActivityIcon, UserCog, ToggleLeft, ShieldCheck, Award, Film, Star, Megaphone, Tags } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
 import { useRealtime } from '@/hooks/useRealtime';
 import { useIdleLogout } from '@/hooks/useIdleLogout';
 import clsx from 'clsx';
 
-const NAV = [
-  { to: '/admin', label: 'Dashboard', icon: LayoutDashboard, end: true },
-  { to: '/admin/events', label: 'Eventos', icon: Calendar },
-  { to: '/admin/offers', label: 'Ofertas', icon: Tag },
-  { to: '/admin/reservations', label: 'Reservaciones', icon: Home },
-  { to: '/admin/venues', label: 'Venues', icon: MapPin },
-  { to: '/admin/community', label: 'Moderación', icon: MessageSquare },
-  { to: '/admin/messages', label: 'Mensajes DM', icon: MessagesSquare },
-  { to: '/admin/reports', label: 'Reportes', icon: Flag },
-  { to: '/admin/support', label: 'Soporte', icon: Inbox },
-  { to: '/admin/notifications', label: 'Push', icon: Bell },
-  { to: '/admin/analytics', label: 'Analytics', icon: BarChart3 },
-  { to: '/admin/users', label: 'Usuarios', icon: Users },
-  { to: '/admin/config', label: 'Configuración', icon: Settings },
+type NavItem = { to: string; label: string; icon: any; end?: boolean };
+type NavGroup = { label: string; items: NavItem[] };
+
+const NAV: NavGroup[] = [
+  {
+    label: 'Inicio',
+    items: [
+      { to: '/admin', label: 'Dashboard', icon: LayoutDashboard, end: true },
+      { to: '/admin/analytics', label: 'Analytics', icon: BarChart3 },
+      { to: '/admin/activity', label: 'Actividad', icon: ActivityIcon },
+    ],
+  },
+  {
+    label: 'Operaciones',
+    items: [
+      { to: '/admin/events', label: 'Eventos', icon: Calendar },
+      { to: '/admin/event-categories', label: 'Categorías eventos', icon: Tags },
+      { to: '/admin/offers', label: 'Ofertas', icon: Tag },
+      { to: '/admin/reservations', label: 'Reservaciones', icon: Home },
+      { to: '/admin/reservations/config', label: 'Config reservas', icon: Settings },
+      { to: '/admin/venues', label: 'Venues', icon: MapPin },
+    ],
+  },
+  {
+    label: 'Comunidad',
+    items: [
+      { to: '/admin/community', label: 'Moderación posts', icon: MessageSquare },
+      { to: '/admin/stories', label: 'Historias', icon: Film },
+      { to: '/admin/reviews', label: 'Reseñas', icon: Star },
+      { to: '/admin/messages', label: 'Mensajes DM', icon: MessagesSquare },
+      { to: '/admin/reports', label: 'Reportes', icon: Flag },
+    ],
+  },
+  {
+    label: 'Comunicación',
+    items: [
+      { to: '/admin/notifications', label: 'Push broadcast', icon: Bell },
+      { to: '/admin/marketing', label: 'Marketing', icon: Megaphone },
+      { to: '/admin/support', label: 'Soporte', icon: Inbox },
+      { to: '/admin/support/quick-replies', label: 'Plantillas soporte', icon: MessageSquare },
+    ],
+  },
+  {
+    label: 'Sistema',
+    items: [
+      { to: '/admin/users', label: 'Usuarios', icon: Users },
+      { to: '/admin/staff', label: 'Equipo', icon: UserCog },
+      { to: '/admin/loyalty', label: 'Loyalty', icon: Award },
+      { to: '/admin/flags', label: 'Feature flags', icon: ToggleLeft },
+      { to: '/admin/gdpr', label: 'GDPR', icon: ShieldCheck },
+      { to: '/admin/config', label: 'Configuración', icon: Settings },
+    ],
+  },
 ];
 
 export function Layout() {
@@ -47,24 +86,31 @@ export function Layout() {
           </div>
         </div>
 
-        <nav className="flex-1 p-3 space-y-0.5 overflow-y-auto">
-          {NAV.map((n) => (
-            <NavLink
-              key={n.to}
-              to={n.to}
-              end={n.end}
-              className={({ isActive }) =>
-                clsx(
-                  'flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition',
-                  isActive
-                    ? 'bg-accent/15 text-accent'
-                    : 'text-zinc-400 hover:bg-elevated hover:text-zinc-100',
-                )
-              }
-            >
-              <n.icon size={17} strokeWidth={2} />
-              {n.label}
-            </NavLink>
+        <nav className="flex-1 p-3 space-y-4 overflow-y-auto">
+          {NAV.map((group) => (
+            <div key={group.label} className="space-y-0.5">
+              <p className="px-3 pb-1 text-[10px] font-bold uppercase tracking-wider text-muted">
+                {group.label}
+              </p>
+              {group.items.map((n) => (
+                <NavLink
+                  key={n.to}
+                  to={n.to}
+                  end={n.end}
+                  className={({ isActive }) =>
+                    clsx(
+                      'flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition',
+                      isActive
+                        ? 'bg-accent/15 text-accent'
+                        : 'text-zinc-400 hover:bg-elevated hover:text-zinc-100',
+                    )
+                  }
+                >
+                  <n.icon size={16} strokeWidth={2} />
+                  {n.label}
+                </NavLink>
+              ))}
+            </div>
           ))}
         </nav>
 

@@ -148,6 +148,7 @@ export const adminApi = {
   toggleFlag: (key: string, enabled: boolean) => apiClient.patch(`/admin/flags/${key}`, { enabled }),
 
   // Loyalty
+  loyaltyLevels: () => apiClient.get('/wallet/levels'),
   createLoyaltyLevel: (data: any) => apiClient.post('/admin/loyalty-levels', data),
   updateLoyaltyLevel: (id: string, data: any) => apiClient.patch(`/admin/loyalty-levels/${id}`, data),
   deleteLoyaltyLevel: (id: string) => apiClient.delete(`/admin/loyalty-levels/${id}`),
@@ -158,6 +159,30 @@ export const adminApi = {
     apiClient.patch(`/admin/gdpr/export/${id}`, { action }),
   processDeletion: (id: string, action: 'APPROVE' | 'REJECT') =>
     apiClient.patch(`/admin/gdpr/deletion/${id}`, { action }),
+
+  // Event categories
+  allCategories: () => apiClient.get('/events/categories', { params: { includeArchived: 'true' } }),
+  createCategory: (data: { name: string; nameEn?: string; icon?: string; color?: string }) =>
+    apiClient.post('/events/categories', data),
+  deleteCategory: (id: string, hard = false) =>
+    apiClient.delete(`/events/categories/${id}`, { params: hard ? { hard: 'true' } : {} }),
+  restoreCategory: (id: string) => apiClient.post(`/events/categories/${id}/restore`),
+
+  // Stories moderation (venue + user)
+  listStories: () => apiClient.get('/admin/community/stories'),
+  createVenueStory: (data: { mediaUrl: string; caption?: string }) =>
+    apiClient.post('/admin/community/stories', data),
+  deleteStory: (id: string) => apiClient.delete(`/community/stories/${id}`),
+
+  // Marketing campaigns
+  marketingTemplates: () => apiClient.get('/admin/marketing/templates'),
+  marketingListCampaigns: () => apiClient.get('/admin/marketing/campaigns'),
+  marketingCampaign: (id: string) => apiClient.get(`/admin/marketing/campaigns/${id}`),
+  marketingCreateCampaign: (data: any) => apiClient.post('/admin/marketing/campaigns', data),
+  marketingSendNow: (id: string) => apiClient.post(`/admin/marketing/campaigns/${id}/send`),
+  marketingCancelCampaign: (id: string) => apiClient.patch(`/admin/marketing/campaigns/${id}/cancel`),
+  marketingDeleteCampaign: (id: string) => apiClient.delete(`/admin/marketing/campaigns/${id}`),
+  marketingAudienceCount: (data: any) => apiClient.post('/admin/marketing/audience-count', data),
 };
 
 export const eventsApi = {
