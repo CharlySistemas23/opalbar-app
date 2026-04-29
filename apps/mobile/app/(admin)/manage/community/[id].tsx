@@ -110,6 +110,23 @@ export default function PostModerationDetail() {
               <Text style={styles.rejectLbl}>Fuera tema</Text>
             </TouchableOpacity>
           </View>
+
+          {/* Pin / Unpin */}
+          <TouchableOpacity
+            style={[styles.rejectBtn, { marginTop: 10, flex: 0, alignSelf: 'stretch' }]}
+            onPress={async () => {
+              try {
+                await adminApi.pinPost(id, !post.isPinned);
+                Alert.alert('OK', post.isPinned ? 'Post desfijado' : 'Post fijado en el feed');
+                setPost({ ...post, isPinned: !post.isPinned });
+              } catch (e: any) { Alert.alert('Error', apiError(e)); }
+            }}
+            disabled={busy}
+          >
+            <Text style={[styles.rejectLbl, { color: post.isPinned ? Colors.accentDanger : Colors.accentPrimary }]}>
+              {post.isPinned ? '📌 Desfijar del feed' : '📌 Fijar en el feed'}
+            </Text>
+          </TouchableOpacity>
         </View>
       </ScrollView>
     </SafeAreaView>

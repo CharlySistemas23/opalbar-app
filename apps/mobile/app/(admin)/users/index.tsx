@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, ActivityIndicator, RefreshControl, Image } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, ActivityIndicator, RefreshControl, Image, Modal, Alert, ScrollView } from 'react-native';
 import { useCallback, useMemo, useState } from 'react';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -42,6 +42,33 @@ export default function AdminUsersList() {
   const [filter, setFilter] = useState<Filter>('all');
   const [search, setSearch] = useState('');
 
+  // Crear usuario
+  const [creating, setCreating] = useState(false);
+  const [draft, setDraft] = useState({ email: '', firstName: '', lastName: '', role: 'USER', phone: '' });
+  const [submitting, setSubmitting] = useState(false);
+  const [createdResult, setCreatedResult] = useState<{ email: string; tempPassword: string } | null>(null);
+
+  async function submitCreate() {
+    if (!draft.email.trim()) return;
+    setSubmitting(true);
+    try {
+      const r = await adminApi.createUserManually({
+        email: draft.email.trim(),
+        firstName: draft.firstName.trim() || undefined,
+        lastName: draft.lastName.trim() || undefined,
+        role: draft.role,
+        phone: draft.phone.trim() || undefined,
+      });
+      const data = r.data?.data ?? r.data ?? {};
+      setCreating(false);
+      setDraft({ email: '', firstName: '', lastName: '', role: 'USER', phone: '' });
+      setCreatedResult({ email: data.user?.email ?? draft.email, tempPassword: data.tempPassword ?? '—' });
+      load();
+    } catch (e: any) {
+      Alert.alert('Error', e?.response?.data?.message ?? e?.message ?? 'No se pudo crear');
+    } finally { setSubmitting(false); }
+  }
+
   const load = useCallback(async () => {
     try {
       const r = await adminApi.users({ limit: 100 });
@@ -71,6 +98,13 @@ export default function AdminUsersList() {
         <View style={styles.logo}><Feather name="users" size={16} color={Colors.accentPrimary} /></View>
         <Text style={styles.title}>Usuarios</Text>
         <View style={{ flex: 1 }} />
+        <TouchableOpacity
+          style={styles.headerBtn}
+          activeOpacity={0.85}
+          onPress={() => setCreating(true)}
+        >
+          <Feather name="user-plus" size={14} color={Colors.accentPrimary} />
+        </TouchableOpacity>
         <TouchableOpacity
           style={styles.insightsBtn}
           activeOpacity={0.85}
@@ -227,7 +261,92 @@ export default function AdminUsersList() {
           }}
         />
       )}
+
+      {/* Modal: Nuevo usuario */}
+      <Modal visible={creating} transparent animationType="slide" onRequestClose={() => setCreating(false)}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalSheet}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Nuevo usuario</Text>
+              <TouchableOpacity onPress={() => setCreating(false)} hitSlop={10}>
+                <Feather name="x" size={20} color={Colors.textPrimary} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView keyboardShouldPersistTaps="handled" style={{ maxHeight: 480 }}>
+              <FieldRow label="Email" value={draft.email} onChangeText={(v: string) => setDraft({ ...draft, email: v })} placeholder="user@gmail.com" />
+              <FieldRow label="Nombre" value={draft.firstName} onChangeText={(v: string) => setDraft({ ...draft, firstName: v })} />
+              <FieldRow label="Apellido" value={draft.lastName} onChangeText={(v: string) => setDraft({ ...draft, lastName: v })} />
+              <FieldRow label="Teléfono" value={draft.phone} onChangeText={(v: string) => setDraft({ ...draft, phone: v })} />
+              <Text style={styles.fieldLabel}>Rol</Text>
+              <View style={styles.rolePicker}>
+                {(['USER', 'MODERATOR', 'ADMIN', 'SUPER_ADMIN'] as const).map((r) => (
+                  <TouchableOpacity
+                    key={r}
+                    onPress={() => setDraft({ ...draft, role: r })}
+                    style={[styles.roleChip, draft.role === r && styles.roleChipActive]}
+                  >
+                    <Text style={[styles.roleChipLbl, draft.role === r && styles.roleChipLblActive]}>{r}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <Text style={styles.modalHint}>Se generará una contraseña temporal que tenés que comunicarle al usuario.</Text>
+            </ScrollView>
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={[styles.modalBtn, styles.modalBtnGhost]} onPress={() => setCreating(false)}>
+                <Text style={styles.modalBtnGhostLbl}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalBtn, styles.modalBtnPrimary, (!draft.email.trim() || submitting) && { opacity: 0.5 }]}
+                onPress={submitCreate}
+                disabled={!draft.email.trim() || submitting}
+              >
+                <Text style={styles.modalBtnPrimaryLbl}>{submitting ? 'Creando…' : 'Crear'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal: Resultado con contraseña temporal */}
+      <Modal visible={!!createdResult} transparent animationType="fade" onRequestClose={() => setCreatedResult(null)}>
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.modalSheet, { padding: 24 }]}>
+            <Text style={styles.modalTitle}>✅ Usuario creado</Text>
+            <Text style={[styles.modalHint, { marginTop: 12 }]}>Comunicale estos datos:</Text>
+            <View style={styles.tempBox}>
+              <Text style={styles.tempLbl}>Email</Text>
+              <Text style={styles.tempVal} selectable>{createdResult?.email}</Text>
+            </View>
+            <View style={[styles.tempBox, { borderColor: Colors.accentPrimary + '60' }]}>
+              <Text style={styles.tempLbl}>Contraseña temporal</Text>
+              <Text style={styles.tempVal} selectable>{createdResult?.tempPassword}</Text>
+            </View>
+            <Text style={[styles.modalHint, { marginTop: 12, textAlign: 'center' }]}>
+              ⓘ Mantené presionado el campo arriba para seleccionar y copiar.
+            </Text>
+            <TouchableOpacity
+              style={[styles.modalBtn, styles.modalBtnGhost, { marginTop: 8 }]}
+              onPress={() => setCreatedResult(null)}
+            >
+              <Text style={styles.modalBtnGhostLbl}>Listo</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
+  );
+}
+
+function FieldRow({ label, ...rest }: any) {
+  return (
+    <View style={{ marginBottom: 12 }}>
+      <Text style={styles.fieldLabel}>{label}</Text>
+      <TextInput
+        {...rest}
+        placeholderTextColor={Colors.textMuted}
+        style={styles.fieldInput}
+      />
+    </View>
   );
 }
 
@@ -353,4 +472,73 @@ const styles = StyleSheet.create({
 
   empty: { alignItems: 'center', paddingTop: 60, gap: 10 },
   emptyText: { color: Colors.textMuted, fontSize: 13 },
+
+  headerBtn: {
+    width: 32, height: 32, borderRadius: 10,
+    backgroundColor: 'rgba(244,163,64,0.10)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(244,163,64,0.45)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+
+  // Modal genérico
+  modalBackdrop: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'flex-end',
+  },
+  modalSheet: {
+    backgroundColor: Colors.bgElevated,
+    borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    padding: 20,
+    maxHeight: '90%',
+  },
+  modalHeader: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    marginBottom: 16,
+  },
+  modalTitle: { color: Colors.textPrimary, fontSize: 17, fontWeight: '700', fontFamily: 'Inter_700Bold' },
+  modalHint: { color: Colors.textMuted, fontSize: 12, marginTop: 8, lineHeight: 17 },
+  modalActions: { flexDirection: 'row', gap: 10, marginTop: 16, paddingTop: 16, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: Colors.border },
+  modalBtn: {
+    flex: 1, paddingVertical: 12, borderRadius: 12,
+    alignItems: 'center', justifyContent: 'center', flexDirection: 'row',
+  },
+  modalBtnGhost: { backgroundColor: Colors.bgCard, borderWidth: 1, borderColor: Colors.borderStrong },
+  modalBtnGhostLbl: { color: Colors.textPrimary, fontSize: 14, fontWeight: '700' },
+  modalBtnPrimary: { backgroundColor: Colors.accentPrimary },
+  modalBtnPrimaryLbl: { color: '#000', fontSize: 14, fontWeight: '700' },
+
+  fieldLabel: {
+    color: Colors.textMuted, fontSize: 11, fontWeight: '700',
+    textTransform: 'uppercase', letterSpacing: 0.5,
+    marginBottom: 6,
+  },
+  fieldInput: {
+    backgroundColor: Colors.bgCard,
+    borderWidth: 1, borderColor: Colors.borderStrong,
+    borderRadius: 12,
+    paddingHorizontal: 12, paddingVertical: 10,
+    color: Colors.textPrimary, fontSize: 14,
+  },
+
+  rolePicker: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 12 },
+  roleChip: {
+    paddingHorizontal: 12, paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: Colors.bgCard,
+    borderWidth: 1, borderColor: Colors.borderStrong,
+  },
+  roleChipActive: { backgroundColor: Colors.accentPrimary, borderColor: Colors.accentPrimary },
+  roleChipLbl: { color: Colors.textSecondary, fontSize: 11, fontWeight: '700' },
+  roleChipLblActive: { color: '#000' },
+
+  tempBox: {
+    backgroundColor: Colors.bgCard,
+    borderWidth: 1, borderColor: Colors.borderStrong,
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 8,
+  },
+  tempLbl: { color: Colors.textMuted, fontSize: 10, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
+  tempVal: { color: Colors.textPrimary, fontSize: 15, fontWeight: '700', marginTop: 4, fontFamily: 'JetBrainsMono_400Regular' },
 });

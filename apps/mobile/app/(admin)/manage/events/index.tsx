@@ -54,6 +54,26 @@ export default function AdminEventsList() {
     );
   }
 
+  function confirmDuplicate(id: string, title: string) {
+    Alert.alert(
+      'Duplicar evento',
+      `¿Crear una copia de "${title}"? Quedará en DRAFT con título "(copia)" y capacidad reseteada.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Duplicar', onPress: async () => {
+            try {
+              const r = await adminApi.duplicateEvent(id);
+              const created = r.data?.data ?? r.data ?? {};
+              load();
+              if (created.id) router.push(`/(admin)/manage/events/${created.id}` as never);
+            } catch (err) { Alert.alert('Error', apiError(err)); }
+          }
+        }
+      ]
+    );
+  }
+
   const shown = useMemo(() => {
     let list = events;
     if (filter !== 'all') list = list.filter((e) => e.status === filter);
@@ -145,6 +165,14 @@ export default function AdminEventsList() {
                 >
                   <Feather name="edit-2" size={13} color={Colors.accentPrimary} />
                   <Text style={styles.editLbl}>Editar</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.editBtn}
+                  onPress={() => confirmDuplicate(item.id, item.title)}
+                  activeOpacity={0.85}
+                >
+                  <Feather name="copy" size={13} color={Colors.accentPrimary} />
+                  <Text style={styles.editLbl}>Duplicar</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.deleteBtn}

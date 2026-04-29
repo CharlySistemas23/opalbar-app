@@ -1,11 +1,12 @@
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, RefreshControl } from 'react-native';
-import { useCallback, useMemo, useState } from 'react';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, RefreshControl, Modal, TextInput, ScrollView, Alert } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
-import { adminApi } from '@/api/client';
+import { adminApi, venueApi } from '@/api/client';
 import { useSafeBack } from '@/hooks/useSafeBack';
 import { Colors } from '@/constants/tokens';
+import { UserPicker, type PickedUser } from '@/components/admin/UserPicker';
 
 type Filter = 'all' | 'PENDING' | 'CONFIRMED' | 'SEATED' | 'COMPLETED' | 'CANCELLED';
 
@@ -24,6 +25,48 @@ export default function AdminReservationsList() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState<Filter>('all');
+
+  // Crear reserva manual
+  const [creating, setCreating] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [picked, setPicked] = useState<PickedUser | null>(null);
+  const [venues, setVenues] = useState<any[]>([]);
+  const [draft, setDraft] = useState({ venueId: '', date: '', timeSlot: '20:00', partySize: '2', notes: '' });
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (creating && venues.length === 0) {
+      venueApi.list({ limit: 50 }).then((r) => {
+        const list = r.data?.data?.data ?? r.data?.data ?? r.data ?? [];
+        setVenues(Array.isArray(list) ? list : []);
+        if (list.length && !draft.venueId) setDraft((d) => ({ ...d, venueId: list[0].id }));
+      }).catch(() => {});
+    }
+  }, [creating]);
+
+  async function submitReservation() {
+    if (!picked || !draft.venueId || !draft.date || !draft.timeSlot || !draft.partySize) {
+      Alert.alert('Faltan datos', 'Cliente, venue, fecha, hora y personas son requeridos.');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await adminApi.createReservation({
+        userId: picked.id,
+        venueId: draft.venueId,
+        date: draft.date,
+        timeSlot: draft.timeSlot,
+        partySize: Number(draft.partySize),
+        notes: draft.notes.trim() || undefined,
+      });
+      setCreating(false); setPicked(null);
+      setDraft({ venueId: venues[0]?.id ?? '', date: '', timeSlot: '20:00', partySize: '2', notes: '' });
+      load();
+      Alert.alert('Reserva creada', 'Quedó CONFIRMADA. El cliente fue notificado.');
+    } catch (e: any) {
+      Alert.alert('Error', e?.response?.data?.message ?? 'No se pudo crear');
+    } finally { setSubmitting(false); }
+  }
 
   const load = useCallback(async () => {
     try {
@@ -54,6 +97,13 @@ export default function AdminReservationsList() {
           <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.title}>Reservaciones</Text>
+        <TouchableOpacity
+          style={styles.configBtn}
+          onPress={() => setCreating(true)}
+          hitSlop={10}
+        >
+          <Feather name="plus" size={20} color={Colors.accentPrimary} />
+        </TouchableOpacity>
         <TouchableOpacity
           style={styles.configBtn}
           onPress={() => router.push('/(admin)/manage/reservations/config' as never)}
@@ -128,6 +178,118 @@ export default function AdminReservationsList() {
           }}
         />
       )}
+
+      {/* Modal: Nueva reserva manual */}
+      <Modal visible={creating} transparent animationType="slide" onRequestClose={() => setCreating(false)}>
+        <View style={mStyles.backdrop}>
+          <View style={mStyles.sheet}>
+            <View style={mStyles.header}>
+              <Text style={mStyles.title}>Nueva reserva manual</Text>
+              <TouchableOpacity onPress={() => setCreating(false)} hitSlop={10}>
+                <Feather name="x" size={20} color={Colors.textPrimary} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView keyboardShouldPersistTaps="handled" style={{ maxHeight: 480 }}>
+              {/* Cliente */}
+              <Text style={mStyles.lbl}>Cliente</Text>
+              {picked ? (
+                <TouchableOpacity onPress={() => setPickerOpen(true)} style={mStyles.pickedRow}>
+                  <Feather name="user" size={14} color={Colors.accentSuccess} />
+                  <Text style={mStyles.pickedTxt} numberOfLines={1}>
+                    {`${picked.profile?.firstName ?? ''} ${picked.profile?.lastName ?? ''}`.trim() || picked.email}
+                  </Text>
+                  <Text style={mStyles.changeTxt}>cambiar</Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity onPress={() => setPickerOpen(true)} style={mStyles.pickerBtn}>
+                  <Feather name="search" size={14} color={Colors.textMuted} />
+                  <Text style={mStyles.pickerBtnTxt}>Buscar usuario…</Text>
+                </TouchableOpacity>
+              )}
+
+              {/* Venue */}
+              <Text style={[mStyles.lbl, { marginTop: 14 }]}>Venue</Text>
+              <View style={mStyles.chipRow}>
+                {venues.map((v) => (
+                  <TouchableOpacity
+                    key={v.id}
+                    onPress={() => setDraft({ ...draft, venueId: v.id })}
+                    style={[mStyles.chip, draft.venueId === v.id && mStyles.chipActive]}
+                  >
+                    <Text style={[mStyles.chipTxt, draft.venueId === v.id && mStyles.chipTxtActive]}>{v.name}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              {/* Fecha */}
+              <Text style={[mStyles.lbl, { marginTop: 14 }]}>Fecha (YYYY-MM-DD)</Text>
+              <TextInput
+                value={draft.date}
+                onChangeText={(v) => setDraft({ ...draft, date: v })}
+                placeholder="2026-05-15"
+                placeholderTextColor={Colors.textMuted}
+                style={mStyles.input}
+              />
+
+              {/* Hora + personas */}
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[mStyles.lbl, { marginTop: 14 }]}>Hora</Text>
+                  <TextInput
+                    value={draft.timeSlot}
+                    onChangeText={(v) => setDraft({ ...draft, timeSlot: v })}
+                    placeholder="20:00"
+                    placeholderTextColor={Colors.textMuted}
+                    style={mStyles.input}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[mStyles.lbl, { marginTop: 14 }]}>Personas</Text>
+                  <TextInput
+                    value={draft.partySize}
+                    onChangeText={(v) => setDraft({ ...draft, partySize: v.replace(/[^0-9]/g, '') })}
+                    keyboardType="number-pad"
+                    placeholder="2"
+                    placeholderTextColor={Colors.textMuted}
+                    style={mStyles.input}
+                  />
+                </View>
+              </View>
+
+              {/* Notas */}
+              <Text style={[mStyles.lbl, { marginTop: 14 }]}>Notas (opcional)</Text>
+              <TextInput
+                value={draft.notes}
+                onChangeText={(v) => setDraft({ ...draft, notes: v })}
+                placeholder="Pedido especial, mesa preferida…"
+                placeholderTextColor={Colors.textMuted}
+                multiline
+                style={[mStyles.input, { minHeight: 60 }]}
+              />
+            </ScrollView>
+
+            <View style={mStyles.actions}>
+              <TouchableOpacity style={[mStyles.btn, mStyles.btnGhost]} onPress={() => setCreating(false)}>
+                <Text style={mStyles.btnGhostLbl}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[mStyles.btn, mStyles.btnPrimary, (submitting || !picked) && { opacity: 0.5 }]}
+                onPress={submitReservation}
+                disabled={submitting || !picked}
+              >
+                <Text style={mStyles.btnPrimaryLbl}>{submitting ? 'Creando…' : 'Crear reserva'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <UserPicker
+        visible={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        onSelect={(u) => setPicked(u)}
+        title="Buscar cliente"
+      />
     </SafeAreaView>
   );
 }
@@ -204,4 +366,43 @@ const styles = StyleSheet.create({
 
   empty: { alignItems: 'center', paddingTop: 60, gap: 10 },
   emptyText: { color: Colors.textMuted, fontSize: 13 },
+});
+
+const mStyles = StyleSheet.create({
+  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
+  sheet: { backgroundColor: Colors.bgElevated, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, maxHeight: '90%' },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+  title: { color: Colors.textPrimary, fontSize: 17, fontWeight: '700' },
+  lbl: { color: Colors.textMuted, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 },
+  input: {
+    backgroundColor: Colors.bgCard,
+    borderWidth: 1, borderColor: Colors.borderStrong,
+    borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10,
+    color: Colors.textPrimary, fontSize: 14,
+  },
+  pickerBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: Colors.bgCard, borderWidth: 1, borderColor: Colors.borderStrong,
+    borderRadius: 12, paddingHorizontal: 12, paddingVertical: 12,
+  },
+  pickerBtnTxt: { color: Colors.textMuted, fontSize: 14 },
+  pickedRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: 'rgba(56,199,147,0.10)',
+    borderWidth: 1, borderColor: 'rgba(56,199,147,0.30)',
+    borderRadius: 12, paddingHorizontal: 12, paddingVertical: 12,
+  },
+  pickedTxt: { color: Colors.textPrimary, fontSize: 14, fontWeight: '600', flex: 1 },
+  changeTxt: { color: Colors.textMuted, fontSize: 11 },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  chip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, backgroundColor: Colors.bgCard, borderWidth: 1, borderColor: Colors.borderStrong },
+  chipActive: { backgroundColor: Colors.accentPrimary, borderColor: Colors.accentPrimary },
+  chipTxt: { color: Colors.textSecondary, fontSize: 11, fontWeight: '700' },
+  chipTxtActive: { color: '#000' },
+  actions: { flexDirection: 'row', gap: 10, marginTop: 16, paddingTop: 16, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: Colors.border },
+  btn: { flex: 1, paddingVertical: 12, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  btnGhost: { backgroundColor: Colors.bgCard, borderWidth: 1, borderColor: Colors.borderStrong },
+  btnGhostLbl: { color: Colors.textPrimary, fontSize: 14, fontWeight: '700' },
+  btnPrimary: { backgroundColor: Colors.accentPrimary },
+  btnPrimaryLbl: { color: '#000', fontSize: 14, fontWeight: '700' },
 });

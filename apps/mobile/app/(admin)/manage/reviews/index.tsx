@@ -85,18 +85,45 @@ export default function AdminReviewsList() {
                 {item.comment ? (
                   <Text style={styles.body} numberOfLines={4}>{item.comment}</Text>
                 ) : null}
-                {filter === 'PENDING' && (
-                  <View style={styles.actions}>
-                    <TouchableOpacity style={styles.rejectBtn} onPress={() => moderate(item.id, 'REJECTED', 'Inapropiado')}>
-                      <Feather name="x" size={14} color={Colors.accentDanger} />
-                      <Text style={styles.rejectLbl}>Rechazar</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.approveBtn} onPress={() => moderate(item.id, 'APPROVED')}>
-                      <Feather name="check" size={14} color={Colors.textInverse} />
-                      <Text style={styles.approveLbl}>Aprobar</Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
+                <View style={styles.actions}>
+                  {filter === 'PENDING' && (
+                    <>
+                      <TouchableOpacity style={styles.rejectBtn} onPress={() => moderate(item.id, 'REJECTED', 'Inapropiado')}>
+                        <Feather name="x" size={14} color={Colors.accentDanger} />
+                        <Text style={styles.rejectLbl}>Rechazar</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={styles.approveBtn} onPress={() => moderate(item.id, 'APPROVED')}>
+                        <Feather name="check" size={14} color={Colors.textInverse} />
+                        <Text style={styles.approveLbl}>Aprobar</Text>
+                      </TouchableOpacity>
+                    </>
+                  )}
+                  <TouchableOpacity
+                    style={styles.rejectBtn}
+                    onPress={() => {
+                      Alert.alert(
+                        'Eliminar permanente?',
+                        'La reseña desaparecerá. Solo para spam o abuso.',
+                        [
+                          { text: 'Cancelar', style: 'cancel' },
+                          {
+                            text: 'Eliminar', style: 'destructive', onPress: async () => {
+                              try {
+                                await adminApi.hardDeleteReview(item.id);
+                                load();
+                              } catch (e: any) {
+                                Alert.alert('Error', e?.response?.data?.message ?? 'No se pudo');
+                              }
+                            }
+                          }
+                        ]
+                      );
+                    }}
+                  >
+                    <Feather name="trash-2" size={14} color={Colors.accentDanger} />
+                    <Text style={styles.rejectLbl}>Borrar</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
             );
           }}

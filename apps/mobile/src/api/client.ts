@@ -353,6 +353,8 @@ export const notificationsApi = {
 export const venueApi = {
   list: (params?: unknown) => apiClient.get('/venues', { params }),
   get: (id: string) => apiClient.get(`/venues/${id}`),
+  create: (data: { name: string; address?: string; city?: string; description?: string; phone?: string; imageUrl?: string; coverUrl?: string }) =>
+    apiClient.post('/venues', data),
   updateConfig: (id: string, data: {
     openTime?: string; closeTime?: string;
     reservationCapacity?: number; reservationsEnabled?: boolean; slotMinutes?: number;
@@ -470,6 +472,43 @@ export const adminApi = {
   createOffer: (data: unknown) => apiClient.post('/offers', data),
   updateOffer: (id: string, data: unknown) => apiClient.patch(`/offers/${id}`, data),
   deleteOffer: (id: string) => apiClient.delete(`/offers/${id}`),
+
+  // ── Tanda 1+2+3: features que se sumaron al admin web y faltaban acá ──
+  // Users
+  createUserManually: (data: { email: string; firstName?: string; lastName?: string; role?: string; phone?: string }) =>
+    apiClient.post('/admin/users', data),
+  resetUserPassword: (id: string) => apiClient.post(`/admin/users/${id}/reset-password`),
+  resendUserVerification: (id: string) => apiClient.post(`/admin/users/${id}/resend-verification`),
+  // Sessions
+  listUserSessions: (id: string) => apiClient.get(`/admin/users/${id}/sessions`),
+  revokeUserSession: (id: string, sessionId: string) =>
+    apiClient.post(`/admin/users/${id}/sessions/${sessionId}/revoke`),
+  revokeAllUserSessions: (id: string) =>
+    apiClient.post(`/admin/users/${id}/sessions/revoke-all`),
+  // Reservations
+  createReservation: (data: { userId: string; venueId: string; date: string; timeSlot: string; partySize: number; notes?: string; internalNotes?: string }) =>
+    apiClient.post('/admin/reservations', data),
+  // Posts
+  pinPost: (id: string, pinned: boolean) => apiClient.patch(`/admin/posts/${id}/pin`, { pinned }),
+  // Tickets
+  createTicketForUser: (data: { userId: string; subject: string; description: string; priority?: string; category?: string }) =>
+    apiClient.post('/admin/support/tickets', data),
+  // Reviews
+  hardDeleteReview: (id: string) => apiClient.delete(`/admin/reviews/${id}`),
+  bulkDeleteReviews: (ids: string[]) => apiClient.post('/admin/reviews/bulk-delete', { ids }),
+  // Messages
+  sendMessageAsAdmin: (data: { userId: string; content: string }) =>
+    apiClient.post('/admin/messages/send', data),
+  // Events
+  duplicateEvent: (id: string) => apiClient.post(`/admin/events/${id}/duplicate`),
+  // Broadcasts history
+  listBroadcasts: () => apiClient.get('/admin/notifications/broadcasts'),
+  // Venue blocks
+  listVenueBlocks: (venueId: string) => apiClient.get(`/admin/venues/${venueId}/blocks`),
+  createVenueBlock: (venueId: string, data: { startsAt: string; endsAt: string; reason?: string }) =>
+    apiClient.post(`/admin/venues/${venueId}/blocks`, data),
+  deleteVenueBlock: (venueId: string, blockId: string) =>
+    apiClient.delete(`/admin/venues/${venueId}/blocks/${blockId}`),
 
   // ── Venue stories (OPAL BAR PV) ──────────────────
   venueStories: {

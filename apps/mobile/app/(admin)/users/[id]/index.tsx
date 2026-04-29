@@ -105,6 +105,7 @@ export default function AdminUserDetail() {
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState('');
   const [savingNote, setSavingNote] = useState(false);
+  const [showSessions, setShowSessions] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -747,6 +748,62 @@ export default function AdminUserDetail() {
             </Pressable>
           )}
 
+          {/* Reset password (Admin+) */}
+          <Pressable
+            style={({ pressed }) => [styles.actionRow, pressed && { opacity: 0.7 }]}
+            onPress={async () => {
+              Alert.alert(
+                '¿Resetear contraseña?',
+                `Se generará una nueva contraseña temporal para ${user.email}. Todas sus sesiones activas se cerrarán.`,
+                [
+                  { text: 'Cancelar', style: 'cancel' },
+                  {
+                    text: 'Resetear', style: 'destructive', onPress: async () => {
+                      try {
+                        const r = await adminApi.resetUserPassword(user.id);
+                        const data = r.data?.data ?? r.data ?? {};
+                        Alert.alert('Contraseña reseteada', `Nueva temporal:\n\n${data.tempPassword ?? '—'}\n\nCopiala y comunicásela al usuario.`);
+                      } catch (e: any) {
+                        Alert.alert('Error', apiError(e));
+                      }
+                    }
+                  }
+                ]
+              );
+            }}
+          >
+            <Feather name="key" size={16} color={Colors.accentPrimary} />
+            <Text style={styles.actionRowLbl}>Resetear contraseña</Text>
+          </Pressable>
+
+          {/* Resend verification (solo si no está verificado) */}
+          {!user.isVerified && (
+            <Pressable
+              style={({ pressed }) => [styles.actionRow, pressed && { opacity: 0.7 }]}
+              onPress={async () => {
+                try {
+                  await adminApi.resendUserVerification(user.id);
+                  Alert.alert('OK', 'Usuario marcado como verificado.');
+                  load();
+                } catch (e: any) {
+                  Alert.alert('Error', apiError(e));
+                }
+              }}
+            >
+              <Feather name="mail" size={16} color={Colors.accentInfo} />
+              <Text style={styles.actionRowLbl}>Marcar como verificado</Text>
+            </Pressable>
+          )}
+
+          {/* Sessions */}
+          <Pressable
+            style={({ pressed }) => [styles.actionRow, pressed && { opacity: 0.7 }]}
+            onPress={() => setShowSessions(true)}
+          >
+            <Feather name="monitor" size={16} color={Colors.textPrimary} />
+            <Text style={styles.actionRowLbl}>Sesiones activas</Text>
+          </Pressable>
+
           {/* Delete (SuperAdmin only, not for other admins) */}
           {isSuperAdmin && user.role !== 'SUPER_ADMIN' && user.status !== 'DELETED' && (
             <Pressable
@@ -763,7 +820,106 @@ export default function AdminUserDetail() {
           )}
         </View>
       </ScrollView>
+
+      {/* Sessions modal */}
+      <SessionsModal
+        visible={showSessions}
+        userId={user.id}
+        onClose={() => setShowSessions(false)}
+      />
     </SafeAreaView>
+  );
+}
+
+// ─────────────────────────────────────────────
+//  Sessions modal
+// ─────────────────────────────────────────────
+function SessionsModal({ visible, userId, onClose }: { visible: boolean; userId: string; onClose: () => void }) {
+  const [sessions, setSessions] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await adminApi.listUserSessions(userId);
+      const list = r.data?.data ?? r.data ?? [];
+      setSessions(Array.isArray(list) ? list : []);
+    } catch {} finally { setLoading(false); }
+  }, [userId]);
+
+  useFocusEffect(useCallback(() => { if (visible) load(); }, [visible, load]));
+
+  async function revoke(sessionId: string) {
+    try {
+      await adminApi.revokeUserSession(userId, sessionId);
+      load();
+    } catch (e: any) { Alert.alert('Error', apiError(e)); }
+  }
+
+  async function revokeAll() {
+    Alert.alert(
+      '¿Cerrar todas las sesiones?',
+      'El usuario tendrá que volver a loguearse en todos sus dispositivos.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Cerrar todas', style: 'destructive', onPress: async () => {
+          try {
+            await adminApi.revokeAllUserSessions(userId);
+            load();
+          } catch (e: any) { Alert.alert('Error', apiError(e)); }
+        }}
+      ]
+    );
+  }
+
+  const Modal = require('react-native').Modal;
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' }}>
+        <View style={{ backgroundColor: Colors.bgElevated, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, maxHeight: '80%' }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <Text style={{ color: Colors.textPrimary, fontSize: 17, fontWeight: '700' }}>Sesiones activas</Text>
+            <Pressable onPress={onClose} hitSlop={10}>
+              <Feather name="x" size={20} color={Colors.textPrimary} />
+            </Pressable>
+          </View>
+
+          {sessions.filter((s) => s.isActive).length > 0 && (
+            <Pressable
+              style={{ paddingVertical: 8, alignItems: 'center', marginBottom: 8 }}
+              onPress={revokeAll}
+            >
+              <Text style={{ color: Colors.accentDanger, fontWeight: '700' }}>Cerrar todas</Text>
+            </Pressable>
+          )}
+
+          <ScrollView>
+            {loading ? (
+              <ActivityIndicator color={Colors.accentPrimary} style={{ marginVertical: 32 }} />
+            ) : sessions.length === 0 ? (
+              <Text style={{ color: Colors.textMuted, textAlign: 'center', padding: 24 }}>Sin sesiones registradas.</Text>
+            ) : sessions.map((s) => (
+              <View key={s.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: Colors.border }}>
+                <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: s.isActive ? Colors.accentSuccess : Colors.textMuted }} />
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: Colors.textPrimary, fontWeight: '600' }} numberOfLines={1}>
+                    {s.deviceName || 'Sin nombre'} {s.deviceOs ? `(${s.deviceOs})` : ''}
+                  </Text>
+                  <Text style={{ color: Colors.textMuted, fontSize: 11, marginTop: 2 }}>
+                    {s.ipAddress ?? '—'} · {new Date(s.createdAt).toLocaleDateString('es')}
+                  </Text>
+                </View>
+                {s.isActive && (
+                  <Pressable onPress={() => revoke(s.id)} hitSlop={6}>
+                    <Text style={{ color: Colors.accentDanger, fontSize: 12, fontWeight: '700' }}>Cerrar</Text>
+                  </Pressable>
+                )}
+              </View>
+            ))}
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -1412,4 +1568,17 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   deleteBtnLbl: { color: Colors.accentDanger, fontSize: 13, fontWeight: '700' },
+
+  actionRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    paddingVertical: 12, paddingHorizontal: 14,
+    borderRadius: 12,
+    backgroundColor: Colors.bgCard,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+    marginTop: 8,
+  },
+  actionRowLbl: {
+    color: Colors.textPrimary, fontSize: 13, fontWeight: '600', flex: 1,
+  },
 });

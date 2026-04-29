@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, ActivityIndicator, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, ActivityIndicator, RefreshControl, Modal, Alert } from 'react-native';
 import { useCallback, useState } from 'react';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -6,6 +6,7 @@ import { Feather } from '@expo/vector-icons';
 import { adminApi } from '@/api/client';
 import { useSafeBack } from '@/hooks/useSafeBack';
 import { Colors } from '@/constants/tokens';
+import { UserPicker, type PickedUser } from '@/components/admin/UserPicker';
 
 const AVATAR_COLORS = ['#F4A340', '#60A5FA', '#A855F7', '#38C793', '#E45858', '#EC4899'];
 function colorFor(id: string) {
@@ -34,6 +35,26 @@ export default function MessagesModerationList() {
   const [search, setSearch] = useState('');
   const [appliedSearch, setAppliedSearch] = useState('');
 
+  // Mensaje como plataforma
+  const [composing, setComposing] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [picked, setPicked] = useState<PickedUser | null>(null);
+  const [body, setBody] = useState('');
+  const [sending, setSending] = useState(false);
+
+  async function send() {
+    if (!picked || !body.trim()) return;
+    setSending(true);
+    try {
+      await adminApi.sendMessageAsAdmin({ userId: picked.id, content: body.trim() });
+      Alert.alert('Mensaje enviado', `Llegó como un DM tuyo a ${picked.email}.`);
+      setComposing(false); setPicked(null); setBody('');
+      load();
+    } catch (e: any) {
+      Alert.alert('Error', e?.response?.data?.message ?? 'No se pudo enviar');
+    } finally { setSending(false); }
+  }
+
   const load = useCallback(async (q = '') => {
     try {
       const r = await adminApi.allThreads(q.trim() || undefined);
@@ -60,6 +81,13 @@ export default function MessagesModerationList() {
           <Text style={styles.title}>Conversaciones</Text>
           <Text style={styles.subtitle}>{threads.length} hilos · moderación</Text>
         </View>
+        <TouchableOpacity
+          style={composeStyles.headerBtn}
+          onPress={() => setComposing(true)}
+          hitSlop={10}
+        >
+          <Feather name="send" size={16} color={Colors.accentPrimary} />
+        </TouchableOpacity>
       </View>
 
       <View style={styles.searchBox}>
@@ -152,9 +180,98 @@ export default function MessagesModerationList() {
           }}
         />
       )}
+
+      {/* Compose modal */}
+      <Modal visible={composing} transparent animationType="slide" onRequestClose={() => setComposing(false)}>
+        <View style={composeStyles.backdrop}>
+          <View style={composeStyles.sheet}>
+            <View style={composeStyles.header}>
+              <Text style={composeStyles.title}>Mensaje como plataforma</Text>
+              <TouchableOpacity onPress={() => setComposing(false)} hitSlop={10}>
+                <Feather name="x" size={20} color={Colors.textPrimary} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={composeStyles.lbl}>Destinatario</Text>
+            {picked ? (
+              <TouchableOpacity onPress={() => setPickerOpen(true)} style={composeStyles.pickedRow}>
+                <Feather name="user" size={14} color={Colors.accentSuccess} />
+                <Text style={composeStyles.pickedTxt} numberOfLines={1}>
+                  {`${picked.profile?.firstName ?? ''} ${picked.profile?.lastName ?? ''}`.trim() || picked.email}
+                </Text>
+                <Text style={composeStyles.changeTxt}>cambiar</Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity onPress={() => setPickerOpen(true)} style={composeStyles.pickerBtn}>
+                <Feather name="search" size={14} color={Colors.textMuted} />
+                <Text style={composeStyles.pickerBtnTxt}>Buscar usuario…</Text>
+              </TouchableOpacity>
+            )}
+
+            <Text style={[composeStyles.lbl, { marginTop: 14 }]}>Mensaje</Text>
+            <TextInput
+              value={body}
+              onChangeText={setBody}
+              placeholder="Llega como un DM tuyo al usuario."
+              placeholderTextColor={Colors.textMuted}
+              multiline
+              style={composeStyles.input}
+              maxLength={2000}
+            />
+            <Text style={composeStyles.counter}>{body.length}/2000</Text>
+
+            <View style={composeStyles.actions}>
+              <TouchableOpacity style={[composeStyles.btn, composeStyles.btnGhost]} onPress={() => setComposing(false)}>
+                <Text style={composeStyles.btnGhostLbl}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[composeStyles.btn, composeStyles.btnPrimary, (sending || !picked || !body.trim()) && { opacity: 0.5 }]}
+                onPress={send}
+                disabled={sending || !picked || !body.trim()}
+              >
+                <Feather name="send" size={14} color="#000" />
+                <Text style={composeStyles.btnPrimaryLbl}>  {sending ? 'Enviando…' : 'Enviar'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <UserPicker visible={pickerOpen} onClose={() => setPickerOpen(false)} onSelect={(u) => setPicked(u)} title="Destinatario" />
     </SafeAreaView>
   );
 }
+
+const composeStyles = StyleSheet.create({
+  headerBtn: {
+    width: 36, height: 36, borderRadius: 10,
+    backgroundColor: 'rgba(244,163,64,0.10)',
+    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(244,163,64,0.45)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
+  sheet: { backgroundColor: Colors.bgElevated, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+  title: { color: Colors.textPrimary, fontSize: 17, fontWeight: '700' },
+  lbl: { color: Colors.textMuted, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 },
+  input: {
+    backgroundColor: Colors.bgCard, borderWidth: 1, borderColor: Colors.borderStrong,
+    borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10,
+    color: Colors.textPrimary, fontSize: 14, minHeight: 100,
+  },
+  counter: { color: Colors.textMuted, fontSize: 11, textAlign: 'right', marginTop: 4 },
+  pickerBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: Colors.bgCard, borderWidth: 1, borderColor: Colors.borderStrong, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 12 },
+  pickerBtnTxt: { color: Colors.textMuted, fontSize: 14 },
+  pickedRow: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(56,199,147,0.10)', borderWidth: 1, borderColor: 'rgba(56,199,147,0.30)', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 12 },
+  pickedTxt: { color: Colors.textPrimary, fontSize: 14, fontWeight: '600', flex: 1 },
+  changeTxt: { color: Colors.textMuted, fontSize: 11 },
+  actions: { flexDirection: 'row', gap: 10, marginTop: 16, paddingTop: 16, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: Colors.border },
+  btn: { flex: 1, paddingVertical: 12, borderRadius: 12, alignItems: 'center', justifyContent: 'center', flexDirection: 'row' },
+  btnGhost: { backgroundColor: Colors.bgCard, borderWidth: 1, borderColor: Colors.borderStrong },
+  btnGhostLbl: { color: Colors.textPrimary, fontSize: 14, fontWeight: '700' },
+  btnPrimary: { backgroundColor: Colors.accentPrimary },
+  btnPrimaryLbl: { color: '#000', fontSize: 14, fontWeight: '700' },
+});
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
