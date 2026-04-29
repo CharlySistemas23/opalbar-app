@@ -12,7 +12,7 @@ import {
   Pressable,
   Share,
 } from 'react-native';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, memo } from 'react';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
@@ -540,7 +540,12 @@ export default function UserProfile() {
         </Pressable>
       </View>
 
-      <ScrollView contentContainerStyle={{ paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={{ paddingBottom: 40 }}
+        showsVerticalScrollIndicator={false}
+        removeClippedSubviews
+        scrollEventThrottle={16}
+      >
         {/* ── Cover banner (FB) ───────────────── */}
         <Pressable
           style={styles.cover}
@@ -1372,13 +1377,109 @@ function FeedList({
     });
   }
 
+  return <FeedListBody
+    posts={posts}
+    profile={profile}
+    name={name}
+    initials={initials}
+    t={t}
+    onPressPost={onPressPost}
+    onLongPress={onLongPress}
+    onToggleLike={onToggleLike}
+    onShare={handleShare}
+  />;
+}
+
+// Progressive rendering: mount the first 8 cards immediately, then append
+// 5 more every ~60ms in InteractionManager-friendly chunks. This eliminates
+// the long single-frame mount cost when the user opens a profile with 30+
+// posts (the visible jank / "fps drop" they were seeing).
+function FeedListBody({
+  posts,
+  profile,
+  name,
+  initials,
+  t,
+  onPressPost,
+  onLongPress,
+  onToggleLike,
+  onShare,
+}: {
+  posts: any[];
+  profile: any;
+  name: string;
+  initials: string;
+  t: boolean;
+  onPressPost: (id: string) => void;
+  onLongPress: (url: string) => void;
+  onToggleLike: (postId: string) => void;
+  onShare: (p: any) => void;
+}) {
+  const INITIAL = 8;
+  const STEP = 5;
+  const STEP_MS = 60;
+  const [count, setCount] = useState(Math.min(INITIAL, posts.length));
+
+  useEffect(() => {
+    setCount(Math.min(INITIAL, posts.length));
+  }, [posts.length]);
+
+  useEffect(() => {
+    if (count >= posts.length) return;
+    const handle = setTimeout(() => {
+      setCount((c) => Math.min(c + STEP, posts.length));
+    }, STEP_MS);
+    return () => clearTimeout(handle);
+  }, [count, posts.length]);
+
   return (
     <View>
-      {posts.map((p) => {
-        const likes = p._count?.reactions ?? 0;
-        const comments = p._count?.comments ?? 0;
-        return (
-          <View key={p.id} style={styles.fbCard}>
+      {posts.slice(0, count).map((p) => (
+        <FeedListItem
+          key={p.id}
+          post={p}
+          profile={profile}
+          name={name}
+          initials={initials}
+          t={t}
+          onPressPost={onPressPost}
+          onLongPress={onLongPress}
+          onToggleLike={onToggleLike}
+          onShare={onShare}
+        />
+      ))}
+    </View>
+  );
+}
+
+// Memoized so a state change elsewhere on the profile (e.g. typing in the
+// composer, switching tabs, opening preview) doesn't re-render every card.
+// Each card only re-renders if its own post object changed reference.
+const FeedListItem = memo(function FeedListItem({
+  post: p,
+  profile,
+  name,
+  initials,
+  t,
+  onPressPost,
+  onLongPress,
+  onToggleLike,
+  onShare,
+}: {
+  post: any;
+  profile: any;
+  name: string;
+  initials: string;
+  t: boolean;
+  onPressPost: (id: string) => void;
+  onLongPress: (url: string) => void;
+  onToggleLike: (postId: string) => void;
+  onShare: (p: any) => void;
+}) {
+  const likes = p._count?.reactions ?? 0;
+  const comments = p._count?.comments ?? 0;
+  return (
+    <View style={styles.fbCard}>
             <View style={styles.feedHeader}>
               {profile?.profile?.avatarUrl ? (
                 <Image source={{ uri: profile.profile.avatarUrl }} style={styles.feedAvatar} />
@@ -1457,18 +1558,15 @@ function FeedList({
               </Pressable>
               <Pressable
                 style={({ pressed }) => [styles.fbActionBtn, pressed && styles.pressed]}
-                onPress={() => handleShare(p)}
+                onPress={() => onShare(p)}
               >
                 <Feather name="share-2" size={18} color={Colors.textSecondary} />
                 <Text style={styles.fbActionLabel}>{t ? 'Compartir' : 'Share'}</Text>
               </Pressable>
             </View>
-          </View>
-        );
-      })}
     </View>
   );
-}
+});
 
 // ─────────────────────────────────────────────
 //  Styles
