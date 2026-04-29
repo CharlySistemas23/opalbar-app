@@ -497,6 +497,7 @@ model Venue {
   offers       Offer[]
   reservations Reservation[]
   reviews      Review[]
+  blocks       ReservationBlock[]
 
   @@index([slug])
   @@index([city])
@@ -1513,6 +1514,45 @@ model EmailCampaignRecipient {
   @@index([campaignId])
   @@index([userId])
   @@index([unsubToken])
+}
+
+// ─────────────────────────────────────────────
+//  PUSH BROADCAST HISTORY
+//  Hasta ahora /admin/notifications/broadcast no persistia. Ahora cada
+//  envío queda registrado para auditoría y para que el admin vea qué
+//  mandó, cuándo y a cuántos llegó.
+// ─────────────────────────────────────────────
+model PushBroadcast {
+  id          String    @id @default(cuid())
+  title       String    @db.VarChar(200)
+  body        String    @db.VarChar(500)
+  audience    String    @default("ALL") // ALL | ADMINS
+  sentCount   Int       @default(0)
+  failedCount Int       @default(0)
+  sentById    String
+  sentAt      DateTime  @default(now())
+
+  @@index([sentAt])
+}
+
+// ─────────────────────────────────────────────
+//  RESERVATION BLOCKS
+//  Bloqueos de franjas horarias por venue (eventos privados, mantenimiento).
+//  La validación de creación de reserva chequea que no haya solapamiento.
+// ─────────────────────────────────────────────
+model ReservationBlock {
+  id           String   @id @default(cuid())
+  venueId      String
+  startsAt     DateTime
+  endsAt       DateTime
+  reason       String?  @db.VarChar(200)
+  createdById  String
+  createdAt    DateTime @default(now())
+
+  venue Venue @relation(fields: [venueId], references: [id], onDelete: Cascade)
+
+  @@index([venueId])
+  @@index([startsAt])
 }
 
 model MarketingAsset {

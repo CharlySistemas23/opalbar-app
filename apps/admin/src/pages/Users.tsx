@@ -328,6 +328,18 @@ export function UserDetail({ id }: { id: string }) {
     mutationFn: (note: string | null) => adminApi.updateNote(id, note),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'user', id] }),
   });
+  const sessions = useQuery({
+    queryKey: ['admin', 'user', id, 'sessions'],
+    queryFn: async () => (await adminApi.listUserSessions(id)).data?.data ?? [],
+  });
+  const revokeSession = useMutation({
+    mutationFn: (sessionId: string) => adminApi.revokeUserSession(id, sessionId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'user', id, 'sessions'] }),
+  });
+  const revokeAll = useMutation({
+    mutationFn: () => adminApi.revokeAllUserSessions(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'user', id, 'sessions'] }),
+  });
 
   if (isLoading) return <div className="p-8 text-muted">Cargando…</div>;
   if (!data) return <div className="p-8 text-muted">No encontrado</div>;
@@ -414,6 +426,61 @@ export function UserDetail({ id }: { id: string }) {
                   <b>{e.action}</b>{e.reason && ` — ${e.reason}`}
                   <span className="text-muted ml-2">por {e.admin?.email ?? '—'}</span>
                 </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <div className="card p-5">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-bold">Sesiones activas</h3>
+          {(sessions.data || []).filter((s: any) => s.isActive).length > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                if (confirm('Cerrar todas las sesiones del usuario? Tendrá que volver a loguearse.')) {
+                  revokeAll.mutate();
+                }
+              }}
+              disabled={revokeAll.isPending}
+              className="text-xs text-danger font-bold hover:underline"
+            >
+              Cerrar todas
+            </button>
+          )}
+        </div>
+        {sessions.isLoading ? (
+          <p className="text-muted text-sm">Cargando…</p>
+        ) : (sessions.data || []).length === 0 ? (
+          <p className="text-muted text-sm">Sin sesiones registradas.</p>
+        ) : (
+          <ul className="space-y-2">
+            {(sessions.data || []).map((s: any) => (
+              <li key={s.id} className="flex items-center gap-3 border-b border-line pb-2 last:border-0">
+                <div className={`w-2 h-2 rounded-full shrink-0 ${s.isActive ? 'bg-success' : 'bg-muted'}`} />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold truncate">
+                    {s.deviceName || 'Sin nombre'}
+                    {s.deviceOs && <span className="text-muted text-xs ml-2">({s.deviceOs})</span>}
+                  </p>
+                  <p className="text-[11px] text-muted">
+                    {s.ipAddress ?? '—'} · creada {new Date(s.createdAt).toLocaleString('es')}
+                    {s.expiresAt && ` · expira ${new Date(s.expiresAt).toLocaleDateString('es')}`}
+                  </p>
+                </div>
+                {s.isActive ? (
+                  <button
+                    type="button"
+                    onClick={() => revokeSession.mutate(s.id)}
+                    disabled={revokeSession.isPending}
+                    className="text-xs text-danger font-bold hover:underline"
+                  >
+                    Cerrar
+                  </button>
+                ) : (
+                  <span className="text-xs text-muted italic">cerrada</span>
+                )}
               </li>
             ))}
           </ul>

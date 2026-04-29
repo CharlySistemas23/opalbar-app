@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { useMutation } from '@tanstack/react-query';
-import { Bell, Send } from 'lucide-react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Bell, Send, History } from 'lucide-react';
 import { adminApi, apiError } from '@/api/client';
-import { PageHeader, Field, InlineError, Segmented } from '@/components/ui';
+import { PageHeader, Field, InlineError, Segmented, EmptyState, SkeletonRows, StatusPill } from '@/components/ui';
 
 const AUDIENCES = [
   { value: 'ALL', label: 'Todos los usuarios' },
@@ -10,10 +10,20 @@ const AUDIENCES = [
 ] as const;
 
 export function PushBroadcast() {
+  const qc = useQueryClient();
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [audience, setAudience] = useState<'ALL' | 'ADMINS'>('ALL');
   const [result, setResult] = useState<string | null>(null);
+
+  const history = useQuery({
+    queryKey: ['admin', 'broadcasts'],
+    queryFn: async () => {
+      const r = await adminApi.listBroadcasts();
+      const list = (r as any).data?.data ?? (r as any).data ?? [];
+      return Array.isArray(list) ? list : [];
+    },
+  });
 
   const send = useMutation({
     mutationFn: () => adminApi.broadcast(title, body, audience),
@@ -21,6 +31,7 @@ export function PushBroadcast() {
       const data = (r as any).data?.data ?? (r as any).data ?? {};
       setResult(`Enviado a ${data.sent ?? 0} usuarios${data.failed ? ` (${data.failed} fallaron)` : ''}.`);
       setTitle(''); setBody('');
+      qc.invalidateQueries({ queryKey: ['admin', 'broadcasts'] });
     },
     onError: (err) => setResult(apiError(err)),
   });
@@ -97,6 +108,48 @@ export function PushBroadcast() {
           </p>
         </div>
       </div>
+
+      {/* Historial */}
+      <section className="space-y-3">
+        <h2 className="section-title flex items-center gap-2">
+          <History size={12} /> Historial · {(history.data ?? []).length}
+        </h2>
+        <div className="card overflow-auto">
+          {history.isLoading ? (
+            <SkeletonRows rows={5} height={56} />
+          ) : (history.data ?? []).length === 0 ? (
+            <EmptyState icon={History} title="Sin envíos previos" message="Cuando mandes un broadcast, queda registrado acá." />
+          ) : (
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Cuándo</th>
+                  <th>Título</th>
+                  <th>Audiencia</th>
+                  <th className="text-right">Entregados</th>
+                  <th className="text-right">Fallaron</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(history.data ?? []).map((b: any) => (
+                  <tr key={b.id}>
+                    <td className="text-xs text-muted whitespace-nowrap">
+                      {new Date(b.sentAt).toLocaleString('es')}
+                    </td>
+                    <td>
+                      <p className="font-bold text-sm">{b.title}</p>
+                      <p className="text-[11px] text-muted truncate max-w-[400px]">{b.body}</p>
+                    </td>
+                    <td><StatusPill status={b.audience} /></td>
+                    <td className="text-right font-mono text-success font-bold">{b.sentCount}</td>
+                    <td className="text-right font-mono text-muted">{b.failedCount > 0 ? <span className="text-warning">{b.failedCount}</span> : 0}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </section>
     </div>
   );
 }

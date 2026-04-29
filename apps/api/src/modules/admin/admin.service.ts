@@ -36,7 +36,7 @@ export class AdminService {
     private readonly config: ConfigService,
   ) {}
 
-  async broadcastPush(title: string, body: string, audience: 'ALL' | 'ADMINS' = 'ALL') {
+  async broadcastPush(title: string, body: string, audience: 'ALL' | 'ADMINS' = 'ALL', sentById?: string) {
     if (!title?.trim() || !body?.trim()) {
       throw new BadRequestException('title y body son requeridos');
     }
@@ -53,8 +53,30 @@ export class AdminService {
         data: { type: 'BROADCAST', audience },
       },
     );
+    // Persistir en historial para que el admin vea qué mando, cuando y a cuantos.
+    if (sentById) {
+      await this.prisma.pushBroadcast.create({
+        data: {
+          title: title.slice(0, 200),
+          body: body.slice(0, 500),
+          audience,
+          sentCount: sent,
+          failedCount: Math.max(0, users.length - sent),
+          sentById,
+        },
+      }).catch((err) => {
+        this.logger.warn(`[admin] broadcast history persist failed: ${err?.message ?? err}`);
+      });
+    }
     this.logger.log(`📣 Broadcast persisted+pushed: ${sent} users (${audience})`);
     return { totalUsers: users.length, sent };
+  }
+
+  async listBroadcasts() {
+    return this.prisma.pushBroadcast.findMany({
+      orderBy: { sentAt: 'desc' },
+      take: 100,
+    });
   }
 
   // ── USERS ─────────────────────────────────
@@ -1392,6 +1414,111 @@ export class AdminService {
     this.realtime.toStaff('event', 'created', { id: dup.id });
     this.logger.log(`[admin] event ${eventId} duplicated as ${dup.id} by ${adminId}`);
     return dup;
+  }
+
+  // ─────────────────────────────────────────────
+  //  TANDA 3: sessions · bulk reviews · venue blocks
+  // ─────────────────────────────────────────────
+
+  async listUserSessions(userId: string) {
+    return this.prisma.session.findMany({
+      where: { userId },
+      orderBy: [{ isActive: 'desc' }, { updatedAt: 'desc' }],
+      select: {
+        id: true,
+        deviceName: true,
+        deviceOs: true,
+        ipAddress: true,
+        userAgent: true,
+        isActive: true,
+        expiresAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+  }
+
+  async revokeUserSession(userId: string, sessionId: string) {
+    const session = await this.prisma.session.findUnique({ where: { id: sessionId } });
+    if (!session || session.userId !== userId) throw new NotFoundException('Sesión no encontrada');
+    await this.prisma.session.update({
+      where: { id: sessionId },
+      data: { isActive: false },
+    });
+    this.realtime.toUser(userId, 'auth', 'session_revoked', { id: sessionId });
+    return { success: true };
+  }
+
+  async revokeAllUserSessions(userId: string) {
+    const r = await this.prisma.session.updateMany({
+      where: { userId, isActive: true },
+      data: { isActive: false },
+    });
+    this.realtime.toUser(userId, 'auth', 'sessions_revoked', { count: r.count });
+    return { revoked: r.count };
+  }
+
+  async bulkDeleteReviews(ids: string[]) {
+    if (!Array.isArray(ids) || ids.length === 0) {
+      throw new BadRequestException('Pasá al menos un id');
+    }
+    if (ids.length > 100) {
+      throw new BadRequestException('Máximo 100 reseñas por bulk');
+    }
+    // Soft-delete masivo (REJECTED + deletedAt) para esquivar FK constraints
+    // de helpfulVotes y mantener trazabilidad. Es lo que hace hardDeleteReview
+    // como fallback, aplicado en bloque.
+    const r = await this.prisma.review.updateMany({
+      where: { id: { in: ids } },
+      data: {
+        deletedAt: new Date(),
+        status: 'REJECTED',
+        rejectionReason: 'Eliminado masivamente por moderación.',
+      },
+    });
+    this.realtime.toStaff('review', 'bulk_deleted', { count: r.count });
+    return { deleted: r.count };
+  }
+
+  async listVenueBlocks(venueId: string) {
+    const venue = await this.prisma.venue.findUnique({ where: { id: venueId }, select: { id: true } });
+    if (!venue) throw new NotFoundException('Venue no encontrado');
+    return this.prisma.reservationBlock.findMany({
+      where: { venueId, endsAt: { gte: new Date() } },
+      orderBy: { startsAt: 'asc' },
+    });
+  }
+
+  async createVenueBlock(
+    adminId: string,
+    venueId: string,
+    body: { startsAt: string; endsAt: string; reason?: string },
+  ) {
+    const start = new Date(body.startsAt);
+    const end = new Date(body.endsAt);
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+      throw new BadRequestException('Fechas inválidas');
+    }
+    if (end.getTime() <= start.getTime()) {
+      throw new BadRequestException('La hora de fin debe ser posterior a la de inicio');
+    }
+    const venue = await this.prisma.venue.findUnique({ where: { id: venueId }, select: { id: true } });
+    if (!venue) throw new NotFoundException('Venue no encontrado');
+    const block = await this.prisma.reservationBlock.create({
+      data: {
+        venueId,
+        startsAt: start,
+        endsAt: end,
+        reason: body.reason?.trim()?.slice(0, 200) || null,
+        createdById: adminId,
+      },
+    });
+    this.realtime.toStaff('venue', 'block_created', { id: block.id, venueId });
+    return block;
+  }
+
+  async deleteVenueBlock(blockId: string) {
+    await this.prisma.reservationBlock.delete({ where: { id: blockId } }).catch(() => null);
   }
 
   async deleteUserDirect(adminId: string, userId: string) {

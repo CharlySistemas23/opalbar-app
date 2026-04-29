@@ -29,6 +29,8 @@ export function Reviews() {
   const qc = useQueryClient();
   const [filter, setFilter] = useState<typeof FILTERS[number]['value']>('PENDING');
   const [confirmDel, setConfirmDel] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [confirmBulk, setConfirmBulk] = useState(false);
 
   const reviewsQuery = useQuery({
     queryKey: ['admin', 'reviews', filter],
@@ -49,6 +51,22 @@ export function Reviews() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'reviews'] }),
   });
 
+  const bulkDel = useMutation({
+    mutationFn: (ids: string[]) => adminApi.bulkDeleteReviews(ids),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'reviews'] });
+      setSelected(new Set());
+    },
+  });
+
+  function toggleSel(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
   const list: any[] = Array.isArray(reviewsQuery.data) ? reviewsQuery.data : (reviewsQuery.data?.data ?? []);
 
   return (
@@ -57,7 +75,20 @@ export function Reviews() {
         icon={Star}
         title="Reseñas"
         subtitle={`${list.length} ${filter !== 'ALL' ? FILTERS.find((f) => f.value === filter)?.label.toLowerCase() : 'totales'}`}
-        actions={<Segmented options={FILTERS} value={filter} onChange={setFilter} />}
+        actions={
+          <div className="flex items-center gap-2">
+            {selected.size > 0 && (
+              <button
+                type="button"
+                onClick={() => setConfirmBulk(true)}
+                className="btn-danger"
+              >
+                <Trash2 size={14} /> Eliminar {selected.size}
+              </button>
+            )}
+            <Segmented options={FILTERS} value={filter} onChange={setFilter} />
+          </div>
+        }
       />
 
       <InlineError message={moderate.error ? apiError(moderate.error) : hardDel.error ? apiError(hardDel.error) : null} />
@@ -72,6 +103,13 @@ export function Reviews() {
             {list.map((r: any) => (
               <li key={r.id} className="p-5 hover:bg-elevated/30 transition space-y-3">
                 <div className="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    aria-label="Seleccionar reseña"
+                    checked={selected.has(r.id)}
+                    onChange={() => toggleSel(r.id)}
+                    className="mt-1 w-4 h-4 accent-accent shrink-0"
+                  />
                   {r.user?.profile?.avatarUrl ? (
                     <img src={r.user.profile.avatarUrl} className="w-11 h-11 rounded-full object-cover ring-1 ring-line" alt="" />
                   ) : (
@@ -145,6 +183,16 @@ export function Reviews() {
         destructive
         confirmLabel="Eliminar permanente"
         onConfirm={() => confirmDel && hardDel.mutate(confirmDel)}
+      />
+
+      <ConfirmDialog
+        open={confirmBulk}
+        onClose={() => setConfirmBulk(false)}
+        title={`Eliminar ${selected.size} reseñas seleccionadas?`}
+        message="Se marcan como REJECTED y se ocultan del feed. Útil para limpiar spam masivo. Acción irreversible."
+        destructive
+        confirmLabel={`Eliminar ${selected.size}`}
+        onConfirm={() => bulkDel.mutate(Array.from(selected))}
       />
     </div>
   );

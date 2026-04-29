@@ -118,6 +118,21 @@ export const adminApi = {
   sendMessageAsAdmin: (data: { userId: string; content: string }) =>
     apiClient.post('/admin/messages/send', data),
   duplicateEvent: (id: string) => apiClient.post(`/admin/events/${id}/duplicate`),
+  // Tanda 3: sessions · broadcasts history · bulk reviews · venue blocks
+  listUserSessions: (id: string) => apiClient.get(`/admin/users/${id}/sessions`),
+  revokeUserSession: (id: string, sessionId: string) =>
+    apiClient.post(`/admin/users/${id}/sessions/${sessionId}/revoke`),
+  revokeAllUserSessions: (id: string) =>
+    apiClient.post(`/admin/users/${id}/sessions/revoke-all`),
+  listBroadcasts: () => apiClient.get('/admin/notifications/broadcasts'),
+  bulkDeleteReviews: (ids: string[]) =>
+    apiClient.post('/admin/reviews/bulk-delete', { ids }),
+  listVenueBlocks: (venueId: string) =>
+    apiClient.get(`/admin/venues/${venueId}/blocks`),
+  createVenueBlock: (venueId: string, data: { startsAt: string; endsAt: string; reason?: string }) =>
+    apiClient.post(`/admin/venues/${venueId}/blocks`, data),
+  deleteVenueBlock: (venueId: string, blockId: string) =>
+    apiClient.delete(`/admin/venues/${venueId}/blocks/${blockId}`),
 
   // Community moderation
   posts: (params?: any) => apiClient.get('/admin/posts/pending', { params }),

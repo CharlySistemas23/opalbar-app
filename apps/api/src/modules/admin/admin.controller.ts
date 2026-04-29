@@ -73,8 +73,11 @@ export class AdminController {
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @Audit('push.broadcast')
   @ApiOperation({ summary: 'Send a push notification to all users' })
-  broadcast(@Body() body: { title: string; body: string; audience?: 'ALL' | 'ADMINS' }) {
-    return this.adminService.broadcastPush(body.title, body.body, body.audience ?? 'ALL');
+  broadcast(
+    @CurrentUser() admin: User,
+    @Body() body: { title: string; body: string; audience?: 'ALL' | 'ADMINS' },
+  ) {
+    return this.adminService.broadcastPush(body.title, body.body, body.audience ?? 'ALL', admin.id);
   }
 
   @Get('users') @ApiOperation({ summary: 'List all users' })
@@ -308,6 +311,62 @@ export class AdminController {
   @ApiOperation({ summary: 'Duplicar evento (crea uno nuevo con mismos datos, status DRAFT)' })
   duplicateEvent(@Param('id') id: string, @CurrentUser() admin: User) {
     return this.adminService.duplicateEvent(id, admin.id);
+  }
+
+  // ── Tanda 3: sessions · broadcasts history · bulk reviews · venue blocks ──
+
+  @Get('users/:id/sessions') @ApiOperation({ summary: 'Sesiones activas del usuario' })
+  listUserSessions(@Param('id') id: string) {
+    return this.adminService.listUserSessions(id);
+  }
+
+  @Post('users/:id/sessions/:sessionId/revoke') @HttpCode(HttpStatus.OK)
+  @Audit('user.revoke_session', { targetType: 'USER', targetIdParam: 'id' })
+  @ApiOperation({ summary: 'Revocar una sesión específica del usuario' })
+  revokeUserSession(@Param('id') id: string, @Param('sessionId') sessionId: string) {
+    return this.adminService.revokeUserSession(id, sessionId);
+  }
+
+  @Post('users/:id/sessions/revoke-all') @HttpCode(HttpStatus.OK)
+  @Audit('user.revoke_all_sessions', { targetType: 'USER', targetIdParam: 'id' })
+  @ApiOperation({ summary: 'Revocar todas las sesiones del usuario' })
+  revokeAllUserSessions(@Param('id') id: string) {
+    return this.adminService.revokeAllUserSessions(id);
+  }
+
+  @Get('notifications/broadcasts') @ApiOperation({ summary: 'Historial de broadcasts push' })
+  listBroadcasts() {
+    return this.adminService.listBroadcasts();
+  }
+
+  @Post('reviews/bulk-delete') @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @Audit('review.bulk_delete', { targetType: 'REVIEW' })
+  @ApiOperation({ summary: 'Eliminar varias reseñas a la vez' })
+  bulkDeleteReviews(@Body() body: { ids: string[] }) {
+    return this.adminService.bulkDeleteReviews(body.ids ?? []);
+  }
+
+  @Get('venues/:id/blocks') @ApiOperation({ summary: 'Listar bloqueos de horarios de un venue' })
+  listVenueBlocks(@Param('id') id: string) {
+    return this.adminService.listVenueBlocks(id);
+  }
+
+  @Post('venues/:id/blocks') @ApiOperation({ summary: 'Crear bloqueo de horario (privado, mantenimiento)' })
+  @Audit('venue.create_block', { targetType: 'VENUE', targetIdParam: 'id' })
+  createVenueBlock(
+    @CurrentUser() admin: User,
+    @Param('id') id: string,
+    @Body() body: { startsAt: string; endsAt: string; reason?: string },
+  ) {
+    return this.adminService.createVenueBlock(admin.id, id, body);
+  }
+
+  @Delete('venues/:id/blocks/:blockId') @HttpCode(HttpStatus.NO_CONTENT)
+  @Audit('venue.delete_block', { targetType: 'VENUE', targetIdParam: 'id' })
+  @ApiOperation({ summary: 'Eliminar bloqueo de horario' })
+  deleteVenueBlock(@Param('blockId') blockId: string) {
+    return this.adminService.deleteVenueBlock(blockId);
   }
 
   // ── Reservations ──────────────────────────

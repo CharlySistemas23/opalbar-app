@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Settings, Save, Clock, Users, MapPin, Check } from 'lucide-react';
-import { venuesApi, apiError } from '@/api/client';
+import { Settings, Save, Clock, Users, MapPin, Check, Ban, Plus, Trash2 } from 'lucide-react';
+import { venuesApi, adminApi, apiError } from '@/api/client';
 import {
-  PageHeader, EmptyState, SkeletonRows, InlineError, Switch, Field,
+  PageHeader, EmptyState, SkeletonRows, InlineError, Switch, Field, Modal, ConfirmDialog,
 } from '@/components/ui';
 
 function unwrap<T = any>(p: any): T {
@@ -167,10 +167,137 @@ export function ReservationConfig() {
                   </span>
                 )}
               </div>
+
+              {/* Bloqueos de horarios */}
+              <VenueBlocks venueId={selected.id} />
             </div>
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
+//  VenueBlocks — bloqueos de horario por venue
+// ─────────────────────────────────────────────
+function VenueBlocks({ venueId }: { venueId: string }) {
+  const qc = useQueryClient();
+  const [creating, setCreating] = useState<{ startsAt: string; endsAt: string; reason: string } | null>(null);
+  const [confirmDel, setConfirmDel] = useState<string | null>(null);
+
+  const blocksQuery = useQuery({
+    queryKey: ['admin', 'venues', venueId, 'blocks'],
+    queryFn: async () => {
+      const r = await adminApi.listVenueBlocks(venueId);
+      const list = (r as any).data?.data ?? (r as any).data ?? [];
+      return Array.isArray(list) ? list : [];
+    },
+  });
+
+  const create = useMutation({
+    mutationFn: (form: NonNullable<typeof creating>) => adminApi.createVenueBlock(venueId, {
+      startsAt: new Date(form.startsAt).toISOString(),
+      endsAt: new Date(form.endsAt).toISOString(),
+      reason: form.reason.trim() || undefined,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'venues', venueId, 'blocks'] });
+      setCreating(null);
+    },
+  });
+
+  const del = useMutation({
+    mutationFn: (blockId: string) => adminApi.deleteVenueBlock(venueId, blockId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'venues', venueId, 'blocks'] }),
+  });
+
+  const blocks = blocksQuery.data ?? [];
+
+  return (
+    <div className="pt-6 mt-6 border-t border-line/60">
+      <div className="flex items-center justify-between mb-3">
+        <p className="section-title flex items-center gap-2">
+          <Ban size={12} /> Bloqueos de horario · {blocks.length}
+        </p>
+        <button
+          type="button"
+          onClick={() => setCreating({
+            startsAt: new Date().toISOString().slice(0, 16),
+            endsAt: '',
+            reason: '',
+          })}
+          className="btn-ghost py-1.5 text-xs"
+        >
+          <Plus size={12} /> Nuevo bloqueo
+        </button>
+      </div>
+
+      <InlineError message={create.error ? apiError(create.error) : del.error ? apiError(del.error) : null} />
+
+      {blocksQuery.isLoading ? (
+        <SkeletonRows rows={2} height={48} />
+      ) : blocks.length === 0 ? (
+        <p className="text-xs text-muted italic">Sin bloqueos. Las reservas pueden hacerse en cualquier slot del horario.</p>
+      ) : (
+        <ul className="space-y-2">
+          {blocks.map((b: any) => (
+            <li key={b.id} className="flex items-center gap-3 p-3 rounded-lg bg-elevated/40 border border-line">
+              <Ban size={14} className="text-warning shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold">
+                  {new Date(b.startsAt).toLocaleString('es', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                  {' → '}
+                  {new Date(b.endsAt).toLocaleString('es', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                </p>
+                {b.reason && <p className="text-[11px] text-muted">{b.reason}</p>}
+              </div>
+              <button
+                type="button"
+                title="Eliminar bloqueo"
+                onClick={() => setConfirmDel(b.id)}
+                className="p-1.5 rounded hover:bg-danger/15 text-muted hover:text-danger"
+              >
+                <Trash2 size={14} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <Modal open={!!creating} onClose={() => setCreating(null)} title="Bloquear horario">
+        {creating && (
+          <div className="space-y-3">
+            <p className="text-xs text-muted">
+              Las reservas no se podrán crear durante este rango. Útil para eventos privados o mantenimiento.
+            </p>
+            <Field label="Desde" type="datetime-local" required value={creating.startsAt} onChange={(v) => setCreating({ ...creating, startsAt: v })} />
+            <Field label="Hasta" type="datetime-local" required value={creating.endsAt} onChange={(v) => setCreating({ ...creating, endsAt: v })} />
+            <Field label="Motivo" value={creating.reason} onChange={(v) => setCreating({ ...creating, reason: v })} placeholder="Evento privado / Mantenimiento" />
+            <div className="flex gap-2 pt-2">
+              <button type="button" onClick={() => setCreating(null)} className="btn-ghost flex-1">Cancelar</button>
+              <button
+                type="button"
+                onClick={() => create.mutate(creating)}
+                disabled={create.isPending || !creating.startsAt || !creating.endsAt}
+                className="btn-primary flex-1"
+              >
+                {create.isPending ? 'Creando…' : 'Bloquear'}
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      <ConfirmDialog
+        open={!!confirmDel}
+        onClose={() => setConfirmDel(null)}
+        title="Eliminar bloqueo?"
+        message="Las reservas volverán a poder crearse en este rango."
+        destructive
+        confirmLabel="Eliminar"
+        onConfirm={() => confirmDel && del.mutate(confirmDel)}
+      />
     </div>
   );
 }
