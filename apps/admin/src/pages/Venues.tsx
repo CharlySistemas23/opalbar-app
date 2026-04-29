@@ -1,10 +1,16 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { MapPin } from 'lucide-react';
+import { MapPin, Plus } from 'lucide-react';
 import { venuesApi, apiError } from '@/api/client';
+import { Modal, Field as UiField, InlineError } from '@/components/ui';
+import { useAuthStore } from '@/stores/auth.store';
 
 export function Venues() {
   const [selected, setSelected] = useState<string | null>(null);
+  const [creating, setCreating] = useState<{ name: string; address: string; city: string; description: string; phone: string; imageUrl: string } | null>(null);
+  const qc = useQueryClient();
+  const { user: me } = useAuthStore();
+  const isSuper = me?.role === 'SUPER_ADMIN';
 
   const { data, isLoading } = useQuery({
     queryKey: ['venues-admin'],
@@ -14,13 +20,36 @@ export function Venues() {
     },
   });
 
+  const create = useMutation({
+    mutationFn: (form: NonNullable<typeof creating>) => venuesApi.create({
+      name: form.name.trim(),
+      address: form.address.trim() || undefined,
+      city: form.city.trim() || undefined,
+      description: form.description.trim() || undefined,
+      phone: form.phone.trim() || undefined,
+      imageUrl: form.imageUrl.trim() || undefined,
+    }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['venues-admin'] }); setCreating(null); },
+  });
+
   const venues: any[] = data ?? [];
 
   return (
     <div className="p-8 space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Venues</h1>
-        <p className="text-muted text-sm mt-1">{venues.length} ubicaciones</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Venues</h1>
+          <p className="text-muted text-sm mt-1">{venues.length} ubicaciones</p>
+        </div>
+        {isSuper && (
+          <button
+            type="button"
+            onClick={() => setCreating({ name: '', address: '', city: 'Puerto Vallarta', description: '', phone: '', imageUrl: '' })}
+            className="btn-primary"
+          >
+            <Plus size={14} /> Nuevo venue
+          </button>
+        )}
       </div>
 
       {isLoading ? (
@@ -54,6 +83,31 @@ export function Venues() {
           )}
         </div>
       )}
+
+      <Modal open={!!creating} onClose={() => setCreating(null)} title="Nuevo venue">
+        {creating && (
+          <div className="space-y-3">
+            <UiField label="Nombre" required value={creating.name} onChange={(v) => setCreating({ ...creating, name: v })} placeholder="OPAL BAR Vallarta" />
+            <UiField label="Dirección" value={creating.address} onChange={(v) => setCreating({ ...creating, address: v })} placeholder="Av. Las Palmas 123" />
+            <UiField label="Ciudad" value={creating.city} onChange={(v) => setCreating({ ...creating, city: v })} />
+            <UiField label="Teléfono" value={creating.phone} onChange={(v) => setCreating({ ...creating, phone: v })} />
+            <UiField label="URL imagen" value={creating.imageUrl} onChange={(v) => setCreating({ ...creating, imageUrl: v })} placeholder="https://…" />
+            <UiField label="Descripción" rows={3} value={creating.description} onChange={(v) => setCreating({ ...creating, description: v })} />
+            <InlineError message={create.error ? apiError(create.error) : null} />
+            <div className="flex gap-2 pt-2">
+              <button type="button" onClick={() => setCreating(null)} className="btn-ghost flex-1">Cancelar</button>
+              <button
+                type="button"
+                onClick={() => create.mutate(creating)}
+                disabled={create.isPending || !creating.name.trim()}
+                className="btn-primary flex-1"
+              >
+                {create.isPending ? 'Creando…' : 'Crear venue'}
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

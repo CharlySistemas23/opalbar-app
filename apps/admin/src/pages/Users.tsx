@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { Search, Shield, Ban, Check, Users as UsersIcon } from 'lucide-react';
+import { Search, Shield, Ban, Check, Users as UsersIcon, Plus, Key, Mail } from 'lucide-react';
 import { adminApi, apiError } from '@/api/client';
 import { useAuthStore } from '@/stores/auth.store';
+import { Modal, Field, InlineError, ConfirmDialog } from '@/components/ui';
 
 const STATUSES = ['', 'ACTIVE', 'BANNED', 'PENDING_VERIFICATION', 'DELETED'];
 const ROLES = ['', 'USER', 'MODERATOR', 'ADMIN', 'SUPER_ADMIN'];
@@ -13,7 +14,13 @@ export function Users() {
   const [status, setStatus] = useState('');
   const [role, setRole] = useState('');
   const [page, setPage] = useState(1);
+  const [creating, setCreating] = useState<{ email: string; firstName: string; lastName: string; role: string; phone: string } | null>(null);
+  const [createdResult, setCreatedResult] = useState<{ email: string; tempPassword: string } | null>(null);
+  const [resetTarget, setResetTarget] = useState<{ id: string; email: string } | null>(null);
+  const [resetResult, setResetResult] = useState<{ email: string; tempPassword: string } | null>(null);
   const qc = useQueryClient();
+  const { user: me } = useAuthStore();
+  const isSuper = me?.role === 'SUPER_ADMIN';
 
   const { data, isLoading } = useQuery({
     queryKey: ['admin', 'users', page, status, role, search],
@@ -31,6 +38,35 @@ export function Users() {
     mutationFn: (id: string) => adminApi.unbanUser(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'users'] }),
   });
+  const createUser = useMutation({
+    mutationFn: (form: NonNullable<typeof creating>) =>
+      adminApi.createUser({
+        email: form.email.trim(),
+        firstName: form.firstName.trim() || undefined,
+        lastName: form.lastName.trim() || undefined,
+        role: form.role || undefined,
+        phone: form.phone.trim() || undefined,
+      }),
+    onSuccess: (r) => {
+      const data: any = (r as any).data?.data ?? (r as any).data ?? r;
+      qc.invalidateQueries({ queryKey: ['admin', 'users'] });
+      setCreating(null);
+      setCreatedResult({ email: data.user?.email ?? '', tempPassword: data.tempPassword ?? '—' });
+    },
+  });
+  const resetPwd = useMutation({
+    mutationFn: (id: string) => adminApi.resetUserPassword(id),
+    onSuccess: (r, id) => {
+      const data: any = (r as any).data?.data ?? (r as any).data ?? r;
+      const target = users.find((x: any) => x.id === id);
+      setResetResult({ email: target?.email ?? '', tempPassword: data.tempPassword ?? '—' });
+      setResetTarget(null);
+    },
+  });
+  const resendVer = useMutation({
+    mutationFn: (id: string) => adminApi.resendUserVerification(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'users'] }),
+  });
 
   const users: any[] = data?.data || data?.users || data || [];
   const total = data?.total ?? data?.meta?.total ?? users.length;
@@ -42,6 +78,15 @@ export function Users() {
           <h1 className="text-2xl font-bold">Usuarios</h1>
           <p className="text-muted text-sm mt-1">{total} usuarios</p>
         </div>
+        {isSuper && (
+          <button
+            type="button"
+            onClick={() => setCreating({ email: '', firstName: '', lastName: '', role: 'USER', phone: '' })}
+            className="btn-primary"
+          >
+            <Plus size={14} /> Nuevo usuario
+          </button>
+        )}
       </div>
 
       <div className="card p-4 flex gap-3 flex-wrap">
@@ -115,10 +160,30 @@ export function Users() {
                     {u.createdAt ? new Date(u.createdAt).toLocaleDateString('es') : '—'}
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <div className="flex gap-2 justify-end">
+                    <div className="flex gap-2 justify-end items-center">
                       <Link to={`/admin/users/${u.id}`} className="text-accent text-sm font-semibold hover:underline">Ver</Link>
+                      <button
+                        type="button"
+                        title="Resetear contraseña"
+                        onClick={() => setResetTarget({ id: u.id, email: u.email })}
+                        className="p-1.5 rounded-lg hover:bg-warning/15 text-muted hover:text-warning"
+                      >
+                        <Key size={12} />
+                      </button>
+                      {!u.isVerified && (
+                        <button
+                          type="button"
+                          title="Marcar como verificado"
+                          onClick={() => resendVer.mutate(u.id)}
+                          disabled={resendVer.isPending}
+                          className="p-1.5 rounded-lg hover:bg-info/15 text-muted hover:text-info"
+                        >
+                          <Mail size={12} />
+                        </button>
+                      )}
                       {u.status === 'BANNED' ? (
                         <button
+                          type="button"
                           onClick={() => unban.mutate(u.id)}
                           disabled={unban.isPending}
                           className="text-xs text-success font-bold hover:underline flex items-center gap-1"
@@ -127,6 +192,7 @@ export function Users() {
                         </button>
                       ) : (
                         <button
+                          type="button"
                           onClick={() => {
                             const reason = prompt('Motivo del ban:');
                             if (reason) ban.mutate({ id: u.id, reason });
@@ -146,11 +212,94 @@ export function Users() {
         </div>
       )}
 
-      {(ban.error || unban.error) && (
-        <p className="text-danger text-sm">{apiError(ban.error || unban.error)}</p>
+      {(ban.error || unban.error || createUser.error || resetPwd.error || resendVer.error) && (
+        <InlineError message={apiError(ban.error || unban.error || createUser.error || resetPwd.error || resendVer.error)} />
       )}
 
       <Pagination page={page} setPage={setPage} hasMore={users.length >= 25} />
+
+      {/* Crear usuario */}
+      <Modal open={!!creating} onClose={() => setCreating(null)} title="Nuevo usuario">
+        {creating && (
+          <div className="space-y-3">
+            <Field label="Email" required value={creating.email} onChange={(v) => setCreating({ ...creating, email: v })} placeholder="usuario@gmail.com" />
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Nombre" value={creating.firstName} onChange={(v) => setCreating({ ...creating, firstName: v })} />
+              <Field label="Apellido" value={creating.lastName} onChange={(v) => setCreating({ ...creating, lastName: v })} />
+            </div>
+            <Field label="Teléfono (opcional)" value={creating.phone} onChange={(v) => setCreating({ ...creating, phone: v })} placeholder="+52 322 123 4567" />
+            <label className="block">
+              <span className="text-[11px] font-bold text-muted tracking-wider uppercase">Rol</span>
+              <select
+                title="Rol"
+                value={creating.role}
+                onChange={(e) => setCreating({ ...creating, role: e.target.value })}
+                className="input-field mt-1.5"
+              >
+                {ROLES.filter(Boolean).map((r) => <option key={r} value={r}>{r}</option>)}
+              </select>
+            </label>
+            <p className="text-[11px] text-muted">Se generará una contraseña temporal que tendrás que comunicarle al usuario.</p>
+            <div className="flex gap-2 pt-2">
+              <button type="button" onClick={() => setCreating(null)} className="btn-ghost flex-1">Cancelar</button>
+              <button
+                type="button"
+                onClick={() => createUser.mutate(creating)}
+                disabled={createUser.isPending || !creating.email.trim()}
+                className="btn-primary flex-1"
+              >
+                {createUser.isPending ? 'Creando…' : 'Crear usuario'}
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Resultado: usuario creado con password temporal */}
+      <Modal open={!!createdResult} onClose={() => setCreatedResult(null)} title="✅ Usuario creado">
+        {createdResult && (
+          <div className="space-y-3">
+            <p className="text-sm text-zinc-200">Compartile estos datos al usuario:</p>
+            <div className="card p-4 space-y-2 ring-1 ring-success/30">
+              <div>
+                <p className="text-[10px] text-muted uppercase font-bold">Email</p>
+                <p className="font-mono text-sm">{createdResult.email}</p>
+              </div>
+              <div>
+                <p className="text-[10px] text-muted uppercase font-bold">Contraseña temporal</p>
+                <p className="font-mono text-sm select-all bg-elevated px-2 py-1 rounded">{createdResult.tempPassword}</p>
+              </div>
+            </div>
+            <p className="text-[11px] text-warning">⚠️ Esta contraseña no se guarda en ningún lado. Copiala ahora.</p>
+            <button type="button" onClick={() => setCreatedResult(null)} className="btn-primary w-full">Listo</button>
+          </div>
+        )}
+      </Modal>
+
+      {/* Confirmar reset de contraseña */}
+      <ConfirmDialog
+        open={!!resetTarget}
+        onClose={() => setResetTarget(null)}
+        title={`Resetear contraseña de ${resetTarget?.email}?`}
+        message="Se generará una nueva contraseña temporal y todas las sesiones activas del usuario se cerrarán."
+        destructive
+        confirmLabel="Resetear contraseña"
+        onConfirm={() => resetTarget && resetPwd.mutate(resetTarget.id)}
+      />
+
+      {/* Resultado: contraseña reseteada */}
+      <Modal open={!!resetResult} onClose={() => setResetResult(null)} title="🔑 Contraseña reseteada">
+        {resetResult && (
+          <div className="space-y-3">
+            <p className="text-sm text-zinc-200">Nueva contraseña temporal para <span className="font-mono">{resetResult.email}</span>:</p>
+            <p className="font-mono text-base select-all bg-elevated px-3 py-2 rounded ring-1 ring-warning/30">
+              {resetResult.tempPassword}
+            </p>
+            <p className="text-[11px] text-warning">⚠️ Copiala ahora. No se guarda en ningún lado.</p>
+            <button type="button" onClick={() => setResetResult(null)} className="btn-primary w-full">Listo</button>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

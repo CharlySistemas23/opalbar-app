@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle, XCircle, AlertCircle, MessageSquare } from 'lucide-react';
+import { CheckCircle, XCircle, AlertCircle, MessageSquare, Pin, PinOff } from 'lucide-react';
 import { adminApi } from '@/api/client';
 
 export function Community() {
@@ -30,6 +30,13 @@ export function Community() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'posts', 'pending'] });
       queryClient.invalidateQueries({ queryKey: ['admin', 'stats'] });
+    },
+  });
+
+  const togglePin = useMutation({
+    mutationFn: ({ id, pinned }: { id: string; pinned: boolean }) => adminApi.pinPost(id, pinned),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'posts', 'pending'] });
     },
   });
 
@@ -108,8 +115,10 @@ export function Community() {
               post={post}
               onApprove={(id) => approve.mutate(id)}
               onReject={(id, reason) => reject.mutate({ postId: id, reason })}
+              onTogglePin={(id, pinned) => togglePin.mutate({ id, pinned })}
               isApproving={approve.isPending}
               isRejecting={reject.isPending}
+              isPinning={togglePin.isPending}
             />
           ))}
         </div>
@@ -141,16 +150,20 @@ interface PostCardProps {
   post: any;
   onApprove: (id: string) => void;
   onReject: (id: string, reason: string) => void;
+  onTogglePin: (id: string, pinned: boolean) => void;
   isApproving: boolean;
   isRejecting: boolean;
+  isPinning: boolean;
 }
 
 function PostCard({
   post,
   onApprove,
   onReject,
+  onTogglePin,
   isApproving,
   isRejecting,
+  isPinning,
 }: PostCardProps) {
   const [showRejectForm, setShowRejectForm] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
@@ -227,6 +240,7 @@ function PostCard({
       {!showRejectForm ? (
         <div className="flex gap-2">
           <button
+            type="button"
             onClick={() => onApprove(post.id)}
             disabled={isApproving || isRejecting}
             className="flex-1 btn-success flex items-center justify-center gap-2 disabled:opacity-50"
@@ -235,12 +249,23 @@ function PostCard({
             Aprobar
           </button>
           <button
+            type="button"
             onClick={() => setShowRejectForm(true)}
             disabled={isApproving || isRejecting}
             className="flex-1 btn-danger flex items-center justify-center gap-2 disabled:opacity-50"
           >
             <XCircle size={16} />
             Rechazar
+          </button>
+          <button
+            type="button"
+            title={post.isPinned ? 'Desfijar del feed' : 'Fijar en el feed'}
+            onClick={() => onTogglePin(post.id, !post.isPinned)}
+            disabled={isPinning}
+            className={`btn-ghost flex items-center justify-center gap-2 disabled:opacity-50 ${post.isPinned ? 'ring-1 ring-accent text-accent' : ''}`}
+          >
+            {post.isPinned ? <PinOff size={16} /> : <Pin size={16} />}
+            {post.isPinned ? 'Desfijar' : 'Fijar'}
           </button>
         </div>
       ) : (

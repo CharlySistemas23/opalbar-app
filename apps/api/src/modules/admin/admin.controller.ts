@@ -82,6 +82,32 @@ export class AdminController {
     return this.adminService.listUsers(pagination);
   }
 
+  @Post('users') @Roles(UserRole.SUPER_ADMIN)
+  @Audit('user.create_admin', { targetType: 'USER' })
+  @ApiOperation({ summary: 'Create a user manually (staff onboarding, VIP). Returns temp password.' })
+  createUser(
+    @CurrentUser() admin: User,
+    @Body() body: { email: string; firstName?: string; lastName?: string; role?: UserRole; phone?: string },
+  ) {
+    return this.adminService.createUserManually(admin.id, body);
+  }
+
+  @Post('users/:id/reset-password') @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @Audit('user.reset_password', { targetType: 'USER', targetIdParam: 'id' })
+  @ApiOperation({ summary: 'Reset password — generates temp password and returns it' })
+  resetUserPassword(@CurrentUser() admin: User, @Param('id') id: string) {
+    return this.adminService.resetUserPassword(admin.id, id);
+  }
+
+  @Post('users/:id/resend-verification') @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @Audit('user.resend_verification', { targetType: 'USER', targetIdParam: 'id' })
+  @ApiOperation({ summary: 'Resend the verification email/OTP to this user' })
+  resendUserVerification(@Param('id') id: string) {
+    return this.adminService.resendVerification(id);
+  }
+
   @Get('users/:id') @ApiOperation({ summary: 'User detail with interests, stats, consent, activity' })
   getUser(@Param('id') id: string) {
     return this.adminService.getUserDetail(id);
@@ -166,6 +192,13 @@ export class AdminController {
     return this.adminService.moderatePost(user.id, id, 'reject', reason);
   }
 
+  @Patch('posts/:id/pin') @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
+  @Audit('post.pin', { targetType: 'POST', targetIdParam: 'id' })
+  @ApiOperation({ summary: 'Toggle pinned state of a post (anuncio fijo en el feed)' })
+  togglePinPost(@Param('id') id: string, @Body() body: { pinned: boolean }) {
+    return this.adminService.togglePinPost(id, !!body.pinned);
+  }
+
   @Post('posts/bulk/approve')
   @Audit('post.bulk.approve')
   @ApiOperation({ summary: 'Approve multiple posts at once (max 100)' })
@@ -245,6 +278,23 @@ export class AdminController {
   @Get('reservations') @ApiOperation({ summary: 'List all reservations' })
   listReservations(@Query() filter: ReservationFilterDto) {
     return this.reservationsService.findAll(filter);
+  }
+
+  @Post('reservations') @ApiOperation({ summary: 'Crear reserva manual (walk-in, telefónica, VIP)' })
+  @Audit('reservation.create_admin', { targetType: 'RESERVATION' })
+  createManualReservation(
+    @CurrentUser() admin: User,
+    @Body() body: {
+      userId: string;
+      venueId: string;
+      date: string;
+      timeSlot: string;
+      partySize: number;
+      notes?: string;
+      internalNotes?: string;
+    },
+  ) {
+    return this.adminService.createManualReservation(admin.id, body);
   }
 
   @Patch('reservations/:id/status') @ApiOperation({ summary: 'Update reservation status' })

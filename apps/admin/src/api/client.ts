@@ -96,6 +96,10 @@ export const adminApi = {
   users: (params?: any) => apiClient.get('/admin/users', { params }),
   user: (id: string) => apiClient.get(`/admin/users/${id}`),
   userAudit: (id: string, limit = 50) => apiClient.get(`/admin/users/${id}/audit`, { params: { limit } }),
+  createUser: (data: { email: string; firstName?: string; lastName?: string; role?: string; phone?: string }) =>
+    apiClient.post('/admin/users', data),
+  resetUserPassword: (id: string) => apiClient.post(`/admin/users/${id}/reset-password`),
+  resendUserVerification: (id: string) => apiClient.post(`/admin/users/${id}/resend-verification`),
   banUser: (id: string, reason: string) => apiClient.patch(`/admin/users/${id}/ban`, { reason }),
   unbanUser: (id: string) => apiClient.patch(`/admin/users/${id}/unban`),
   deleteUser: (id: string) => apiClient.delete(`/admin/users/${id}`),
@@ -103,6 +107,10 @@ export const adminApi = {
   adjustPoints: (id: string, delta: number, reason: string) =>
     apiClient.post(`/admin/users/${id}/points`, { delta, reason }),
   updateNote: (id: string, note: string | null) => apiClient.patch(`/admin/users/${id}/note`, { note }),
+  // Reservations admin-create + pin
+  createReservation: (data: { userId: string; venueId: string; date: string; timeSlot: string; partySize: number; notes?: string; internalNotes?: string }) =>
+    apiClient.post('/admin/reservations', data),
+  pinPost: (id: string, pinned: boolean) => apiClient.patch(`/admin/posts/${id}/pin`, { pinned }),
 
   // Community moderation
   posts: (params?: any) => apiClient.get('/admin/posts/pending', { params }),
@@ -220,6 +228,7 @@ export const messagesApi = {
 export const venuesApi = {
   list: (params?: any) => apiClient.get('/venues', { params }),
   get: (id: string) => apiClient.get(`/venues/${id}`),
+  create: (data: any) => apiClient.post('/venues', data),
   update: (id: string, data: any) => apiClient.patch(`/venues/${id}`, data),
   updateConfig: (id: string, data: any) => apiClient.patch(`/venues/${id}/config`, data),
 };

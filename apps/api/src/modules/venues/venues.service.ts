@@ -84,6 +84,47 @@ export class VenuesService {
     return updated;
   }
 
+  async create(data: {
+    name: string;
+    address?: string;
+    city?: string;
+    description?: string;
+    phone?: string;
+    imageUrl?: string;
+    coverUrl?: string;
+  }) {
+    const name = (data.name ?? '').trim();
+    if (!name) throw new NotFoundException('Falta el nombre del venue');
+    // Slug auto-generado a partir del nombre, garantizado único
+    const baseSlug = name.toLowerCase()
+      .normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 60) || 'venue';
+    let slug = baseSlug;
+    let suffix = 0;
+    while (await this.prisma.venue.findUnique({ where: { slug } })) {
+      suffix += 1;
+      slug = `${baseSlug}-${suffix}`;
+    }
+    const venue = await this.prisma.venue.create({
+      data: {
+        name,
+        slug,
+        address: data.address?.trim() || 'Sin dirección',
+        city: data.city?.trim() || 'Puerto Vallarta',
+        country: 'MX',
+        description: data.description?.trim() || null,
+        phone: data.phone?.trim() || null,
+        imageUrl: data.imageUrl?.trim() || null,
+        coverUrl: data.coverUrl?.trim() || null,
+        isActive: true,
+      },
+    });
+    await this.invalidate();
+    return venue;
+  }
+
   async update(id: string, data: Record<string, any>) {
     const existing = await this.prisma.venue.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Venue not found');

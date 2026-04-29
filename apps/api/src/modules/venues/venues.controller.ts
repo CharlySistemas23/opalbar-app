@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { Public } from '../../common/decorators/public.decorator';
@@ -57,5 +57,21 @@ export class VenuesController {
   @ApiOperation({ summary: 'Update venue fields (Admin only)' })
   update(@Param('id') id: string, @Body() body: UpdateVenueDto) {
     return this.venuesService.update(id, body);
+  }
+
+  @Post()
+  @Roles(UserRole.SUPER_ADMIN)
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Create a new venue (SuperAdmin only)' })
+  create(@Body() body: {
+    name: string;
+    address?: string;
+    city?: string;
+    description?: string;
+    phone?: string;
+    imageUrl?: string;
+    coverUrl?: string;
+  }) {
+    return this.venuesService.create(body);
   }
 }

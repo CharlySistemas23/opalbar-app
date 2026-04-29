@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Calendar, Check, X, ChevronLeft, ChevronRight } from 'lucide-react';
-import { adminApi, apiError } from '@/api/client';
+import { Calendar, Check, X, ChevronLeft, ChevronRight, Plus, Search } from 'lucide-react';
+import { adminApi, venuesApi, apiError } from '@/api/client';
 import {
   PageHeader, EmptyState, SkeletonRows, StatusPill, InlineError,
+  Modal, Field, useDebounced,
 } from '@/components/ui';
 
 const STATUSES = ['', 'PENDING', 'CONFIRMED', 'SEATED', 'COMPLETED', 'CANCELLED', 'NO_SHOW'];
@@ -16,6 +17,10 @@ export function Reservations() {
   const [status, setStatus] = useState('');
   const [date, setDate] = useState('');
   const [page, setPage] = useState(1);
+  const [creating, setCreating] = useState<{
+    userId: string; userLabel: string; userSearch: string;
+    venueId: string; date: string; timeSlot: string; partySize: string; notes: string;
+  } | null>(null);
   const qc = useQueryClient();
 
   const { data, isLoading } = useQuery({
@@ -33,6 +38,18 @@ export function Reservations() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'reservations'] }),
   });
 
+  const create = useMutation({
+    mutationFn: (form: NonNullable<typeof creating>) => adminApi.createReservation({
+      userId: form.userId,
+      venueId: form.venueId,
+      date: form.date,
+      timeSlot: form.timeSlot,
+      partySize: Number(form.partySize),
+      notes: form.notes.trim() || undefined,
+    }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin', 'reservations'] }); setCreating(null); },
+  });
+
   const reservations: any[] = Array.isArray(data) ? data : (data?.data ?? data ?? []);
 
   return (
@@ -41,6 +58,18 @@ export function Reservations() {
         icon={Calendar}
         title="Reservaciones"
         subtitle={`${reservations.length} resultados${status ? ` · ${status}` : ''}${date ? ` · ${date}` : ''}`}
+        actions={
+          <button
+            type="button"
+            onClick={() => setCreating({
+              userId: '', userLabel: '', userSearch: '',
+              venueId: '', date: '', timeSlot: '20:00', partySize: '2', notes: '',
+            })}
+            className="btn-primary"
+          >
+            <Plus size={14} /> Nueva reserva
+          </button>
+        }
       />
 
       <div className="toolbar">
@@ -152,6 +181,154 @@ export function Reservations() {
           Siguiente <ChevronRight size={12} />
         </button>
       </div>
+
+      <Modal open={!!creating} onClose={() => setCreating(null)} title="Nueva reserva manual" size="lg">
+        {creating && (
+          <CreateReservationForm
+            form={creating}
+            onChange={setCreating}
+            onSubmit={() => create.mutate(creating)}
+            onCancel={() => setCreating(null)}
+            submitting={create.isPending}
+            error={create.error ? apiError(create.error) : null}
+          />
+        )}
+      </Modal>
     </div>
   );
 }
+
+// ─────────────────────────────────────────────
+//  Form de reserva manual
+// ─────────────────────────────────────────────
+function CreateReservationForm({
+  form, onChange, onSubmit, onCancel, submitting, error,
+}: {
+  form: NonNullable<Parameters<typeof setStateExample>[0]> | any; // pragmático
+  onChange: (f: any) => void;
+  onSubmit: () => void;
+  onCancel: () => void;
+  submitting: boolean;
+  error: string | null;
+}) {
+  const debounced = useDebounced(form.userSearch, 300);
+
+  const venuesQuery = useQuery({
+    queryKey: ['venues-quick'],
+    queryFn: async () => {
+      const r = await venuesApi.list({ limit: 50 });
+      return (r.data?.data?.data ?? r.data?.data ?? r.data ?? []) as any[];
+    },
+  });
+
+  const usersQuery = useQuery({
+    enabled: debounced.trim().length >= 2,
+    queryKey: ['admin', 'users-search', debounced],
+    queryFn: async () => {
+      const r = await adminApi.users({ search: debounced.trim(), limit: 12 });
+      const list: any[] = (r.data?.data?.data ?? r.data?.data ?? r.data ?? []) as any[];
+      return list;
+    },
+  });
+
+  const venues: any[] = Array.isArray(venuesQuery.data) ? venuesQuery.data : [];
+  const userMatches: any[] = Array.isArray(usersQuery.data) ? usersQuery.data : [];
+
+  const canSubmit = !!form.userId && !!form.venueId && !!form.date && !!form.timeSlot && Number(form.partySize) > 0 && !submitting;
+
+  return (
+    <div className="space-y-4">
+      {/* User picker */}
+      <div>
+        <p className="text-[11px] font-bold text-muted tracking-wider uppercase mb-2">Cliente</p>
+        {form.userId ? (
+          <div className="flex items-center gap-2 p-2 rounded-lg bg-success/10 ring-1 ring-success/30">
+            <Check size={14} className="text-success" />
+            <span className="text-sm flex-1">{form.userLabel}</span>
+            <button
+              type="button"
+              onClick={() => onChange({ ...form, userId: '', userLabel: '', userSearch: '' })}
+              className="text-xs text-muted hover:text-danger"
+            >
+              cambiar
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <div className="relative">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+              <input
+                value={form.userSearch}
+                onChange={(e) => onChange({ ...form, userSearch: e.target.value })}
+                placeholder="Buscar por nombre o email…"
+                className="input-search"
+              />
+            </div>
+            {debounced.trim().length >= 2 && (
+              <div className="card max-h-[200px] overflow-auto">
+                {usersQuery.isLoading ? (
+                  <p className="p-3 text-xs text-muted">Buscando…</p>
+                ) : userMatches.length === 0 ? (
+                  <p className="p-3 text-xs text-muted">Sin resultados.</p>
+                ) : (
+                  <ul className="divide-y divide-line/60">
+                    {userMatches.map((u: any) => (
+                      <li
+                        key={u.id}
+                        onClick={() => onChange({
+                          ...form,
+                          userId: u.id,
+                          userLabel: `${u.profile?.firstName ?? ''} ${u.profile?.lastName ?? ''} (${u.email})`.trim(),
+                          userSearch: '',
+                        })}
+                        className="p-2.5 cursor-pointer hover:bg-elevated/40 text-sm"
+                      >
+                        <p className="font-semibold truncate">{u.profile?.firstName ?? ''} {u.profile?.lastName ?? ''}</p>
+                        <p className="text-[11px] text-muted truncate">{u.email}</p>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Venue */}
+      <label className="block">
+        <span className="text-[11px] font-bold text-muted tracking-wider uppercase">Venue</span>
+        <select
+          title="Venue"
+          value={form.venueId}
+          onChange={(e) => onChange({ ...form, venueId: e.target.value })}
+          className="input-field mt-1.5"
+        >
+          <option value="">Elegí un venue</option>
+          {venues.map((v: any) => <option key={v.id} value={v.id}>{v.name}</option>)}
+        </select>
+      </label>
+
+      {/* Date / time / party */}
+      <div className="grid grid-cols-3 gap-3">
+        <Field label="Fecha" type="date" value={form.date} onChange={(v) => onChange({ ...form, date: v })} />
+        <Field label="Hora (HH:MM)" value={form.timeSlot} onChange={(v) => onChange({ ...form, timeSlot: v })} placeholder="20:00" />
+        <Field label="Personas" type="number" value={form.partySize} onChange={(v) => onChange({ ...form, partySize: v })} />
+      </div>
+
+      <Field label="Notas (opcional)" rows={2} value={form.notes} onChange={(v) => onChange({ ...form, notes: v })} placeholder="Pedido especial, alergias, mesa preferida…" />
+
+      <InlineError message={error} />
+
+      <div className="flex gap-2 pt-2 border-t border-line/60">
+        <button type="button" onClick={onCancel} className="btn-ghost flex-1">Cancelar</button>
+        <button type="button" onClick={onSubmit} disabled={!canSubmit} className="btn-primary flex-1">
+          {submitting ? 'Creando…' : 'Crear reserva'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// dummy para inferencia de tipo
+function setStateExample(_: { userId: string; venueId: string; date: string; timeSlot: string; partySize: string; notes: string; userLabel: string; userSearch: string }) { return null; }
