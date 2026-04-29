@@ -241,13 +241,26 @@ export class CommunityService {
     return updated;
   }
 
-  async deletePost(_postId: string, _userId: string) {
+  async deletePost(postId: string, userId: string, role?: UserRole) {
     // Politica de moderacion: los usuarios no pueden eliminar publicaciones.
-    // Solo ADMIN/SUPER_ADMIN/MODERATOR via /admin/posts/:id. Si el contenido
-    // viola las normas de la comunidad, el flujo correcto es Reportar.
-    throw new ForbiddenException(
-      'Los usuarios no pueden eliminar publicaciones. Si esta publicación viola las normas, usa la opción Reportar.',
-    );
+    // EXCEPCION: el equipo (ADMIN/SUPER_ADMIN/MODERATOR) puede borrar
+    // (sus propios posts o cualquiera) directamente desde la app — el
+    // mismo endpoint que usa el cliente.
+    const isStaff = role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'MODERATOR';
+    if (!isStaff) {
+      throw new ForbiddenException(
+        'Los usuarios no pueden eliminar publicaciones. Si esta publicación viola las normas, usa la opción Reportar.',
+      );
+    }
+    const post = await this.prisma.post.findUnique({ where: { id: postId } });
+    if (!post || post.deletedAt) throw new NotFoundException('Post no encontrado');
+    await this.prisma.post.update({
+      where: { id: postId },
+      data: { deletedAt: new Date() },
+    });
+    await this.invalidateFeed();
+    this.communityGateway.emitChanged({ type: 'post_deleted', postId });
+    this.realtime.broadcast('post', 'deleted', { id: postId });
   }
 
   // ── COMMENTS ──────────────────────────────
@@ -553,13 +566,26 @@ export class CommunityService {
     return updated;
   }
 
-  async deleteComment(_commentId: string, _userId: string) {
-    // Politica de moderacion: los usuarios no pueden eliminar comentarios.
-    // Solo ADMIN/SUPER_ADMIN/MODERATOR. Para contenido inapropiado el flujo
-    // es Reportar.
-    throw new ForbiddenException(
-      'Los usuarios no pueden eliminar comentarios. Si este comentario viola las normas, usa la opción Reportar.',
-    );
+  async deleteComment(commentId: string, userId: string, role?: UserRole) {
+    // Misma logica que deletePost: bloqueado para usuarios, abierto para staff.
+    const isStaff = role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'MODERATOR';
+    if (!isStaff) {
+      throw new ForbiddenException(
+        'Los usuarios no pueden eliminar comentarios. Si este comentario viola las normas, usa la opción Reportar.',
+      );
+    }
+    const comment = await this.prisma.comment.findUnique({ where: { id: commentId } });
+    if (!comment || comment.deletedAt) throw new NotFoundException('Comentario no encontrado');
+    await this.prisma.$transaction([
+      this.prisma.comment.update({ where: { id: commentId }, data: { deletedAt: new Date() } }),
+      this.prisma.post.update({ where: { id: comment.postId }, data: { commentsCount: { decrement: 1 } } }),
+    ]);
+    this.communityGateway.emitChanged({
+      type: 'comment_deleted',
+      postId: comment.postId,
+      commentId,
+    });
+    this.realtime.broadcast('comment', 'deleted', { id: commentId, data: { postId: comment.postId } });
   }
 
   // ── REACTIONS ─────────────────────────────

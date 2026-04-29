@@ -39,9 +39,9 @@ export class CommunityController {
     return this.communityService.updatePost(id, user.id, dto);
   }
 
-  @Delete('posts/:id') @HttpCode(HttpStatus.NO_CONTENT) @ApiOperation({ summary: 'Delete my post' })
+  @Delete('posts/:id') @HttpCode(HttpStatus.NO_CONTENT) @ApiOperation({ summary: 'Delete a post (staff only)' })
   deletePost(@Param('id') id: string, @CurrentUser() user: User) {
-    return this.communityService.deletePost(id, user.id);
+    return this.communityService.deletePost(id, user.id, user.role);
   }
 
   @Get('posts/:id/comments') @Public() @SkipThrottle() @ApiOperation({ summary: 'Get comments for a post' })
@@ -59,9 +59,9 @@ export class CommunityController {
     return this.communityService.updateComment(id, user.id, dto.content);
   }
 
-  @Delete('comments/:id') @HttpCode(HttpStatus.NO_CONTENT) @ApiOperation({ summary: 'Delete a comment' })
+  @Delete('comments/:id') @HttpCode(HttpStatus.NO_CONTENT) @ApiOperation({ summary: 'Delete a comment (staff only)' })
   deleteComment(@Param('id') id: string, @CurrentUser() user: User) {
-    return this.communityService.deleteComment(id, user.id);
+    return this.communityService.deleteComment(id, user.id, user.role);
   }
 
   @Post('comments/:id/like') @HttpCode(HttpStatus.OK) @ApiOperation({ summary: 'Toggle like on a comment' })

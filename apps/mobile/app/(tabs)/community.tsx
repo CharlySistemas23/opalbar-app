@@ -312,22 +312,51 @@ export default function Community() {
   }
 
   function openPostOptions(post: CommunityPost) {
-    // Politica de moderacion: los usuarios NO pueden borrar publicaciones
-    // (ni propias ni ajenas). El unico flujo es Reportar — el equipo decide
-    // si retira el contenido. Mantiene la cadena de evidencia y evita que
-    // alguien borre algo justo despues de ser reportado.
-    Alert.alert(t ? 'Opciones' : 'Options', post.author.name, [
-      {
-        text: t ? 'Reportar' : 'Report',
-        onPress: async () => {
-          try {
-            await communityApi.reportPost(post.id, { reason: 'OTHER' });
-            Alert.alert(t ? 'Gracias' : 'Thanks', t ? 'Publicación reportada.' : 'Post reported.');
-          } catch {}
+    // Politica de moderacion:
+    //  · Usuarios comunes solo pueden Reportar (no borrar — preserva la
+    //    cadena de evidencia para moderacion).
+    //  · Staff (ADMIN/SUPER_ADMIN/MODERATOR) puede borrar cualquier post
+    //    directamente.
+    const isStaff = user?.role && ['ADMIN', 'SUPER_ADMIN', 'MODERATOR'].includes(user.role);
+    const buttons: any[] = [];
+
+    if (isStaff) {
+      buttons.push({
+        text: t ? 'Borrar publicación' : 'Delete post',
+        style: 'destructive' as const,
+        onPress: () => {
+          Alert.alert(
+            t ? '¿Borrar?' : 'Delete?',
+            t ? 'La publicación se ocultará del feed inmediatamente.' : 'The post will be hidden from the feed immediately.',
+            [
+              { text: t ? 'Cancelar' : 'Cancel', style: 'cancel' },
+              {
+                text: t ? 'Borrar' : 'Delete', style: 'destructive', onPress: async () => {
+                  setPosts((prev) => prev.filter((p) => p.id !== post.id));
+                  try { await communityApi.deletePost(post.id); }
+                  catch (err: any) {
+                    Alert.alert(t ? 'Error' : 'Error', apiError(err));
+                  }
+                }
+              }
+            ]
+          );
         },
+      });
+    }
+
+    buttons.push({
+      text: t ? 'Reportar' : 'Report',
+      onPress: async () => {
+        try {
+          await communityApi.reportPost(post.id, { reason: 'OTHER' });
+          Alert.alert(t ? 'Gracias' : 'Thanks', t ? 'Publicación reportada.' : 'Post reported.');
+        } catch {}
       },
-      { text: t ? 'Cancelar' : 'Cancel', style: 'cancel' },
-    ]);
+    });
+    buttons.push({ text: t ? 'Cancelar' : 'Cancel', style: 'cancel' as const });
+
+    Alert.alert(t ? 'Opciones' : 'Options', post.author.name, buttons);
   }
 
   return (

@@ -411,10 +411,12 @@ export default function PostDetail() {
 
   function onCommentOptions(c: any) {
     const mine = c.user?.id === me?.id;
+    const isStaff = me?.role && ['ADMIN', 'SUPER_ADMIN', 'MODERATOR'].includes(me.role);
     const buttons: any[] = [];
-    // Politica de moderacion: los usuarios NO pueden borrar comentarios.
-    // Solo se permite Editar el propio (el contenido queda registrado igual)
-    // y Reportar los ajenos. Si algo viola las normas, lo decide el equipo.
+    // Reglas:
+    //  · Si es mi comentario: Editar siempre. Borrar solo si soy staff.
+    //  · Si es ajeno: Reportar (todos). Borrar también si soy staff
+    //    (poder del equipo para limpiar contenido violatorio rápido).
     if (mine) {
       buttons.push({
         text: t ? 'Editar' : 'Edit',
@@ -424,7 +426,33 @@ export default function PostDetail() {
           setComment(c.content ?? '');
         },
       });
-    } else {
+    }
+    if (isStaff) {
+      buttons.push({
+        text: t ? 'Borrar comentario' : 'Delete comment',
+        style: 'destructive' as const,
+        onPress: () => {
+          Alert.alert(
+            t ? '¿Borrar comentario?' : 'Delete comment?',
+            t ? 'No se puede deshacer.' : 'Cannot be undone.',
+            [
+              { text: t ? 'Cancelar' : 'Cancel', style: 'cancel' },
+              {
+                text: t ? 'Borrar' : 'Delete', style: 'destructive', onPress: async () => {
+                  try {
+                    await communityApi.deleteComment(c.id);
+                    load();
+                  } catch (err) {
+                    Alert.alert('Error', apiError(err));
+                  }
+                }
+              }
+            ]
+          );
+        },
+      });
+    }
+    if (!mine) {
       buttons.push({
         text: t ? 'Reportar' : 'Report',
         onPress: async () => {
