@@ -16,9 +16,15 @@ export function useIdleLogout(active: boolean, onLogout: () => void) {
       return;
     }
 
+    // Reset es throttled: actualizamos el ref en CADA evento (barato, no
+    // dispara re-render) pero solo tocamos React state cuando realmente
+    // pasó algo. mousemove dispara 60+ veces por segundo y antes esto
+    // generaba 60+ re-renders del Layout, arrastrando todas las pantallas
+    // con caída de FPS visible.
     const reset = () => {
       lastActivity.current = Date.now();
-      setWarning(null);
+      // setState con bailout: solo dispara re-render si el valor cambia.
+      setWarning((prev) => (prev === null ? prev : null));
     };
     ACTIVITY_EVENTS.forEach((ev) => window.addEventListener(ev, reset, { passive: true }));
 

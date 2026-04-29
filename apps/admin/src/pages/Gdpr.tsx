@@ -63,7 +63,7 @@ export function Gdpr() {
       <div className="grid grid-cols-2 gap-4 flex-1 min-h-0">
         {/* Exports */}
         <section className="card overflow-auto flex flex-col">
-          <div className="px-4 py-3 border-b border-line/60 bg-elevated/40 sticky top-0 backdrop-blur z-10 flex items-center gap-2">
+          <div className="px-4 py-3 border-b border-line/60 bg-elevated sticky top-0 z-10 flex items-center gap-2">
             <Download size={14} className="text-info" />
             <p className="section-title">Solicitudes de exportación</p>
             <span className="ml-auto pill-info">{exports.length}</span>
@@ -104,7 +104,7 @@ export function Gdpr() {
 
         {/* Deletions */}
         <section className="card overflow-auto flex flex-col">
-          <div className="px-4 py-3 border-b border-line/60 bg-elevated/40 sticky top-0 backdrop-blur z-10 flex items-center gap-2">
+          <div className="px-4 py-3 border-b border-line/60 bg-elevated sticky top-0 z-10 flex items-center gap-2">
             <Trash2 size={14} className="text-danger" />
             <p className="section-title">Solicitudes de eliminación</p>
             <span className="ml-auto pill-danger">{deletions.length}</span>

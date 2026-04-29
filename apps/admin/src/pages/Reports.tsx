@@ -57,7 +57,7 @@ export function Reports() {
         <div className="grid grid-cols-1 lg:grid-cols-[400px,1fr] gap-4 flex-1 min-h-0">
           {/* List */}
           <div className="card overflow-auto">
-            <div className="px-4 py-3 border-b border-line/60 bg-elevated/40 sticky top-0 backdrop-blur z-10">
+            <div className="px-4 py-3 border-b border-line/60 bg-elevated sticky top-0 z-10">
               <p className="section-title">Reportes · {reports.length}</p>
             </div>
             <ul className="divide-y divide-line/60">

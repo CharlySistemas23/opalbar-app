@@ -65,7 +65,7 @@ export function ReservationConfig() {
       <div className="grid grid-cols-[300px,1fr] gap-4 flex-1 min-h-0">
         {/* Venue list */}
         <div className="card overflow-auto">
-          <div className="px-4 py-3 border-b border-line/60 bg-elevated/40 sticky top-0 backdrop-blur z-10">
+          <div className="px-4 py-3 border-b border-line/60 bg-elevated sticky top-0 z-10">
             <p className="section-title">Venues · {venues.length}</p>
           </div>
           {venuesQuery.isLoading ? (

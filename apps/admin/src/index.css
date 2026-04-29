@@ -4,12 +4,11 @@
 
 @layer base {
   html, body, #root { height: 100%; }
+  /* Background plano — los radial gradients con background-attachment: fixed
+     forzaban repaint en cada scroll y bajaban los fps notablemente en
+     pantallas con tablas largas. Mantenemos el look dark sin el costo. */
   body {
     @apply bg-bgPrimary text-zinc-100 font-sans antialiased;
-    background-image:
-      radial-gradient(1200px 600px at 0% -10%, rgba(244,163,64,0.06), transparent 60%),
-      radial-gradient(800px 500px at 100% 0%, rgba(96,165,250,0.04), transparent 60%);
-    background-attachment: fixed;
   }
 
   *::selection { @apply bg-accent/40 text-zinc-50; }
@@ -55,9 +54,9 @@
            transition;
   }
   .input-search {
-    @apply w-full pl-10 pr-3 py-2.5 rounded-xl bg-card/60 backdrop-blur border border-line
+    @apply w-full pl-10 pr-3 py-2.5 rounded-xl bg-card border border-line
            text-zinc-100 placeholder-muted text-sm
-           focus:border-accent/60 focus:bg-card focus:ring-2 focus:ring-accent/20 focus:outline-none
+           focus:border-accent/60 focus:ring-2 focus:ring-accent/20 focus:outline-none
            transition;
   }
 
@@ -106,7 +105,9 @@
     @apply w-full;
   }
   .data-table thead {
-    @apply bg-elevated/60 backdrop-blur sticky top-0 z-10;
+    /* Solid background en vez de blur para no repintar la columna en cada
+       frame de scroll. */
+    @apply bg-elevated sticky top-0 z-10;
   }
   .data-table thead th {
     @apply text-left text-[11px] font-bold text-muted uppercase tracking-wider px-4 py-3
@@ -126,7 +127,7 @@
 
   /* Toolbar */
   .toolbar {
-    @apply flex flex-wrap items-center gap-3 p-3 bg-card/60 backdrop-blur border border-line rounded-xl;
+    @apply flex flex-wrap items-center gap-3 p-3 bg-card border border-line rounded-xl;
   }
 
   /* Section header inside a page */

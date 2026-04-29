@@ -99,7 +99,7 @@ export function Staff() {
       <div className="grid grid-cols-2 gap-4 flex-1 min-h-0">
         {/* Equipo actual */}
         <div className="card overflow-auto">
-          <div className="px-4 py-3 border-b border-line/60 bg-elevated/40 sticky top-0 backdrop-blur z-10">
+          <div className="px-4 py-3 border-b border-line/60 bg-elevated sticky top-0 z-10">
             <p className="section-title">Miembros del equipo</p>
           </div>
           {staffQuery.isLoading ? (
@@ -117,7 +117,7 @@ export function Staff() {
 
         {/* Buscador */}
         <div className="card overflow-auto">
-          <div className="px-4 py-3 border-b border-line/60 bg-elevated/40 sticky top-0 backdrop-blur z-10 space-y-2">
+          <div className="px-4 py-3 border-b border-line/60 bg-elevated sticky top-0 z-10 space-y-2">
             <p className="section-title">Promover usuario</p>
             <div className="relative">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
