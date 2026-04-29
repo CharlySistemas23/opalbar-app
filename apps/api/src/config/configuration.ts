@@ -45,7 +45,7 @@ export default () => ({
     secure: process.env.SMTP_SECURE === 'true',
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
-    from: process.env.EMAIL_FROM || 'OPALBAR <noreply@opalbar.com>',
+    from: process.env.EMAIL_FROM || 'OPAL BAR <carlosalonsog966@gmail.com>',
   },
 
   twilio: {
@@ -96,7 +96,7 @@ export default () => ({
   },
 
   admin: {
-    email: process.env.ADMIN_EMAIL || 'admin@opalbar.com',
+    email: process.env.ADMIN_EMAIL || 'carlosalonsog966@gmail.com',
     password: process.env.ADMIN_PASSWORD || 'Admin@123456',
   },
 

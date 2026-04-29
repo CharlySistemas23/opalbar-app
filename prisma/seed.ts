@@ -160,7 +160,7 @@ async function main() {
   // ── Admin User ─────────────────────────────
 
   console.log('  → Admin user…');
-  const adminEmail = process.env['ADMIN_EMAIL'] || 'admin@opalbar.com';
+  const adminEmail = process.env['ADMIN_EMAIL'] || 'carlosalonsog966@gmail.com';
   const adminPassword = process.env['ADMIN_PASSWORD'] || 'Admin@123456';
   const passwordHash = await bcrypt.hash(adminPassword, 12);
 
