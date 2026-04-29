@@ -1319,12 +1319,46 @@ export class AdminService {
     return this.prisma.featureFlag.findMany({ orderBy: { key: 'asc' } });
   }
 
-  async setFeatureFlag(key: string, enabled: boolean) {
+  async createFeatureFlag(key: string, description?: string, enabled = false) {
+    const cleanKey = (key ?? '').trim();
+    if (!cleanKey) throw new BadRequestException('Falta el key del flag');
+    if (!/^[a-z][a-z0-9_]{2,49}$/.test(cleanKey)) {
+      throw new BadRequestException('Key inválido. Usá snake_case (3-50 caracteres, empieza con letra)');
+    }
+    const exists = await this.prisma.featureFlag.findUnique({ where: { key: cleanKey } });
+    if (exists) throw new BadRequestException(`Ya existe un flag con key "${cleanKey}"`);
+    return this.prisma.featureFlag.create({
+      data: {
+        key: cleanKey,
+        enabled: !!enabled,
+        description: description?.trim() || null,
+      },
+    });
+  }
+
+  async updateFeatureFlag(
+    key: string,
+    patch: { enabled?: boolean; description?: string | null },
+  ) {
+    const data: { enabled?: boolean; description?: string | null } = {};
+    if (typeof patch.enabled === 'boolean') data.enabled = patch.enabled;
+    if (typeof patch.description !== 'undefined') {
+      data.description = patch.description?.trim() || null;
+    }
     return this.prisma.featureFlag.upsert({
       where: { key },
-      update: { enabled },
-      create: { key, enabled, description: '' },
+      update: data,
+      create: { key, enabled: !!data.enabled, description: data.description ?? '' },
     });
+  }
+
+  /** Compat con el endpoint viejo `setFeatureFlag(key, enabled)` */
+  async setFeatureFlag(key: string, enabled: boolean) {
+    return this.updateFeatureFlag(key, { enabled });
+  }
+
+  async deleteFeatureFlag(key: string) {
+    await this.prisma.featureFlag.delete({ where: { key } }).catch(() => null);
   }
 
   // ─────────────────────────────────────────────

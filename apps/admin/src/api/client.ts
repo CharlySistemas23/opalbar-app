@@ -145,7 +145,12 @@ export const adminApi = {
 
   // Feature flags
   flags: () => apiClient.get('/admin/flags'),
+  createFlag: (data: { key: string; description?: string; enabled?: boolean }) =>
+    apiClient.post('/admin/flags', data),
   toggleFlag: (key: string, enabled: boolean) => apiClient.patch(`/admin/flags/${key}`, { enabled }),
+  updateFlag: (key: string, data: { enabled?: boolean; description?: string }) =>
+    apiClient.patch(`/admin/flags/${key}`, data),
+  deleteFlag: (key: string) => apiClient.delete(`/admin/flags/${key}`),
 
   // Loyalty
   loyaltyLevels: () => apiClient.get('/wallet/levels'),

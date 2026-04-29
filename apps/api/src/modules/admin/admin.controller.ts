@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Patch, Post, Query } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ReportStatus, UserRole, UserStatus } from '@prisma/client';
@@ -213,11 +213,31 @@ export class AdminController {
   @Get('flags') @ApiOperation({ summary: 'List feature flags' })
   listFlags() { return this.adminService.listFeatureFlags(); }
 
+  @Post('flags') @Roles(UserRole.SUPER_ADMIN)
+  @Audit('feature_flag.create', { targetType: 'FEATURE_FLAG' })
+  @ApiOperation({ summary: 'Create a new feature flag' })
+  createFlag(
+    @Body() body: { key: string; description?: string; enabled?: boolean },
+  ) {
+    return this.adminService.createFeatureFlag(body.key, body.description, body.enabled);
+  }
+
   @Patch('flags/:key') @Roles(UserRole.SUPER_ADMIN)
-  @Audit('feature_flag.toggle', { targetType: 'FEATURE_FLAG', targetIdParam: 'key' })
-  @ApiOperation({ summary: 'Toggle feature flag' })
-  toggleFlag(@Param('key') key: string, @Body('enabled') enabled: boolean) {
-    return this.adminService.setFeatureFlag(key, enabled);
+  @Audit('feature_flag.update', { targetType: 'FEATURE_FLAG', targetIdParam: 'key' })
+  @ApiOperation({ summary: 'Update feature flag (toggle and/or description)' })
+  toggleFlag(
+    @Param('key') key: string,
+    @Body() body: { enabled?: boolean; description?: string },
+  ) {
+    return this.adminService.updateFeatureFlag(key, body);
+  }
+
+  @Delete('flags/:key') @Roles(UserRole.SUPER_ADMIN)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Audit('feature_flag.delete', { targetType: 'FEATURE_FLAG', targetIdParam: 'key' })
+  @ApiOperation({ summary: 'Delete a feature flag' })
+  deleteFlag(@Param('key') key: string) {
+    return this.adminService.deleteFeatureFlag(key);
   }
 
   // ── Reservations ──────────────────────────
