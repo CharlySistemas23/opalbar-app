@@ -1,16 +1,26 @@
+import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { Plus, Tag, Trash2 } from 'lucide-react';
+import { Plus, Tag, Trash2, Pencil, Star } from 'lucide-react';
 import { offersApi, apiError } from '@/api/client';
+import {
+  PageHeader, EmptyState, SkeletonRows, StatusPill, Toolbar, useDebounced,
+  ConfirmDialog, InlineError,
+} from '@/components/ui';
+
+function unwrap<T = any>(p: any): T {
+  return (p?.data?.data?.data ?? p?.data?.data ?? p?.data ?? p) as T;
+}
 
 export function OffersList() {
   const qc = useQueryClient();
+  const [search, setSearch] = useState('');
+  const debounced = useDebounced(search, 250);
+  const [confirmDel, setConfirmDel] = useState<{ id: string; title: string } | null>(null);
+
   const { data, isLoading } = useQuery({
     queryKey: ['offers', 'admin-list'],
-    queryFn: async () => {
-      const r = await offersApi.list({ limit: 100 });
-      return r.data?.data?.data ?? r.data?.data ?? [];
-    },
+    queryFn: async () => unwrap<any[]>(await offersApi.list({ limit: 100 })),
   });
 
   const del = useMutation({
@@ -18,87 +28,108 @@ export function OffersList() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['offers'] }),
   });
 
-  const offers: any[] = data ?? [];
+  const offers: any[] = Array.isArray(data) ? data : [];
+  const filtered = useMemo(() => {
+    const q = debounced.trim().toLowerCase();
+    if (!q) return offers;
+    return offers.filter((o: any) =>
+      [o.title, o.venue?.name, o.type, o.status].filter(Boolean).join(' ').toLowerCase().includes(q),
+    );
+  }, [offers, debounced]);
 
   return (
-    <div className="p-8 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Ofertas</h1>
-          <p className="text-muted text-sm mt-1">{offers.length} ofertas</p>
-        </div>
-        <Link to="/admin/offers/new" className="btn-primary">
-          <Plus size={16} /> Nueva oferta
-        </Link>
-      </div>
+    <div className="page-shell">
+      <PageHeader
+        icon={Tag}
+        title="Ofertas"
+        subtitle={`${filtered.length} de ${offers.length} ofertas`}
+        actions={
+          <Link to="/admin/offers/new" className="btn-primary">
+            <Plus size={14} /> Nueva oferta
+          </Link>
+        }
+      />
 
-      {isLoading ? (
-        <p className="text-muted">Cargando…</p>
-      ) : offers.length === 0 ? (
-        <div className="card p-12 text-center">
-          <Tag size={40} className="mx-auto text-muted mb-3" />
-          <p className="text-muted">No hay ofertas.</p>
-        </div>
-      ) : (
-        <div className="card overflow-hidden">
-          <table className="w-full">
-            <thead className="bg-elevated">
+      <Toolbar search={search} onSearch={setSearch} searchPlaceholder="Buscar oferta, venue, tipo o status…" />
+
+      <InlineError message={del.error ? apiError(del.error) : null} />
+
+      <div className="card flex-1 overflow-auto">
+        {isLoading ? (
+          <SkeletonRows rows={6} />
+        ) : filtered.length === 0 ? (
+          <EmptyState
+            icon={Tag}
+            title={offers.length === 0 ? 'No hay ofertas' : 'Sin resultados'}
+            message={offers.length === 0 ? 'Creá tu primera oferta.' : 'Probá con otro término.'}
+            action={offers.length === 0 ? (
+              <Link to="/admin/offers/new" className="btn-primary"><Plus size={14} /> Crear oferta</Link>
+            ) : undefined}
+          />
+        ) : (
+          <table className="data-table">
+            <thead>
               <tr>
-                <th className="text-left text-xs font-bold text-muted uppercase px-4 py-3">Título</th>
-                <th className="text-left text-xs font-bold text-muted uppercase px-4 py-3">Venue</th>
-                <th className="text-left text-xs font-bold text-muted uppercase px-4 py-3">Tipo</th>
-                <th className="text-left text-xs font-bold text-muted uppercase px-4 py-3">Vigencia</th>
-                <th className="text-left text-xs font-bold text-muted uppercase px-4 py-3">Status</th>
-                <th className="px-4 py-3"></th>
+                <th>Título</th>
+                <th>Venue</th>
+                <th>Tipo</th>
+                <th>Vigencia</th>
+                <th>Status</th>
+                <th></th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-line">
-              {offers.map((o: any) => (
-                <tr key={o.id} className="hover:bg-elevated/50">
-                  <td className="px-4 py-3">
-                    <p className="font-semibold text-sm">{o.title}</p>
-                    {o.isHighlighted && <span className="pill bg-accent/15 text-accent">Destacada</span>}
+            <tbody>
+              {filtered.map((o: any) => (
+                <tr key={o.id}>
+                  <td>
+                    <div className="flex items-center gap-2">
+                      <p className="font-bold text-sm">{o.title}</p>
+                      {o.isHighlighted && (
+                        <span className="pill-accent inline-flex items-center gap-1">
+                          <Star size={9} /> Destacada
+                        </span>
+                      )}
+                    </div>
                   </td>
-                  <td className="px-4 py-3 text-sm text-muted">{o.venue?.name ?? '—'}</td>
-                  <td className="px-4 py-3 text-sm">{o.type}</td>
-                  <td className="px-4 py-3 text-xs text-muted">
+                  <td className="text-sm text-muted">{o.venue?.name ?? '—'}</td>
+                  <td className="text-sm">{o.type}</td>
+                  <td className="text-xs text-muted">
                     {o.startDate ? new Date(o.startDate).toLocaleDateString('es') : '—'}
                     {' → '}
                     {o.endDate ? new Date(o.endDate).toLocaleDateString('es') : '—'}
                   </td>
-                  <td className="px-4 py-3">
-                    <StatusPill status={o.status} />
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <div className="flex gap-3 justify-end items-center">
-                      <Link to={`/admin/offers/${o.id}`} className="text-accent text-sm font-semibold hover:underline">Editar</Link>
-                      <button
-                        onClick={() => { if (confirm('¿Archivar esta oferta?')) del.mutate(o.id); }}
-                        className="text-danger text-xs font-bold hover:underline flex items-center gap-1"
-                      >
-                        <Trash2 size={12} /> Archivar
-                      </button>
-                    </div>
+                  <td><StatusPill status={o.status} /></td>
+                  <td className="text-right whitespace-nowrap">
+                    <Link
+                      to={`/admin/offers/${o.id}`}
+                      className="inline-flex items-center gap-1 text-accent text-xs font-semibold hover:underline mr-3"
+                    >
+                      <Pencil size={12} /> Editar
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDel({ id: o.id, title: o.title })}
+                      className="inline-flex items-center gap-1 text-danger text-xs font-bold hover:underline"
+                    >
+                      <Trash2 size={12} /> Archivar
+                    </button>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-        </div>
-      )}
+        )}
+      </div>
 
-      {del.error && <p className="text-danger text-sm">{apiError(del.error)}</p>}
+      <ConfirmDialog
+        open={!!confirmDel}
+        onClose={() => setConfirmDel(null)}
+        title={`Archivar "${confirmDel?.title}"?`}
+        message="La oferta dejará de mostrarse en la app. Podés restaurarla desde el detalle."
+        destructive
+        confirmLabel="Archivar"
+        onConfirm={() => confirmDel && del.mutate(confirmDel.id)}
+      />
     </div>
   );
-}
-
-function StatusPill({ status }: { status: string }) {
-  const map: Record<string, string> = {
-    ACTIVE: 'bg-success/15 text-success',
-    SCHEDULED: 'bg-blue-500/15 text-blue-400',
-    EXPIRED: 'bg-muted/15 text-muted',
-    ARCHIVED: 'bg-muted/15 text-muted',
-    DRAFT: 'bg-amber-500/15 text-amber-400',
-  };
-  return <span className={`pill ${map[status] ?? 'bg-muted/15 text-muted'}`}>{status ?? '—'}</span>;
 }

@@ -1,7 +1,11 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Megaphone, Send, Trash2, Plus, X, Pause } from 'lucide-react';
+import { Megaphone, Send, Trash2, Plus, Pause, Calendar, Users } from 'lucide-react';
 import { adminApi, apiError } from '@/api/client';
+import {
+  PageHeader, EmptyState, SkeletonRows, InlineError, Modal, Field, StatusPill,
+  StatCard, ConfirmDialog,
+} from '@/components/ui';
 
 function unwrap<T = any>(p: any): T {
   return (p?.data?.data ?? p?.data ?? p) as T;
@@ -19,6 +23,7 @@ const empty: CampaignForm = { title: '', body: '', audience: 'ALL' };
 export function Marketing() {
   const qc = useQueryClient();
   const [editor, setEditor] = useState<CampaignForm | null>(null);
+  const [confirmAction, setConfirmAction] = useState<{ kind: 'send' | 'delete' | 'cancel'; id: string; title: string } | null>(null);
 
   const campaignsQuery = useQuery({
     queryKey: ['admin', 'marketing', 'campaigns'],
@@ -27,115 +32,113 @@ export function Marketing() {
 
   const create = useMutation({
     mutationFn: (form: CampaignForm) => adminApi.marketingCreateCampaign(form),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['admin', 'marketing'] });
-      setEditor(null);
-    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin', 'marketing'] }); setEditor(null); },
   });
-
   const sendNow = useMutation({
     mutationFn: (id: string) => adminApi.marketingSendNow(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'marketing'] }),
   });
-
   const cancel = useMutation({
     mutationFn: (id: string) => adminApi.marketingCancelCampaign(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'marketing'] }),
   });
-
   const del = useMutation({
     mutationFn: (id: string) => adminApi.marketingDeleteCampaign(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'marketing'] }),
   });
 
   const list: any[] = Array.isArray(campaignsQuery.data) ? campaignsQuery.data : [];
+  const sentCount = list.filter((c) => c.status === 'SENT').length;
+  const pendingCount = list.filter((c) => c.status === 'DRAFT' || c.status === 'SCHEDULED').length;
 
   return (
-    <div className="p-8 space-y-6 h-full flex flex-col">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Megaphone className="text-accent" size={22} /> Marketing
-          </h1>
-          <p className="text-muted text-sm mt-1">{list.length} campañas</p>
-        </div>
-        <button
-          onClick={() => setEditor(empty)}
-          className="px-3 py-2 rounded-xl bg-accent/15 border border-accent/40 text-accent text-sm font-bold flex items-center gap-2 hover:bg-accent/25"
-        >
-          <Plus size={14} /> Nueva campaña
-        </button>
+    <div className="page-shell">
+      <PageHeader
+        icon={Megaphone}
+        title="Marketing"
+        subtitle="Campañas push masivas a la audiencia de la app"
+        actions={
+          <button type="button" onClick={() => setEditor(empty)} className="btn-primary">
+            <Plus size={14} /> Nueva campaña
+          </button>
+        }
+      />
+
+      <div className="grid grid-cols-3 gap-3">
+        <StatCard icon={Megaphone} label="Total campañas" value={list.length} tone="accent" />
+        <StatCard icon={Send} label="Enviadas" value={sentCount} tone="success" />
+        <StatCard icon={Calendar} label="En cola" value={pendingCount} tone="info" />
       </div>
 
-      {(create.error || sendNow.error || del.error || cancel.error) && (
-        <div className="p-3 rounded-xl bg-danger/10 border border-danger/30 text-danger text-sm">
-          {apiError(create.error ?? sendNow.error ?? del.error ?? cancel.error)}
-        </div>
-      )}
+      <InlineError message={create.error ? apiError(create.error) : sendNow.error ? apiError(sendNow.error) : del.error ? apiError(del.error) : cancel.error ? apiError(cancel.error) : null} />
 
       <div className="card flex-1 overflow-auto">
         {campaignsQuery.isLoading ? (
-          <p className="text-muted text-sm p-6">Cargando…</p>
+          <SkeletonRows rows={6} />
         ) : list.length === 0 ? (
-          <p className="text-muted text-sm p-6">Sin campañas. Creá la primera.</p>
+          <EmptyState
+            icon={Megaphone}
+            title="Sin campañas"
+            message="Creá tu primera campaña push para llegar a tus usuarios."
+            action={
+              <button type="button" onClick={() => setEditor(empty)} className="btn-primary">
+                <Plus size={14} /> Crear campaña
+              </button>
+            }
+          />
         ) : (
-          <table className="w-full">
-            <thead className="bg-elevated sticky top-0">
+          <table className="data-table">
+            <thead>
               <tr>
-                <th className="text-left text-xs font-bold text-muted uppercase px-4 py-3">Título</th>
-                <th className="text-left text-xs font-bold text-muted uppercase px-4 py-3">Audiencia</th>
-                <th className="text-left text-xs font-bold text-muted uppercase px-4 py-3">Estado</th>
-                <th className="text-left text-xs font-bold text-muted uppercase px-4 py-3">Programada</th>
-                <th></th>
+                <th>Título</th>
+                <th>Audiencia</th>
+                <th>Estado</th>
+                <th>Programada</th>
+                <th className="text-right">Acciones</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-line">
+            <tbody>
               {list.map((c: any) => (
-                <tr key={c.id} className="hover:bg-elevated/40">
-                  <td className="px-4 py-3 text-sm">
-                    <p className="font-semibold">{c.title}</p>
-                    <p className="text-[10px] text-muted truncate max-w-[300px]">{c.body}</p>
+                <tr key={c.id}>
+                  <td>
+                    <p className="font-bold">{c.title}</p>
+                    <p className="text-[11px] text-muted truncate max-w-[340px]">{c.body}</p>
                   </td>
-                  <td className="px-4 py-3 text-xs">{c.audience ?? '—'}</td>
-                  <td className="px-4 py-3 text-xs">
-                    <span className={`px-2 py-0.5 rounded ${
-                      c.status === 'SENT' ? 'bg-success/15 text-success' :
-                      c.status === 'SENDING' ? 'bg-warning/15 text-warning' :
-                      c.status === 'CANCELLED' ? 'bg-muted/15 text-muted' :
-                      'bg-info/15 text-info'
-                    }`}>
-                      {c.status ?? 'DRAFT'}
+                  <td>
+                    <span className="inline-flex items-center gap-1.5 text-xs">
+                      <Users size={12} className="text-muted" /> {c.audience ?? '—'}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-xs text-muted">
+                  <td><StatusPill status={c.status ?? 'DRAFT'} /></td>
+                  <td className="text-xs text-muted">
                     {c.scheduledFor ? new Date(c.scheduledFor).toLocaleString('es') : '—'}
                   </td>
-                  <td className="px-4 py-3 text-right whitespace-nowrap">
+                  <td className="text-right whitespace-nowrap">
                     {c.status !== 'SENT' && c.status !== 'SENDING' && c.status !== 'CANCELLED' && (
                       <>
                         <button
-                          onClick={() => {
-                            if (confirm(`Enviar "${c.title}" ahora?`)) sendNow.mutate(c.id);
-                          }}
-                          className="p-1.5 rounded hover:bg-success/15 text-success"
+                          type="button"
                           title="Enviar ahora"
+                          onClick={() => setConfirmAction({ kind: 'send', id: c.id, title: c.title })}
+                          className="p-1.5 rounded-lg hover:bg-success/15 text-muted hover:text-success transition"
                         >
                           <Send size={14} />
                         </button>
                         <button
-                          onClick={() => cancel.mutate(c.id)}
-                          className="p-1.5 rounded hover:bg-elevated text-muted"
-                          title="Cancelar campaña"
+                          type="button"
+                          title="Cancelar"
+                          onClick={() => setConfirmAction({ kind: 'cancel', id: c.id, title: c.title })}
+                          className="p-1.5 rounded-lg hover:bg-elevated text-muted transition"
                         >
                           <Pause size={14} />
                         </button>
                       </>
                     )}
                     <button
-                      onClick={() => {
-                        if (confirm(`Eliminar campaña "${c.title}"?`)) del.mutate(c.id);
-                      }}
-                      className="p-1.5 rounded hover:bg-danger/15 text-danger"
+                      type="button"
+                      title="Eliminar"
+                      onClick={() => setConfirmAction({ kind: 'delete', id: c.id, title: c.title })}
+                      className="p-1.5 rounded-lg hover:bg-danger/15 text-muted hover:text-danger transition"
                     >
                       <Trash2 size={14} />
                     </button>
@@ -147,56 +150,73 @@ export function Marketing() {
         )}
       </div>
 
-      {editor && (
-        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={() => setEditor(null)}>
-          <div className="bg-zinc-950 border border-line rounded-2xl p-6 w-full max-w-md space-y-4" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-bold">Nueva campaña</h2>
-              <button onClick={() => setEditor(null)} className="p-1 rounded hover:bg-elevated"><X size={18} /></button>
-            </div>
+      <Modal open={!!editor} onClose={() => setEditor(null)} title="Nueva campaña">
+        {editor && (
+          <div className="space-y-3">
+            <Field label="Título" required value={editor.title} onChange={(v) => setEditor({ ...editor, title: v })} placeholder="Promo de fin de semana" />
+            <Field label="Mensaje" rows={4} required value={editor.body} onChange={(v) => setEditor({ ...editor, body: v })} placeholder="Esta noche 2x1 en…" />
             <label className="block">
-              <span className="text-xs font-bold text-muted tracking-wide uppercase">Título</span>
-              <input value={editor.title} onChange={(e) => setEditor({ ...editor, title: e.target.value })} className="input-field mt-1.5" />
-            </label>
-            <label className="block">
-              <span className="text-xs font-bold text-muted tracking-wide uppercase">Mensaje</span>
-              <textarea rows={4} value={editor.body} onChange={(e) => setEditor({ ...editor, body: e.target.value })} className="input-field mt-1.5" />
-            </label>
-            <label className="block">
-              <span className="text-xs font-bold text-muted tracking-wide uppercase">Audiencia</span>
+              <span className="text-[11px] font-bold text-muted tracking-wider uppercase">Audiencia</span>
               <select
+                title="Audiencia"
                 value={editor.audience}
                 onChange={(e) => setEditor({ ...editor, audience: e.target.value as any })}
                 className="input-field mt-1.5"
               >
-                <option value="ALL">Todos</option>
+                <option value="ALL">Todos los usuarios</option>
                 <option value="SUBSCRIBED">Suscriptos a notificaciones</option>
                 <option value="PREMIUM">Premium</option>
                 <option value="STAFF">Staff</option>
               </select>
             </label>
-            <label className="block">
-              <span className="text-xs font-bold text-muted tracking-wide uppercase">Programar (opcional)</span>
-              <input
-                type="datetime-local"
-                value={editor.scheduledFor ?? ''}
-                onChange={(e) => setEditor({ ...editor, scheduledFor: e.target.value || undefined })}
-                className="input-field mt-1.5"
-              />
-            </label>
-            <div className="flex gap-2">
-              <button onClick={() => setEditor(null)} className="flex-1 px-3 py-2 rounded-xl bg-elevated border border-line text-sm">Cancelar</button>
+            <Field
+              label="Programar (opcional)"
+              type="datetime-local"
+              value={editor.scheduledFor ?? ''}
+              onChange={(v) => setEditor({ ...editor, scheduledFor: v || undefined })}
+              hint="Si lo dejás vacío, queda como borrador y la podés enviar manualmente."
+            />
+            <div className="flex gap-2 pt-2">
+              <button type="button" onClick={() => setEditor(null)} className="btn-ghost flex-1">Cancelar</button>
               <button
+                type="button"
                 onClick={() => create.mutate(editor)}
                 disabled={create.isPending || !editor.title || !editor.body}
-                className="flex-1 px-3 py-2 rounded-xl bg-accent text-black text-sm font-bold disabled:opacity-50"
+                className="btn-primary flex-1"
               >
                 {create.isPending ? 'Creando…' : 'Crear'}
               </button>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </Modal>
+
+      <ConfirmDialog
+        open={!!confirmAction}
+        onClose={() => setConfirmAction(null)}
+        title={
+          confirmAction?.kind === 'send' ? `Enviar "${confirmAction?.title}" ahora?`
+          : confirmAction?.kind === 'cancel' ? `Cancelar "${confirmAction?.title}"?`
+          : `Eliminar "${confirmAction?.title}"?`
+        }
+        message={
+          confirmAction?.kind === 'send' ? 'Se enviará la notificación a la audiencia configurada inmediatamente.'
+          : confirmAction?.kind === 'cancel' ? 'La campaña no se enviará. Podés volver a programarla creando una nueva.'
+          : 'Se borrará permanentemente. Esta acción no se puede deshacer.'
+        }
+        destructive={confirmAction?.kind !== 'send'}
+        confirmLabel={
+          confirmAction?.kind === 'send' ? 'Enviar ahora'
+          : confirmAction?.kind === 'cancel' ? 'Cancelar campaña'
+          : 'Eliminar'
+        }
+        onConfirm={() => {
+          if (!confirmAction) return;
+          if (confirmAction.kind === 'send') sendNow.mutate(confirmAction.id);
+          else if (confirmAction.kind === 'cancel') cancel.mutate(confirmAction.id);
+          else del.mutate(confirmAction.id);
+        }}
+      />
     </div>
   );
 }

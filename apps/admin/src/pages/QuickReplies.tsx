@@ -1,7 +1,10 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { MessageSquare, Plus, Trash2, Pencil, X } from 'lucide-react';
+import { MessageSquare, Plus, Trash2, Pencil } from 'lucide-react';
 import { adminApi, apiError } from '@/api/client';
+import {
+  PageHeader, EmptyState, SkeletonRows, InlineError, Modal, Field, ConfirmDialog,
+} from '@/components/ui';
 
 function unwrap<T = any>(p: any): T {
   return (p?.data?.data ?? p?.data ?? p) as T;
@@ -19,6 +22,7 @@ const empty: ReplyForm = { title: '', body: '', category: '' };
 export function QuickReplies() {
   const qc = useQueryClient();
   const [editor, setEditor] = useState<ReplyForm | null>(null);
+  const [confirmDel, setConfirmDel] = useState<{ id: string; title: string } | null>(null);
 
   const repliesQuery = useQuery({
     queryKey: ['admin', 'support', 'quick-replies'],
@@ -31,10 +35,7 @@ export function QuickReplies() {
       if (form.id) return adminApi.updateQuickReply(form.id, payload);
       return adminApi.createQuickReply(payload);
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['admin', 'support', 'quick-replies'] });
-      setEditor(null);
-    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin', 'support', 'quick-replies'] }); setEditor(null); },
   });
 
   const del = useMutation({
@@ -44,108 +45,122 @@ export function QuickReplies() {
 
   const list: any[] = Array.isArray(repliesQuery.data) ? repliesQuery.data : [];
 
-  return (
-    <div className="p-8 space-y-6 h-full flex flex-col">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <MessageSquare className="text-accent" size={22} /> Respuestas rápidas
-          </h1>
-          <p className="text-muted text-sm mt-1">{list.length} plantillas para soporte</p>
-        </div>
-        <button
-          onClick={() => setEditor(empty)}
-          className="px-3 py-2 rounded-xl bg-accent/15 border border-accent/40 text-accent text-sm font-bold flex items-center gap-2 hover:bg-accent/25"
-        >
-          <Plus size={14} /> Nueva plantilla
-        </button>
-      </div>
+  const grouped = useMemo(() => {
+    const m = new Map<string, any[]>();
+    list.forEach((r) => {
+      const key = r.category?.trim() || 'General';
+      if (!m.has(key)) m.set(key, []);
+      m.get(key)!.push(r);
+    });
+    return Array.from(m.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [list]);
 
-      {(save.error || del.error) && (
-        <div className="p-3 rounded-xl bg-danger/10 border border-danger/30 text-danger text-sm">
-          {apiError(save.error ?? del.error)}
+  return (
+    <div className="page-shell">
+      <PageHeader
+        icon={MessageSquare}
+        title="Respuestas rápidas"
+        subtitle={`${list.length} plantillas para soporte`}
+        actions={
+          <button type="button" onClick={() => setEditor(empty)} className="btn-primary">
+            <Plus size={14} /> Nueva plantilla
+          </button>
+        }
+      />
+
+      <InlineError message={save.error ? apiError(save.error) : del.error ? apiError(del.error) : null} />
+
+      {repliesQuery.isLoading ? (
+        <div className="card flex-1"><SkeletonRows rows={5} height={80} /></div>
+      ) : list.length === 0 ? (
+        <div className="card flex-1 flex items-center justify-center">
+          <EmptyState
+            icon={MessageSquare}
+            title="Sin plantillas"
+            message="Creá tu primera plantilla para responder tickets más rápido."
+            action={
+              <button type="button" onClick={() => setEditor(empty)} className="btn-primary">
+                <Plus size={14} /> Crear plantilla
+              </button>
+            }
+          />
+        </div>
+      ) : (
+        <div className="space-y-6 flex-1 overflow-auto pr-1">
+          {grouped.map(([cat, items]) => (
+            <section key={cat} className="space-y-2">
+              <h2 className="section-title flex items-center gap-2">
+                {cat}
+                <span className="pill-muted">{items.length}</span>
+              </h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {items.map((r: any) => (
+                  <article key={r.id} className="card card-hover p-4 group flex flex-col gap-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-sm font-bold truncate flex-1">{r.title}</p>
+                      <div className="flex gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition">
+                        <button
+                          type="button"
+                          title="Editar"
+                          onClick={() => setEditor({ id: r.id, title: r.title, body: r.body, category: r.category ?? '' })}
+                          className="p-1.5 rounded-lg hover:bg-elevated text-muted hover:text-zinc-200"
+                        >
+                          <Pencil size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          title="Eliminar"
+                          onClick={() => setConfirmDel({ id: r.id, title: r.title })}
+                          className="p-1.5 rounded-lg hover:bg-danger/15 text-muted hover:text-danger"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+                    <p className="text-xs text-zinc-300 whitespace-pre-wrap leading-relaxed line-clamp-4">{r.body}</p>
+                  </article>
+                ))}
+              </div>
+            </section>
+          ))}
         </div>
       )}
 
-      <div className="card flex-1 overflow-auto">
-        {repliesQuery.isLoading ? (
-          <p className="text-muted text-sm p-6">Cargando…</p>
-        ) : list.length === 0 ? (
-          <p className="text-muted text-sm p-6">Sin plantillas. Creá la primera.</p>
-        ) : (
-          <ul className="divide-y divide-line">
-            {list.map((r: any) => (
-              <li key={r.id} className="p-4 group hover:bg-elevated/30">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-semibold">{r.title}</p>
-                      {r.category && (
-                        <span className="text-[10px] px-2 py-0.5 rounded bg-elevated text-muted">{r.category}</span>
-                      )}
-                    </div>
-                    <p className="text-xs text-zinc-300 mt-1 whitespace-pre-wrap line-clamp-3">{r.body}</p>
-                  </div>
-                  <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100">
-                    <button
-                      onClick={() => setEditor({ id: r.id, title: r.title, body: r.body, category: r.category ?? '' })}
-                      className="p-1.5 rounded hover:bg-elevated text-muted"
-                    >
-                      <Pencil size={14} />
-                    </button>
-                    <button
-                      onClick={() => {
-                        if (confirm(`Eliminar "${r.title}"?`)) del.mutate(r.id);
-                      }}
-                      className="p-1.5 rounded hover:bg-danger/15 text-danger"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-
-      {editor && (
-        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={() => setEditor(null)}>
-          <div className="bg-zinc-950 border border-line rounded-2xl p-6 w-full max-w-md space-y-4" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-bold">{editor.id ? 'Editar plantilla' : 'Nueva plantilla'}</h2>
-              <button onClick={() => setEditor(null)} className="p-1 rounded hover:bg-elevated"><X size={18} /></button>
-            </div>
-            <label className="block">
-              <span className="text-xs font-bold text-muted tracking-wide uppercase">Título</span>
-              <input value={editor.title} onChange={(e) => setEditor({ ...editor, title: e.target.value })} className="input-field mt-1.5" />
-            </label>
-            <label className="block">
-              <span className="text-xs font-bold text-muted tracking-wide uppercase">Categoría</span>
-              <input value={editor.category ?? ''} onChange={(e) => setEditor({ ...editor, category: e.target.value })} className="input-field mt-1.5" placeholder="general · cobros · técnico …" />
-            </label>
-            <label className="block">
-              <span className="text-xs font-bold text-muted tracking-wide uppercase">Cuerpo del mensaje</span>
-              <textarea
-                rows={6}
-                value={editor.body}
-                onChange={(e) => setEditor({ ...editor, body: e.target.value })}
-                className="input-field mt-1.5"
-              />
-            </label>
-            <div className="flex gap-2">
-              <button onClick={() => setEditor(null)} className="flex-1 px-3 py-2 rounded-xl bg-elevated border border-line text-sm">Cancelar</button>
+      <Modal open={!!editor} onClose={() => setEditor(null)} title={editor?.id ? 'Editar plantilla' : 'Nueva plantilla'}>
+        {editor && (
+          <div className="space-y-3">
+            <Field label="Título" required value={editor.title} onChange={(v) => setEditor({ ...editor, title: v })} />
+            <Field
+              label="Categoría"
+              value={editor.category ?? ''}
+              onChange={(v) => setEditor({ ...editor, category: v })}
+              placeholder="general · cobros · técnico…"
+              hint="Las plantillas se agrupan por categoría."
+            />
+            <Field label="Cuerpo del mensaje" rows={6} required value={editor.body} onChange={(v) => setEditor({ ...editor, body: v })} />
+            <div className="flex gap-2 pt-2">
+              <button type="button" onClick={() => setEditor(null)} className="btn-ghost flex-1">Cancelar</button>
               <button
+                type="button"
                 onClick={() => save.mutate(editor)}
                 disabled={save.isPending || !editor.title || !editor.body}
-                className="flex-1 px-3 py-2 rounded-xl bg-accent text-black text-sm font-bold disabled:opacity-50"
+                className="btn-primary flex-1"
               >
                 {save.isPending ? 'Guardando…' : 'Guardar'}
               </button>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </Modal>
+
+      <ConfirmDialog
+        open={!!confirmDel}
+        onClose={() => setConfirmDel(null)}
+        title={`Eliminar "${confirmDel?.title}"?`}
+        destructive
+        confirmLabel="Eliminar"
+        onConfirm={() => confirmDel && del.mutate(confirmDel.id)}
+      />
     </div>
   );
 }

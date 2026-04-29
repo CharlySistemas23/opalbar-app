@@ -1,92 +1,108 @@
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { Plus, Calendar, MapPin, Users } from 'lucide-react';
+import { Plus, Calendar, MapPin, Users, Pencil } from 'lucide-react';
 import { eventsApi } from '@/api/client';
+import {
+  PageHeader, EmptyState, SkeletonRows, StatusPill, Toolbar, useDebounced,
+} from '@/components/ui';
+
+function unwrap<T = any>(p: any): T {
+  return (p?.data?.data?.data ?? p?.data?.data ?? p?.data ?? p) as T;
+}
 
 export function EventsList() {
+  const [search, setSearch] = useState('');
+  const debounced = useDebounced(search, 250);
+
   const { data, isLoading } = useQuery({
     queryKey: ['events', 'admin-list'],
-    queryFn: async () => {
-      const r = await eventsApi.list({ limit: 100 });
-      return r.data?.data?.data ?? r.data?.data ?? [];
-    },
+    queryFn: async () => unwrap<any[]>(await eventsApi.list({ limit: 100 })),
   });
 
-  return (
-    <div className="p-8 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Eventos</h1>
-          <p className="text-muted text-sm mt-1">{(data ?? []).length} eventos</p>
-        </div>
-        <Link to="/admin/events/new" className="btn-primary">
-          <Plus size={16} />
-          Nuevo evento
-        </Link>
-      </div>
+  const events: any[] = Array.isArray(data) ? data : [];
+  const filtered = useMemo(() => {
+    const q = debounced.trim().toLowerCase();
+    if (!q) return events;
+    return events.filter((e: any) =>
+      [e.title, e.venue?.name, e.status].filter(Boolean).join(' ').toLowerCase().includes(q),
+    );
+  }, [events, debounced]);
 
-      {isLoading ? (
-        <p className="text-muted">Cargando…</p>
-      ) : (data ?? []).length === 0 ? (
-        <div className="card p-12 text-center">
-          <Calendar size={40} className="mx-auto text-muted mb-3" />
-          <p className="text-muted">No hay eventos. Crea el primero.</p>
-        </div>
-      ) : (
-        <div className="card overflow-hidden">
-          <table className="w-full">
-            <thead className="bg-elevated">
+  return (
+    <div className="page-shell">
+      <PageHeader
+        icon={Calendar}
+        title="Eventos"
+        subtitle={`${filtered.length} de ${events.length} eventos`}
+        actions={
+          <Link to="/admin/events/new" className="btn-primary">
+            <Plus size={14} /> Nuevo evento
+          </Link>
+        }
+      />
+
+      <Toolbar search={search} onSearch={setSearch} searchPlaceholder="Buscar evento, venue o status…" />
+
+      <div className="card flex-1 overflow-auto">
+        {isLoading ? (
+          <SkeletonRows rows={6} />
+        ) : filtered.length === 0 ? (
+          <EmptyState
+            icon={Calendar}
+            title={events.length === 0 ? 'No hay eventos' : 'Sin resultados'}
+            message={events.length === 0 ? 'Creá tu primer evento para empezar.' : 'Probá con otro término de búsqueda.'}
+            action={events.length === 0 ? (
+              <Link to="/admin/events/new" className="btn-primary"><Plus size={14} /> Crear evento</Link>
+            ) : undefined}
+          />
+        ) : (
+          <table className="data-table">
+            <thead>
               <tr>
-                <th className="text-left text-xs font-bold text-muted uppercase tracking-wide px-4 py-3">Título</th>
-                <th className="text-left text-xs font-bold text-muted uppercase tracking-wide px-4 py-3">Venue</th>
-                <th className="text-left text-xs font-bold text-muted uppercase tracking-wide px-4 py-3">Fecha</th>
-                <th className="text-left text-xs font-bold text-muted uppercase tracking-wide px-4 py-3">Cupo</th>
-                <th className="text-left text-xs font-bold text-muted uppercase tracking-wide px-4 py-3">Status</th>
-                <th className="w-24 px-4 py-3"></th>
+                <th>Título</th>
+                <th>Venue</th>
+                <th>Fecha</th>
+                <th>Cupo</th>
+                <th>Status</th>
+                <th className="w-20"></th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-line">
-              {(data ?? []).map((e: any) => (
-                <tr key={e.id} className="hover:bg-elevated/50">
-                  <td className="px-4 py-3">
-                    <p className="font-semibold text-sm">{e.title}</p>
-                    {e.isFree && <span className="pill bg-success/15 text-success">Entrada libre</span>}
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-1.5 text-sm text-zinc-400">
-                      <MapPin size={12} /> {e.venue?.name ?? '—'}
+            <tbody>
+              {filtered.map((e: any) => (
+                <tr key={e.id}>
+                  <td>
+                    <div className="flex items-center gap-2">
+                      <p className="font-bold text-sm">{e.title}</p>
+                      {e.isFree && <span className="pill-success">Free</span>}
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-sm text-zinc-400">
+                  <td className="text-sm text-zinc-400">
+                    <div className="inline-flex items-center gap-1.5">
+                      <MapPin size={12} className="text-muted" /> {e.venue?.name ?? '—'}
+                    </div>
+                  </td>
+                  <td className="text-sm text-muted whitespace-nowrap">
                     {e.startDate ? new Date(e.startDate).toLocaleString('es', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'}
                   </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-1.5 text-sm text-zinc-400">
-                      <Users size={12} /> {e.currentCapacity ?? 0}{e.maxCapacity ? ` / ${e.maxCapacity}` : ''}
+                  <td className="text-sm text-zinc-400">
+                    <div className="inline-flex items-center gap-1.5">
+                      <Users size={12} className="text-muted" />
+                      {e.currentCapacity ?? 0}{e.maxCapacity ? ` / ${e.maxCapacity}` : ''}
                     </div>
                   </td>
-                  <td className="px-4 py-3">
-                    <StatusPill status={e.status} />
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <Link to={`/admin/events/${e.id}`} className="text-accent text-sm font-semibold hover:underline">Editar</Link>
+                  <td><StatusPill status={e.status} /></td>
+                  <td className="text-right">
+                    <Link to={`/admin/events/${e.id}`} className="inline-flex items-center gap-1 text-accent text-sm font-semibold hover:underline">
+                      <Pencil size={12} /> Editar
+                    </Link>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
-}
-
-function StatusPill({ status }: { status: string }) {
-  const map: Record<string, string> = {
-    PUBLISHED: 'bg-success/15 text-success',
-    DRAFT: 'bg-muted/15 text-muted',
-    CANCELLED: 'bg-danger/15 text-danger',
-    COMPLETED: 'bg-blue-500/15 text-blue-400',
-  };
-  return <span className={`pill ${map[status] ?? 'bg-muted/15 text-muted'}`}>{status}</span>;
 }

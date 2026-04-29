@@ -4,26 +4,156 @@
 
 @layer base {
   html, body, #root { height: 100%; }
-  body { @apply bg-zinc-950 text-zinc-100 font-sans antialiased; }
+  body {
+    @apply bg-bgPrimary text-zinc-100 font-sans antialiased;
+    background-image:
+      radial-gradient(1200px 600px at 0% -10%, rgba(244,163,64,0.06), transparent 60%),
+      radial-gradient(800px 500px at 100% 0%, rgba(96,165,250,0.04), transparent 60%);
+    background-attachment: fixed;
+  }
+
+  *::selection { @apply bg-accent/40 text-zinc-50; }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { @apply bg-elevated rounded-full border-2 border-bgPrimary; }
+  ::-webkit-scrollbar-thumb:hover { @apply bg-line; }
 }
 
 @layer components {
+  /* Buttons */
   .btn-primary {
-    @apply inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-accent text-black font-bold text-sm hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition;
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl
+           bg-accent text-black font-bold text-sm tracking-tight
+           hover:opacity-90 active:scale-[0.98]
+           disabled:opacity-50 disabled:cursor-not-allowed
+           transition shadow-soft;
   }
   .btn-ghost {
-    @apply inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-card border border-line text-zinc-200 font-semibold text-sm hover:bg-elevated transition;
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl
+           bg-card border border-line text-zinc-200 font-semibold text-sm
+           hover:bg-elevated hover:border-line/60 active:scale-[0.98]
+           transition;
   }
   .btn-danger {
-    @apply inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-danger/10 border border-danger/40 text-danger font-bold text-sm hover:bg-danger/15 transition;
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl
+           bg-danger/10 border border-danger/40 text-danger font-bold text-sm
+           hover:bg-danger/20 active:scale-[0.98] transition;
   }
+  .btn-success {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl
+           bg-success/10 border border-success/40 text-success font-bold text-sm
+           hover:bg-success/20 active:scale-[0.98] transition;
+  }
+
+  /* Inputs */
   .input-field {
-    @apply w-full px-3.5 py-2.5 rounded-xl bg-card border border-line text-zinc-100 placeholder-muted focus:border-accent focus:outline-none transition;
+    @apply w-full px-3.5 py-2.5 rounded-xl bg-card border border-line
+           text-zinc-100 placeholder-muted
+           focus:border-accent/60 focus:ring-2 focus:ring-accent/20 focus:outline-none
+           transition;
   }
+  .input-search {
+    @apply w-full pl-10 pr-3 py-2.5 rounded-xl bg-card/60 backdrop-blur border border-line
+           text-zinc-100 placeholder-muted text-sm
+           focus:border-accent/60 focus:bg-card focus:ring-2 focus:ring-accent/20 focus:outline-none
+           transition;
+  }
+
+  /* Cards */
   .card {
-    @apply bg-card border border-line rounded-2xl;
+    @apply bg-card border border-line rounded-2xl shadow-ring;
+    background-image: linear-gradient(180deg, rgba(255,255,255,0.02) 0%, rgba(255,255,255,0) 100%);
   }
+  .card-hover {
+    @apply hover:border-line/40 hover:shadow-soft hover:-translate-y-[1px] transition;
+  }
+  .card-glow {
+    @apply ring-1 ring-accent/20 shadow-glow;
+  }
+
+  /* Page chrome */
+  .page-shell {
+    @apply px-6 py-6 lg:px-8 lg:py-8 space-y-6 h-full flex flex-col animate-fade-in;
+  }
+  .page-shell--scroll {
+    @apply overflow-auto;
+  }
+
+  /* Stat card */
+  .stat-card {
+    @apply card p-4 lg:p-5 flex items-start gap-4;
+  }
+  .stat-card__icon {
+    @apply w-11 h-11 rounded-xl flex items-center justify-center bg-accent/10 text-accent shrink-0
+           ring-1 ring-accent/20;
+  }
+
+  /* Pills */
   .pill {
-    @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold uppercase tracking-wide;
+    @apply inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wide;
   }
+  .pill-success { @apply pill bg-success/15 text-success ring-1 ring-success/30; }
+  .pill-danger  { @apply pill bg-danger/15  text-danger  ring-1 ring-danger/30; }
+  .pill-warning { @apply pill bg-warning/15 text-warning ring-1 ring-warning/30; }
+  .pill-info    { @apply pill bg-info/15    text-info    ring-1 ring-info/30; }
+  .pill-muted   { @apply pill bg-elevated   text-muted   ring-1 ring-line; }
+  .pill-accent  { @apply pill bg-accent/15  text-accent  ring-1 ring-accent/30; }
+
+  /* Tables */
+  .data-table {
+    @apply w-full;
+  }
+  .data-table thead {
+    @apply bg-elevated/60 backdrop-blur sticky top-0 z-10;
+  }
+  .data-table thead th {
+    @apply text-left text-[11px] font-bold text-muted uppercase tracking-wider px-4 py-3
+           border-b border-line;
+  }
+  .data-table tbody tr {
+    @apply border-b border-line/60 hover:bg-elevated/40 transition;
+  }
+  .data-table tbody td {
+    @apply px-4 py-3 text-sm align-middle;
+  }
+
+  /* Skeleton */
+  .skeleton {
+    @apply rounded-md bg-gradient-to-r from-elevated via-line to-elevated bg-[length:200%_100%] animate-shimmer;
+  }
+
+  /* Toolbar */
+  .toolbar {
+    @apply flex flex-wrap items-center gap-3 p-3 bg-card/60 backdrop-blur border border-line rounded-xl;
+  }
+
+  /* Section header inside a page */
+  .section-title {
+    @apply text-[11px] font-bold uppercase tracking-wider text-muted px-1;
+  }
+
+  /* Tabs (segmented) */
+  .seg {
+    @apply inline-flex items-center gap-1 p-1 rounded-xl bg-card border border-line;
+  }
+  .seg-btn {
+    @apply px-3 py-1.5 text-xs font-bold rounded-lg text-muted hover:text-zinc-200 transition;
+  }
+  .seg-btn--active {
+    @apply bg-accent text-black hover:text-black shadow-soft;
+  }
+
+  /* Toggle switch */
+  .switch {
+    @apply relative inline-flex h-6 w-11 items-center rounded-full transition;
+  }
+  .switch--on  { @apply bg-accent; }
+  .switch--off { @apply bg-elevated; }
+  .switch__thumb {
+    @apply inline-block h-5 w-5 transform rounded-full bg-white transition shadow-soft;
+  }
+  .switch--on  .switch__thumb { @apply translate-x-5; }
+  .switch--off .switch__thumb { @apply translate-x-0.5; }
 }

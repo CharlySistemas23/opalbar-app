@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ToggleLeft, ToggleRight, Flag } from 'lucide-react';
+import { Flag, Zap, Power } from 'lucide-react';
 import { adminApi, apiError } from '@/api/client';
+import { PageHeader, EmptyState, SkeletonRows, InlineError, Switch, StatCard } from '@/components/ui';
 
 function unwrap<T = any>(p: any): T {
   return (p?.data?.data ?? p?.data ?? p) as T;
@@ -20,35 +21,36 @@ export function Flags() {
   });
 
   const flags: any[] = Array.isArray(flagsQuery.data) ? flagsQuery.data : [];
+  const active = flags.filter((f) => f.enabled).length;
+  const inactive = flags.length - active;
 
   return (
-    <div className="p-8 space-y-6 h-full flex flex-col">
-      <div>
-        <h1 className="text-2xl font-bold flex items-center gap-2">
-          <Flag className="text-accent" size={22} /> Feature Flags
-        </h1>
-        <p className="text-muted text-sm mt-1">
-          Encender/apagar features sin redeploy · {flags.length} flags
-        </p>
+    <div className="page-shell">
+      <PageHeader
+        icon={Flag}
+        title="Feature Flags"
+        subtitle="Encender/apagar features sin redeploy. Los cambios son inmediatos."
+      />
+
+      <div className="grid grid-cols-2 gap-3">
+        <StatCard icon={Zap} label="Activos" value={active} tone="success" />
+        <StatCard icon={Power} label="Apagados" value={inactive} tone="warning" />
       </div>
 
-      {toggle.error && (
-        <div className="p-3 rounded-xl bg-danger/10 border border-danger/30 text-danger text-sm">
-          {apiError(toggle.error)}
-        </div>
-      )}
+      <InlineError message={toggle.error ? apiError(toggle.error) : null} />
 
-      <div className="card overflow-auto">
+      <div className="card flex-1 overflow-auto">
         {flagsQuery.isLoading ? (
-          <p className="text-muted text-sm p-6">Cargando…</p>
+          <SkeletonRows rows={6} height={64} />
         ) : flags.length === 0 ? (
-          <p className="text-muted text-sm p-6">Sin flags definidos.</p>
+          <EmptyState icon={Flag} title="Sin flags definidos" message="Cuando registres un feature flag en el backend, aparecerá aquí." />
         ) : (
-          <ul className="divide-y divide-line">
+          <ul className="divide-y divide-line/60">
             {flags.map((f: any) => (
-              <li key={f.key} className="p-4 flex items-center gap-4">
+              <li key={f.key} className="p-5 flex items-center gap-4 hover:bg-elevated/30 transition">
+                <div className={`w-2 h-2 rounded-full shrink-0 ${f.enabled ? 'bg-success animate-pulse-soft' : 'bg-muted'}`} />
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold font-mono">{f.key}</p>
+                  <p className="text-sm font-bold font-mono">{f.key}</p>
                   {f.description && <p className="text-xs text-muted mt-0.5">{f.description}</p>}
                   {f.updatedAt && (
                     <p className="text-[10px] text-muted mt-1">
@@ -56,18 +58,11 @@ export function Flags() {
                     </p>
                   )}
                 </div>
-                <button
-                  onClick={() => toggle.mutate({ key: f.key, enabled: !f.enabled })}
+                <Switch
+                  checked={!!f.enabled}
                   disabled={toggle.isPending}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-xl border text-sm font-bold transition ${
-                    f.enabled
-                      ? 'bg-accent/15 border-accent/40 text-accent hover:bg-accent/25'
-                      : 'bg-elevated border-line text-muted hover:bg-card'
-                  }`}
-                >
-                  {f.enabled ? <ToggleRight size={18} /> : <ToggleLeft size={18} />}
-                  {f.enabled ? 'ACTIVO' : 'APAGADO'}
-                </button>
+                  onChange={(next) => toggle.mutate({ key: f.key, enabled: next })}
+                />
               </li>
             ))}
           </ul>

@@ -1,68 +1,79 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Settings, ToggleLeft, ToggleRight } from 'lucide-react';
-import { adminApi, apiError } from '@/api/client';
+import { Link } from 'react-router-dom';
+import { Settings, Flag, ShieldCheck, Award, UserCog, ArrowRight } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth.store';
+import { PageHeader, StatusPill } from '@/components/ui';
+
+const SECTIONS: Array<{
+  to: string;
+  icon: any;
+  title: string;
+  desc: string;
+  requiresSuper?: boolean;
+}> = [
+  { to: '/admin/flags', icon: Flag, title: 'Feature flags', desc: 'Encender/apagar features sin redeploy', requiresSuper: true },
+  { to: '/admin/loyalty', icon: Award, title: 'Niveles de fidelidad', desc: 'CRUD de niveles, puntos y beneficios' },
+  { to: '/admin/staff', icon: UserCog, title: 'Equipo', desc: 'Promover y degradar admins/moderadores', requiresSuper: true },
+  { to: '/admin/gdpr', icon: ShieldCheck, title: 'GDPR', desc: 'Solicitudes de exportación y eliminación de datos' },
+  { to: '/admin/reservations/config', icon: Settings, title: 'Reservas por venue', desc: 'Horarios, capacidad y disponibilidad' },
+  { to: '/admin/event-categories', icon: Flag, title: 'Categorías de eventos', desc: 'CRUD de categorías' },
+];
 
 export function Config() {
   const { user } = useAuthStore();
   const isSuper = user?.role === 'SUPER_ADMIN';
-  const qc = useQueryClient();
-
-  const flags = useQuery({
-    queryKey: ['admin', 'flags'],
-    queryFn: async () => (await adminApi.flags()).data?.data ?? [],
-  });
-
-  const toggle = useMutation({
-    mutationFn: ({ key, enabled }: { key: string; enabled: boolean }) => adminApi.toggleFlag(key, enabled),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'flags'] }),
-  });
-
-  const list: any[] = flags.data ?? [];
 
   return (
-    <div className="p-8 space-y-6 max-w-3xl">
-      <div>
-        <h1 className="text-2xl font-bold">Configuración</h1>
-        <p className="text-muted text-sm mt-1">Feature flags y ajustes globales</p>
+    <div className="page-shell page-shell--scroll">
+      <PageHeader
+        icon={Settings}
+        title="Configuración"
+        subtitle="Ajustes globales del sistema · agrupa los paneles de configuración"
+      />
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+        {SECTIONS.map((s) => {
+          const blocked = s.requiresSuper && !isSuper;
+          return (
+            <Link
+              key={s.to}
+              to={blocked ? '#' : s.to}
+              onClick={(e) => blocked && e.preventDefault()}
+              className={`card card-hover p-5 flex items-start gap-4 group ${blocked ? 'opacity-60 cursor-not-allowed' : ''}`}
+            >
+              <div className="w-11 h-11 rounded-xl bg-accent/10 text-accent ring-1 ring-accent/20 flex items-center justify-center shrink-0">
+                <s.icon size={20} strokeWidth={2.25} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-bold tracking-tight">{s.title}</p>
+                  <ArrowRight size={14} className="text-muted group-hover:text-accent group-hover:translate-x-0.5 transition" />
+                </div>
+                <p className="text-xs text-muted mt-1">{s.desc}</p>
+                {blocked && (
+                  <div className="mt-2"><StatusPill status="USER" label="Requiere SUPER_ADMIN" /></div>
+                )}
+              </div>
+            </Link>
+          );
+        })}
       </div>
 
-      <div className="card p-6 space-y-3">
-        <h3 className="font-bold flex items-center gap-2"><Settings size={16} /> Feature flags</h3>
-        {flags.isLoading ? (
-          <p className="text-muted text-sm">Cargando…</p>
-        ) : list.length === 0 ? (
-          <p className="text-muted text-sm">Sin flags configurados.</p>
-        ) : (
-          <ul className="divide-y divide-line">
-            {list.map((f: any) => (
-              <li key={f.key} className="flex items-center justify-between py-3">
-                <div>
-                  <p className="text-sm font-semibold">{f.key}</p>
-                  {f.description && <p className="text-xs text-muted">{f.description}</p>}
-                </div>
-                <button
-                  disabled={!isSuper || toggle.isPending}
-                  onClick={() => toggle.mutate({ key: f.key, enabled: !f.enabled })}
-                  className={`p-1 rounded-lg transition ${!isSuper ? 'opacity-50' : 'hover:bg-elevated'}`}
-                  title={!isSuper ? 'Solo SUPER_ADMIN puede cambiar flags' : ''}
-                >
-                  {f.enabled ? (
-                    <ToggleRight size={32} className="text-success" />
-                  ) : (
-                    <ToggleLeft size={32} className="text-muted" />
-                  )}
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-        {toggle.error && <p className="text-danger text-xs">{apiError(toggle.error)}</p>}
-        {!isSuper && (
-          <p className="text-xs text-muted italic">
-            Requiere SUPER_ADMIN para modificar flags.
-          </p>
-        )}
+      <div className="card p-5">
+        <p className="text-[11px] font-bold text-muted tracking-wider uppercase">Sesión actual</p>
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mt-3">
+          <div>
+            <p className="text-xs text-muted">Email</p>
+            <p className="text-sm font-mono mt-0.5">{user?.email ?? '—'}</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted">Rol</p>
+            <div className="mt-1"><StatusPill status={user?.role ?? '—'} /></div>
+          </div>
+          <div>
+            <p className="text-xs text-muted">Nombre</p>
+            <p className="text-sm mt-0.5">{user?.profile?.firstName ?? '—'} {user?.profile?.lastName ?? ''}</p>
+          </div>
+        </div>
       </div>
     </div>
   );

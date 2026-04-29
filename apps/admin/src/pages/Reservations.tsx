@@ -1,9 +1,16 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Calendar, Check, X } from 'lucide-react';
+import { Calendar, Check, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { adminApi, apiError } from '@/api/client';
+import {
+  PageHeader, EmptyState, SkeletonRows, StatusPill, InlineError,
+} from '@/components/ui';
 
 const STATUSES = ['', 'PENDING', 'CONFIRMED', 'SEATED', 'COMPLETED', 'CANCELLED', 'NO_SHOW'];
+
+function unwrap<T = any>(p: any): T {
+  return (p?.data?.data ?? p?.data ?? p) as T;
+}
 
 export function Reservations() {
   const [status, setStatus] = useState('');
@@ -13,10 +20,11 @@ export function Reservations() {
 
   const { data, isLoading } = useQuery({
     queryKey: ['admin', 'reservations', status, date, page],
-    queryFn: async () => {
-      const r = await adminApi.reservations({ page, limit: 25, status: status || undefined, date: date || undefined });
-      return r.data?.data ?? r.data;
-    },
+    queryFn: async () => unwrap<any>(await adminApi.reservations({
+      page, limit: 25,
+      status: status || undefined,
+      date: date || undefined,
+    })),
   });
 
   const update = useMutation({
@@ -25,125 +33,125 @@ export function Reservations() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'reservations'] }),
   });
 
-  const reservations: any[] = data?.data ?? data ?? [];
+  const reservations: any[] = Array.isArray(data) ? data : (data?.data ?? data ?? []);
 
   return (
-    <div className="p-8 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Reservaciones</h1>
-          <p className="text-muted text-sm mt-1">{reservations.length} resultados</p>
-        </div>
-      </div>
+    <div className="page-shell">
+      <PageHeader
+        icon={Calendar}
+        title="Reservaciones"
+        subtitle={`${reservations.length} resultados${status ? ` · ${status}` : ''}${date ? ` · ${date}` : ''}`}
+      />
 
-      <div className="card p-4 flex gap-3 flex-wrap">
-        <select value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }} className="input-field max-w-[200px]">
+      <div className="toolbar">
+        <select
+          title="Filtrar por estado"
+          value={status}
+          onChange={(e) => { setStatus(e.target.value); setPage(1); }}
+          className="bg-card border border-line rounded-lg px-3 py-2 text-sm focus:border-accent/60 focus:outline-none"
+        >
           <option value="">Todos los estados</option>
           {STATUSES.filter(Boolean).map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
-        <input type="date" value={date} onChange={(e) => { setDate(e.target.value); setPage(1); }} className="input-field max-w-[200px]" />
-        {date && <button onClick={() => setDate('')} className="btn-ghost text-xs">Limpiar</button>}
+        <input
+          type="date"
+          aria-label="Fecha"
+          value={date}
+          onChange={(e) => { setDate(e.target.value); setPage(1); }}
+          className="bg-card border border-line rounded-lg px-3 py-2 text-sm focus:border-accent/60 focus:outline-none"
+        />
+        {date && (
+          <button type="button" onClick={() => setDate('')} className="btn-ghost py-1.5 text-xs">Limpiar fecha</button>
+        )}
       </div>
 
-      {isLoading ? (
-        <p className="text-muted">Cargando…</p>
-      ) : reservations.length === 0 ? (
-        <div className="card p-12 text-center">
-          <Calendar size={40} className="mx-auto text-muted mb-3" />
-          <p className="text-muted">Sin reservaciones.</p>
-        </div>
-      ) : (
-        <div className="card overflow-hidden">
-          <table className="w-full">
-            <thead className="bg-elevated">
+      <InlineError message={update.error ? apiError(update.error) : null} />
+
+      <div className="card flex-1 overflow-auto">
+        {isLoading ? (
+          <SkeletonRows rows={6} />
+        ) : reservations.length === 0 ? (
+          <EmptyState icon={Calendar} title="Sin reservaciones" message="No hay reservaciones que coincidan con los filtros." />
+        ) : (
+          <table className="data-table">
+            <thead>
               <tr>
-                <th className="text-left text-xs font-bold text-muted uppercase px-4 py-3">Cliente</th>
-                <th className="text-left text-xs font-bold text-muted uppercase px-4 py-3">Venue</th>
-                <th className="text-left text-xs font-bold text-muted uppercase px-4 py-3">Fecha</th>
-                <th className="text-left text-xs font-bold text-muted uppercase px-4 py-3">Personas</th>
-                <th className="text-left text-xs font-bold text-muted uppercase px-4 py-3">Status</th>
-                <th className="px-4 py-3"></th>
+                <th>Cliente</th>
+                <th>Venue</th>
+                <th>Fecha</th>
+                <th>Personas</th>
+                <th>Status</th>
+                <th className="text-right">Acciones</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-line">
+            <tbody>
               {reservations.map((r: any) => (
-                <tr key={r.id} className="hover:bg-elevated/50">
-                  <td className="px-4 py-3">
-                    <p className="text-sm font-semibold">{r.user?.profile?.firstName} {r.user?.profile?.lastName}</p>
-                    <p className="text-xs text-muted">{r.user?.email}</p>
+                <tr key={r.id}>
+                  <td>
+                    <p className="text-sm font-bold">{r.user?.profile?.firstName ?? ''} {r.user?.profile?.lastName ?? ''}</p>
+                    <p className="text-[11px] text-muted">{r.user?.email}</p>
                   </td>
-                  <td className="px-4 py-3 text-sm">{r.venue?.name ?? '—'}</td>
-                  <td className="px-4 py-3 text-sm">
+                  <td className="text-sm">{r.venue?.name ?? '—'}</td>
+                  <td className="text-sm whitespace-nowrap">
                     {r.date ? new Date(r.date).toLocaleDateString('es', { day: 'numeric', month: 'short' }) : '—'}
-                    {' '}
-                    <span className="text-muted">{r.timeSlot}</span>
+                    {r.timeSlot && <span className="text-muted ml-1.5">{r.timeSlot}</span>}
                   </td>
-                  <td className="px-4 py-3 text-sm">{r.partySize}</td>
-                  <td className="px-4 py-3">
-                    <StatusPill status={r.status} />
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <div className="flex gap-2 justify-end">
-                      {r.status === 'PENDING' && (
-                        <>
-                          <button
-                            onClick={() => update.mutate({ id: r.id, status: 'CONFIRMED' })}
-                            className="text-success text-xs font-bold hover:underline flex items-center gap-1"
-                          >
-                            <Check size={12} /> Confirmar
-                          </button>
-                          <button
-                            onClick={() => update.mutate({ id: r.id, status: 'CANCELLED' })}
-                            className="text-danger text-xs font-bold hover:underline flex items-center gap-1"
-                          >
-                            <X size={12} /> Rechazar
-                          </button>
-                        </>
-                      )}
-                      {r.status === 'CONFIRMED' && (
+                  <td className="text-sm">{r.partySize}</td>
+                  <td><StatusPill status={r.status} /></td>
+                  <td className="text-right whitespace-nowrap">
+                    {r.status === 'PENDING' && (
+                      <>
                         <button
-                          onClick={() => update.mutate({ id: r.id, status: 'SEATED' })}
-                          className="text-accent text-xs font-bold hover:underline"
+                          type="button"
+                          onClick={() => update.mutate({ id: r.id, status: 'CONFIRMED' })}
+                          className="text-success text-xs font-bold hover:underline inline-flex items-center gap-1 mr-3"
                         >
-                          Marcar sentado
+                          <Check size={12} /> Confirmar
                         </button>
-                      )}
-                      {r.status === 'SEATED' && (
                         <button
-                          onClick={() => update.mutate({ id: r.id, status: 'COMPLETED' })}
-                          className="text-accent text-xs font-bold hover:underline"
+                          type="button"
+                          onClick={() => update.mutate({ id: r.id, status: 'CANCELLED' })}
+                          className="text-danger text-xs font-bold hover:underline inline-flex items-center gap-1"
                         >
-                          Completar
+                          <X size={12} /> Rechazar
                         </button>
-                      )}
-                    </div>
+                      </>
+                    )}
+                    {r.status === 'CONFIRMED' && (
+                      <button
+                        type="button"
+                        onClick={() => update.mutate({ id: r.id, status: 'SEATED' })}
+                        className="text-accent text-xs font-bold hover:underline"
+                      >
+                        Marcar sentado
+                      </button>
+                    )}
+                    {r.status === 'SEATED' && (
+                      <button
+                        type="button"
+                        onClick={() => update.mutate({ id: r.id, status: 'COMPLETED' })}
+                        className="text-accent text-xs font-bold hover:underline"
+                      >
+                        Completar
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-        </div>
-      )}
+        )}
+      </div>
 
-      {update.error && <p className="text-danger text-sm">{apiError(update.error)}</p>}
-
-      <div className="flex items-center gap-3">
-        <button disabled={page <= 1} onClick={() => setPage(page - 1)} className="btn-ghost text-xs disabled:opacity-40">‹ Anterior</button>
+      <div className="flex items-center justify-end gap-3">
+        <button type="button" disabled={page <= 1} onClick={() => setPage(page - 1)} className="btn-ghost py-1.5 text-xs disabled:opacity-40">
+          <ChevronLeft size={12} /> Anterior
+        </button>
         <span className="text-sm text-muted">Página {page}</span>
-        <button disabled={reservations.length < 25} onClick={() => setPage(page + 1)} className="btn-ghost text-xs disabled:opacity-40">Siguiente ›</button>
+        <button type="button" disabled={reservations.length < 25} onClick={() => setPage(page + 1)} className="btn-ghost py-1.5 text-xs disabled:opacity-40">
+          Siguiente <ChevronRight size={12} />
+        </button>
       </div>
     </div>
   );
-}
-
-function StatusPill({ status }: { status: string }) {
-  const map: Record<string, string> = {
-    PENDING: 'bg-amber-500/15 text-amber-400',
-    CONFIRMED: 'bg-success/15 text-success',
-    SEATED: 'bg-accent/15 text-accent',
-    COMPLETED: 'bg-blue-500/15 text-blue-400',
-    CANCELLED: 'bg-danger/15 text-danger',
-    NO_SHOW: 'bg-muted/15 text-muted',
-  };
-  return <span className={`pill ${map[status] ?? 'bg-muted/15 text-muted'}`}>{status ?? '—'}</span>;
 }

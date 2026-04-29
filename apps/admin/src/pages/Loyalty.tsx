@@ -1,7 +1,10 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Award, Plus, Trash2, Pencil, X } from 'lucide-react';
+import { Award, Plus, Trash2, Pencil } from 'lucide-react';
 import { adminApi, apiError } from '@/api/client';
+import {
+  PageHeader, EmptyState, SkeletonRows, InlineError, Modal, Field, ConfirmDialog,
+} from '@/components/ui';
 
 function unwrap<T = any>(p: any): T {
   return (p?.data?.data ?? p?.data ?? p) as T;
@@ -22,6 +25,7 @@ const empty: LoyaltyForm = { name: '', level: 1, pointsRequired: 0, benefits: ''
 export function Loyalty() {
   const qc = useQueryClient();
   const [editor, setEditor] = useState<LoyaltyForm | null>(null);
+  const [confirmDel, setConfirmDel] = useState<{ id: string; name: string } | null>(null);
 
   const levelsQuery = useQuery({
     queryKey: ['admin', 'loyalty', 'levels'],
@@ -56,132 +60,125 @@ export function Loyalty() {
   const sorted = [...levels].sort((a, b) => (a.level ?? 0) - (b.level ?? 0));
 
   return (
-    <div className="p-8 space-y-6 h-full flex flex-col">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Award className="text-accent" size={22} /> Niveles de fidelidad
-          </h1>
-          <p className="text-muted text-sm mt-1">{levels.length} niveles configurados</p>
-        </div>
-        <button
-          onClick={() => setEditor({ ...empty, level: (sorted[sorted.length - 1]?.level ?? 0) + 1 })}
-          className="px-3 py-2 rounded-xl bg-accent/15 border border-accent/40 text-accent text-sm font-bold flex items-center gap-2 hover:bg-accent/25"
-        >
-          <Plus size={14} /> Nuevo nivel
-        </button>
-      </div>
+    <div className="page-shell">
+      <PageHeader
+        icon={Award}
+        title="Niveles de fidelidad"
+        subtitle={`${levels.length} niveles configurados`}
+        actions={
+          <button
+            type="button"
+            onClick={() => setEditor({ ...empty, level: (sorted[sorted.length - 1]?.level ?? 0) + 1 })}
+            className="btn-primary"
+          >
+            <Plus size={14} /> Nuevo nivel
+          </button>
+        }
+      />
 
-      {(save.error || del.error) && (
-        <div className="p-3 rounded-xl bg-danger/10 border border-danger/30 text-danger text-sm">
-          {apiError(save.error ?? del.error)}
+      <InlineError message={save.error ? apiError(save.error) : del.error ? apiError(del.error) : null} />
+
+      {levelsQuery.isLoading ? (
+        <div className="card flex-1"><SkeletonRows rows={5} height={64} /></div>
+      ) : sorted.length === 0 ? (
+        <div className="card flex-1 flex items-center justify-center">
+          <EmptyState
+            icon={Award}
+            title="Sin niveles"
+            message="Creá el primer nivel para que tus usuarios suban escalando puntos."
+          />
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 flex-1 overflow-auto pr-1">
+          {sorted.map((l: any) => (
+            <article key={l.id} className="card card-hover p-5 flex flex-col gap-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div
+                    className="w-12 h-12 rounded-2xl flex items-center justify-center text-2xl ring-1 ring-line"
+                    style={{ backgroundColor: (l.color ? `${l.color}20` : undefined), color: l.color }}
+                  >
+                    {l.icon ?? '🏆'}
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-muted">Nivel {l.level}</p>
+                    <p className="text-base font-bold tracking-tight">{l.name}</p>
+                  </div>
+                </div>
+                <div className="flex gap-1">
+                  <button
+                    type="button"
+                    title="Editar"
+                    onClick={() => setEditor({
+                      id: l.id, name: l.name ?? '', level: l.level ?? 1,
+                      pointsRequired: l.pointsRequired ?? 0,
+                      benefits: l.benefits ?? '', color: l.color ?? '', icon: l.icon ?? '',
+                    })}
+                    className="p-1.5 rounded-lg hover:bg-elevated text-muted hover:text-zinc-200"
+                  >
+                    <Pencil size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    title="Eliminar"
+                    onClick={() => setConfirmDel({ id: l.id, name: l.name })}
+                    className="p-1.5 rounded-lg hover:bg-danger/15 text-muted hover:text-danger"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              </div>
+              <div className="flex items-baseline gap-2">
+                <span className="text-3xl font-bold tracking-tight">{l.pointsRequired ?? 0}</span>
+                <span className="text-xs text-muted">puntos requeridos</span>
+              </div>
+              {l.benefits && (
+                <p className="text-xs text-zinc-300 leading-relaxed line-clamp-3 border-t border-line/60 pt-3">
+                  {l.benefits}
+                </p>
+              )}
+            </article>
+          ))}
         </div>
       )}
 
-      <div className="card overflow-auto">
-        {levelsQuery.isLoading ? (
-          <p className="text-muted text-sm p-6">Cargando…</p>
-        ) : sorted.length === 0 ? (
-          <p className="text-muted text-sm p-6">Sin niveles. Creá el primero.</p>
-        ) : (
-          <table className="w-full">
-            <thead className="bg-elevated">
-              <tr>
-                <th className="text-left text-xs font-bold text-muted uppercase px-4 py-3">Nivel</th>
-                <th className="text-left text-xs font-bold text-muted uppercase px-4 py-3">Nombre</th>
-                <th className="text-left text-xs font-bold text-muted uppercase px-4 py-3">Puntos</th>
-                <th className="text-left text-xs font-bold text-muted uppercase px-4 py-3">Beneficios</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-line">
-              {sorted.map((l: any) => (
-                <tr key={l.id} className="hover:bg-elevated/40">
-                  <td className="px-4 py-3 text-sm font-bold">{l.level}</td>
-                  <td className="px-4 py-3 text-sm">
-                    {l.icon && <span className="mr-2">{l.icon}</span>}
-                    {l.name}
-                  </td>
-                  <td className="px-4 py-3 text-sm font-mono">{l.pointsRequired ?? 0}</td>
-                  <td className="px-4 py-3 text-xs text-muted max-w-[400px] truncate">{l.benefits ?? ''}</td>
-                  <td className="px-4 py-3 text-right whitespace-nowrap">
-                    <button
-                      onClick={() => setEditor({
-                        id: l.id,
-                        name: l.name ?? '',
-                        level: l.level ?? 1,
-                        pointsRequired: l.pointsRequired ?? 0,
-                        benefits: l.benefits ?? '',
-                        color: l.color ?? '',
-                        icon: l.icon ?? '',
-                      })}
-                      className="p-1.5 rounded hover:bg-elevated text-muted"
-                    >
-                      <Pencil size={14} />
-                    </button>
-                    <button
-                      onClick={() => {
-                        if (confirm(`Eliminar nivel "${l.name}"?`)) del.mutate(l.id);
-                      }}
-                      className="p-1.5 rounded hover:bg-danger/15 text-danger"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-
-      {editor && (
-        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={() => setEditor(null)}>
-          <div className="bg-zinc-950 border border-line rounded-2xl p-6 w-full max-w-md space-y-4" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-bold">{editor.id ? 'Editar nivel' : 'Nuevo nivel'}</h2>
-              <button onClick={() => setEditor(null)} className="p-1 rounded hover:bg-elevated">
-                <X size={18} />
-              </button>
-            </div>
-            <div className="space-y-3">
-              <Field label="Nombre" value={editor.name} onChange={(v) => setEditor({ ...editor, name: v })} />
+      <Modal open={!!editor} onClose={() => setEditor(null)} title={editor?.id ? 'Editar nivel' : 'Nuevo nivel'}>
+        {editor && (
+          <div className="space-y-3">
+            <Field label="Nombre" required value={editor.name} onChange={(v) => setEditor({ ...editor, name: v })} />
+            <div className="grid grid-cols-2 gap-3">
               <Field label="Nivel (orden)" type="number" value={String(editor.level)} onChange={(v) => setEditor({ ...editor, level: Number(v) })} />
               <Field label="Puntos requeridos" type="number" value={String(editor.pointsRequired)} onChange={(v) => setEditor({ ...editor, pointsRequired: Number(v) })} />
-              <Field label="Icono (emoji)" value={editor.icon ?? ''} onChange={(v) => setEditor({ ...editor, icon: v })} />
-              <Field label="Color (hex)" value={editor.color ?? ''} onChange={(v) => setEditor({ ...editor, color: v })} />
-              <label className="block">
-                <span className="text-xs font-bold text-muted tracking-wide uppercase">Beneficios</span>
-                <textarea
-                  rows={3}
-                  value={editor.benefits ?? ''}
-                  onChange={(e) => setEditor({ ...editor, benefits: e.target.value })}
-                  className="input-field mt-1.5"
-                />
-              </label>
             </div>
-            <div className="flex gap-2">
-              <button onClick={() => setEditor(null)} className="flex-1 px-3 py-2 rounded-xl bg-elevated border border-line text-sm">Cancelar</button>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Icono (emoji)" value={editor.icon ?? ''} onChange={(v) => setEditor({ ...editor, icon: v })} />
+              <Field label="Color (hex)" value={editor.color ?? ''} onChange={(v) => setEditor({ ...editor, color: v })} placeholder="#F4A340" />
+            </div>
+            <Field label="Beneficios" rows={3} value={editor.benefits ?? ''} onChange={(v) => setEditor({ ...editor, benefits: v })} />
+            <div className="flex gap-2 pt-2">
+              <button type="button" onClick={() => setEditor(null)} className="btn-ghost flex-1">Cancelar</button>
               <button
+                type="button"
                 onClick={() => save.mutate(editor)}
                 disabled={save.isPending || !editor.name}
-                className="flex-1 px-3 py-2 rounded-xl bg-accent text-black text-sm font-bold disabled:opacity-50"
+                className="btn-primary flex-1"
               >
                 {save.isPending ? 'Guardando…' : 'Guardar'}
               </button>
             </div>
           </div>
-        </div>
-      )}
-    </div>
-  );
-}
+        )}
+      </Modal>
 
-function Field({ label, value, onChange, type = 'text' }: { label: string; value: string; onChange: (v: string) => void; type?: string }) {
-  return (
-    <label className="block">
-      <span className="text-xs font-bold text-muted tracking-wide uppercase">{label}</span>
-      <input type={type} value={value} onChange={(e) => onChange(e.target.value)} className="input-field mt-1.5" />
-    </label>
+      <ConfirmDialog
+        open={!!confirmDel}
+        onClose={() => setConfirmDel(null)}
+        title={`Eliminar nivel "${confirmDel?.name ?? ''}"?`}
+        message="Los usuarios que estén en este nivel pasarán al inferior. Esta acción no se puede deshacer."
+        destructive
+        confirmLabel="Eliminar"
+        onConfirm={() => confirmDel && del.mutate(confirmDel.id)}
+      />
+    </div>
   );
 }

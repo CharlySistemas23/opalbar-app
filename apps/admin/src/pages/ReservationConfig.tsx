@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Settings, Save } from 'lucide-react';
+import { Settings, Save, Clock, Users, MapPin, Check } from 'lucide-react';
 import { venuesApi, apiError } from '@/api/client';
+import {
+  PageHeader, EmptyState, SkeletonRows, InlineError, Switch, Field,
+} from '@/components/ui';
 
 function unwrap<T = any>(p: any): T {
   return (p?.data?.data ?? p?.data ?? p) as T;
@@ -50,115 +53,124 @@ export function ReservationConfig() {
   });
 
   return (
-    <div className="p-8 space-y-6 h-full flex flex-col">
-      <div>
-        <h1 className="text-2xl font-bold flex items-center gap-2">
-          <Settings className="text-accent" size={22} /> Configuración de reservas
-        </h1>
-        <p className="text-muted text-sm mt-1">Horarios, capacidad y disponibilidad por venue</p>
-      </div>
+    <div className="page-shell">
+      <PageHeader
+        icon={Settings}
+        title="Configuración de reservas"
+        subtitle="Horarios, capacidad y disponibilidad por venue"
+      />
 
-      {save.error && (
-        <div className="p-3 rounded-xl bg-danger/10 border border-danger/30 text-danger text-sm">
-          {apiError(save.error)}
-        </div>
-      )}
+      <InlineError message={save.error ? apiError(save.error) : null} />
 
-      <div className="grid grid-cols-[280px,1fr] gap-4 flex-1 min-h-0">
+      <div className="grid grid-cols-[300px,1fr] gap-4 flex-1 min-h-0">
+        {/* Venue list */}
         <div className="card overflow-auto">
+          <div className="px-4 py-3 border-b border-line/60 bg-elevated/40 sticky top-0 backdrop-blur z-10">
+            <p className="section-title">Venues · {venues.length}</p>
+          </div>
           {venuesQuery.isLoading ? (
-            <p className="text-muted text-sm p-4">Cargando…</p>
+            <SkeletonRows rows={4} height={56} />
           ) : venues.length === 0 ? (
-            <p className="text-muted text-sm p-4">Sin venues.</p>
+            <EmptyState icon={MapPin} title="Sin venues" message="Creá un venue primero." />
           ) : (
-            <ul className="divide-y divide-line">
-              {venues.map((v: any) => (
-                <li
-                  key={v.id}
-                  onClick={() => setSelectedId(v.id)}
-                  className={`p-4 cursor-pointer ${selectedId === v.id ? 'bg-accent/10' : 'hover:bg-elevated/50'}`}
-                >
-                  <p className="text-sm font-semibold">{v.name}</p>
-                  <p className="text-[10px] text-muted">
-                    {v.reservationsEnabled ? '✓ Reservas activas' : '✗ Reservas desactivadas'}
-                  </p>
-                </li>
-              ))}
+            <ul className="divide-y divide-line/60">
+              {venues.map((v: any) => {
+                const active = selectedId === v.id;
+                return (
+                  <li
+                    key={v.id}
+                    onClick={() => setSelectedId(v.id)}
+                    className={`p-4 cursor-pointer transition ${active ? 'bg-accent/10 border-l-2 border-accent' : 'hover:bg-elevated/40 border-l-2 border-transparent'}`}
+                  >
+                    <p className="text-sm font-bold truncate">{v.name}</p>
+                    <p className="text-[11px] text-muted mt-0.5 flex items-center gap-1.5">
+                      <span className={`w-1.5 h-1.5 rounded-full ${v.reservationsEnabled ? 'bg-success' : 'bg-muted'}`} />
+                      {v.reservationsEnabled ? 'Reservas activas' : 'Reservas desactivadas'}
+                    </p>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>
 
+        {/* Editor */}
         <div className="card p-6 overflow-auto">
           {!selected ? (
-            <p className="text-muted text-sm">Seleccioná un venue.</p>
+            <EmptyState icon={Settings} title="Seleccioná un venue" message="Elegí uno de la lista para editar su configuración de reservas." />
           ) : (
-            <div className="space-y-4 max-w-md">
-              <h2 className="text-lg font-bold">{selected.name}</h2>
+            <div className="space-y-6 max-w-md">
+              <div>
+                <p className="text-[11px] font-bold text-muted uppercase tracking-wider">Editando</p>
+                <h2 className="text-2xl font-bold tracking-tight mt-0.5">{selected.name}</h2>
+              </div>
 
-              <label className="flex items-center gap-3 p-3 rounded-xl bg-elevated border border-line cursor-pointer">
-                <input
-                  type="checkbox"
+              <div className="card p-4 flex items-center gap-3">
+                <Switch
                   checked={!!draft.reservationsEnabled}
-                  onChange={(e) => setDraft({ ...draft, reservationsEnabled: e.target.checked })}
-                  className="w-4 h-4"
+                  onChange={(next) => setDraft({ ...draft, reservationsEnabled: next })}
                 />
                 <div className="flex-1">
-                  <p className="text-sm font-semibold">Reservas habilitadas</p>
+                  <p className="text-sm font-bold">Reservas habilitadas</p>
                   <p className="text-xs text-muted">Si está apagado los usuarios no pueden reservar.</p>
                 </div>
-              </label>
-
-              <div className="grid grid-cols-2 gap-3">
-                <Field
-                  label="Apertura (HH:MM)"
-                  value={draft.openTime ?? ''}
-                  onChange={(v) => setDraft({ ...draft, openTime: v })}
-                />
-                <Field
-                  label="Cierre (HH:MM)"
-                  value={draft.closeTime ?? ''}
-                  onChange={(v) => setDraft({ ...draft, closeTime: v })}
-                />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <Field
-                  label="Capacidad por slot"
-                  type="number"
-                  value={String(draft.reservationCapacity ?? 0)}
-                  onChange={(v) => setDraft({ ...draft, reservationCapacity: Number(v) })}
-                />
-                <Field
-                  label="Duración slot (min)"
-                  type="number"
-                  value={String(draft.slotMinutes ?? 60)}
-                  onChange={(v) => setDraft({ ...draft, slotMinutes: Number(v) })}
-                />
+              <div>
+                <p className="section-title mb-3 flex items-center gap-2"><Clock size={12} /> Horarios</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field
+                    label="Apertura"
+                    value={draft.openTime ?? ''}
+                    onChange={(v) => setDraft({ ...draft, openTime: v })}
+                    placeholder="HH:MM"
+                  />
+                  <Field
+                    label="Cierre"
+                    value={draft.closeTime ?? ''}
+                    onChange={(v) => setDraft({ ...draft, closeTime: v })}
+                    placeholder="HH:MM"
+                  />
+                </div>
               </div>
 
-              <button
-                onClick={() => save.mutate()}
-                disabled={save.isPending}
-                className="px-4 py-2 rounded-xl bg-accent text-black text-sm font-bold flex items-center gap-2 disabled:opacity-50"
-              >
-                <Save size={14} /> {save.isPending ? 'Guardando…' : 'Guardar cambios'}
-              </button>
-              {save.isSuccess && (
-                <p className="text-success text-xs">✓ Guardado</p>
-              )}
+              <div>
+                <p className="section-title mb-3 flex items-center gap-2"><Users size={12} /> Capacidad</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field
+                    label="Capacidad por slot"
+                    type="number"
+                    value={String(draft.reservationCapacity ?? 0)}
+                    onChange={(v) => setDraft({ ...draft, reservationCapacity: Number(v) })}
+                  />
+                  <Field
+                    label="Duración slot (min)"
+                    type="number"
+                    value={String(draft.slotMinutes ?? 60)}
+                    onChange={(v) => setDraft({ ...draft, slotMinutes: Number(v) })}
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => save.mutate()}
+                  disabled={save.isPending}
+                  className="btn-primary"
+                >
+                  <Save size={14} /> {save.isPending ? 'Guardando…' : 'Guardar cambios'}
+                </button>
+                {save.isSuccess && (
+                  <span className="inline-flex items-center gap-1.5 text-xs text-success animate-fade-in">
+                    <Check size={12} /> Guardado
+                  </span>
+                )}
+              </div>
             </div>
           )}
         </div>
       </div>
     </div>
-  );
-}
-
-function Field({ label, value, onChange, type = 'text' }: { label: string; value: string; onChange: (v: string) => void; type?: string }) {
-  return (
-    <label className="block">
-      <span className="text-xs font-bold text-muted tracking-wide uppercase">{label}</span>
-      <input type={type} value={value} onChange={(e) => onChange(e.target.value)} className="input-field mt-1.5" />
-    </label>
   );
 }

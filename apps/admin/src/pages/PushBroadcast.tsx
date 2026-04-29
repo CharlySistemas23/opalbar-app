@@ -2,6 +2,12 @@ import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { Bell, Send } from 'lucide-react';
 import { adminApi, apiError } from '@/api/client';
+import { PageHeader, Field, InlineError, Segmented } from '@/components/ui';
+
+const AUDIENCES = [
+  { value: 'ALL', label: 'Todos los usuarios' },
+  { value: 'ADMINS', label: 'Solo staff' },
+] as const;
 
 export function PushBroadcast() {
   const [title, setTitle] = useState('');
@@ -12,10 +18,9 @@ export function PushBroadcast() {
   const send = useMutation({
     mutationFn: () => adminApi.broadcast(title, body, audience),
     onSuccess: (r) => {
-      const data = r.data?.data ?? r.data ?? {};
-      setResult(`Enviado a ${data.sent ?? 0} usuarios (${data.failed ?? 0} fallaron).`);
-      setTitle('');
-      setBody('');
+      const data = (r as any).data?.data ?? (r as any).data ?? {};
+      setResult(`Enviado a ${data.sent ?? 0} usuarios${data.failed ? ` (${data.failed} fallaron)` : ''}.`);
+      setTitle(''); setBody('');
     },
     onError: (err) => setResult(apiError(err)),
   });
@@ -23,90 +28,74 @@ export function PushBroadcast() {
   const canSend = title.trim().length >= 3 && body.trim().length >= 3 && !send.isPending;
 
   return (
-    <div className="p-8 space-y-6 max-w-2xl">
-      <div>
-        <h1 className="text-2xl font-bold">Notificaciones push</h1>
-        <p className="text-muted text-sm mt-1">Envía un mensaje a toda la audiencia o solo al staff.</p>
-      </div>
+    <div className="page-shell page-shell--scroll">
+      <PageHeader
+        icon={Bell}
+        title="Notificaciones push"
+        subtitle="Mensaje inmediato a toda la audiencia o solo al staff. Para campañas programadas usá Marketing."
+      />
 
-      <div className="card p-6 space-y-5">
-        <label className="block">
-          <span className="text-xs font-bold text-muted uppercase">Audiencia</span>
-          <div className="flex gap-2 mt-1.5">
-            <button
-              onClick={() => setAudience('ALL')}
-              className={`px-4 py-2 rounded-xl text-sm font-semibold transition ${
-                audience === 'ALL' ? 'bg-accent text-black' : 'bg-elevated text-zinc-300'
-              }`}
-            >
-              Todos los usuarios
-            </button>
-            <button
-              onClick={() => setAudience('ADMINS')}
-              className={`px-4 py-2 rounded-xl text-sm font-semibold transition ${
-                audience === 'ADMINS' ? 'bg-accent text-black' : 'bg-elevated text-zinc-300'
-              }`}
-            >
-              Solo staff
-            </button>
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr,320px] gap-4">
+        <div className="card p-6 space-y-5">
+          <div>
+            <p className="text-[11px] font-bold text-muted tracking-wider uppercase mb-2">Audiencia</p>
+            <Segmented options={AUDIENCES} value={audience} onChange={(v) => setAudience(v as any)} />
           </div>
-        </label>
 
-        <label className="block">
-          <span className="text-xs font-bold text-muted uppercase">Título</span>
-          <input
+          <Field
+            label="Título"
             value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            maxLength={60}
+            onChange={setTitle}
             placeholder="¡Noticia importante!"
-            className="input-field mt-1.5"
+            hint={`${title.length}/60`}
           />
-          <span className="text-[10px] text-muted">{title.length}/60</span>
-        </label>
 
-        <label className="block">
-          <span className="text-xs font-bold text-muted uppercase">Mensaje</span>
-          <textarea
+          <Field
+            label="Mensaje"
             value={body}
-            onChange={(e) => setBody(e.target.value)}
-            maxLength={180}
+            onChange={setBody}
             rows={4}
             placeholder="Descripción del mensaje…"
-            className="input-field mt-1.5"
+            hint={`${body.length}/180`}
           />
-          <span className="text-[10px] text-muted">{body.length}/180</span>
-        </label>
 
-        <div className="border border-line rounded-xl p-4 bg-elevated">
-          <p className="text-[10px] text-muted uppercase tracking-wide mb-2">Preview</p>
-          <div className="flex items-start gap-3">
-            <div className="w-9 h-9 rounded-lg bg-accent/20 flex items-center justify-center shrink-0">
-              <Bell size={16} className="text-accent" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-bold truncate">{title || 'Título del mensaje'}</p>
-              <p className="text-xs text-muted break-words">{body || 'Descripción aquí…'}</p>
-            </div>
+          <InlineError message={send.isError ? result : null} />
+
+          <div className="flex gap-3 pt-2">
+            <button type="button" onClick={() => send.mutate()} disabled={!canSend} className="btn-primary">
+              <Send size={14} /> {send.isPending ? 'Enviando…' : 'Enviar ahora'}
+            </button>
           </div>
+
+          {send.isSuccess && result && (
+            <div className="p-3 rounded-xl bg-success/10 border border-success/30 text-success text-sm animate-fade-in">
+              {result}
+            </div>
+          )}
         </div>
 
-        <div className="flex gap-3">
-          <button
-            onClick={() => send.mutate()}
-            disabled={!canSend}
-            className="btn-primary"
-          >
-            <Send size={16} /> {send.isPending ? 'Enviando…' : 'Enviar ahora'}
-          </button>
-        </div>
-
-        {result && (
-          <div className={`p-3 rounded-xl text-sm ${
-            send.isError ? 'bg-danger/10 text-danger border border-danger/30' : 'bg-success/10 text-success border border-success/30'
-          }`}>
-            {result}
+        {/* Preview */}
+        <div className="card p-5 space-y-3">
+          <p className="text-[11px] font-bold text-muted tracking-wider uppercase">Preview</p>
+          <div className="rounded-2xl p-4 bg-gradient-to-br from-zinc-900 to-zinc-800 border border-line shadow-soft">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-accent/15 ring-1 ring-accent/30 flex items-center justify-center shrink-0">
+                <Bell size={18} className="text-accent" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[10px] font-bold text-muted uppercase tracking-wider">OPAL BAR</p>
+                  <p className="text-[10px] text-muted">ahora</p>
+                </div>
+                <p className="text-sm font-bold mt-1 break-words">{title || 'Título del mensaje'}</p>
+                <p className="text-xs text-zinc-300 break-words mt-0.5">{body || 'Descripción aquí…'}</p>
+              </div>
+            </div>
           </div>
-        )}
+          <p className="text-[11px] text-muted">
+            Esto es lo que verán tus usuarios al recibir la notificación.
+          </p>
+        </div>
       </div>
     </div>
   );
