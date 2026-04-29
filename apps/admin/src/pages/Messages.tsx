@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { MessagesSquare, Search, Trash2, Shield, AlertTriangle, X } from 'lucide-react';
-import { messagesApi, apiError } from '@/api/client';
+import { MessagesSquare, Search, Trash2, Shield, AlertTriangle, X, Send } from 'lucide-react';
+import { messagesApi, adminApi, apiError } from '@/api/client';
+import { Modal, Field, InlineError, useDebounced } from '@/components/ui';
 
 type ThreadUser = {
   id: string;
@@ -79,6 +80,28 @@ export function Messages() {
 
   const threads: ThreadRow[] = threadsQuery.data ?? [];
 
+  // Compose modal state ─────────────────────────
+  const [composing, setComposing] = useState<{ userId: string; userLabel: string; userSearch: string; content: string } | null>(null);
+  const composeSearch = useDebounced(composing?.userSearch ?? '', 300);
+  const userSearchQuery = useQuery({
+    enabled: !!composing && !composing.userId && composeSearch.trim().length >= 2,
+    queryKey: ['admin', 'users-search-msg', composeSearch],
+    queryFn: async () => {
+      const r = await adminApi.users({ search: composeSearch.trim(), limit: 10 });
+      return (r.data?.data?.data ?? r.data?.data ?? r.data ?? []) as any[];
+    },
+  });
+  const compose = useMutation({
+    mutationFn: (form: NonNullable<typeof composing>) => adminApi.sendMessageAsAdmin({
+      userId: form.userId,
+      content: form.content,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'messages'] });
+      setComposing(null);
+    },
+  });
+
   return (
     <div className="p-8 space-y-6 h-full flex flex-col">
       <div className="flex items-center justify-between gap-4">
@@ -90,6 +113,13 @@ export function Messages() {
             Supervisión de DMs entre usuarios · {threads.length} conversaciones
           </p>
         </div>
+        <button
+          type="button"
+          onClick={() => setComposing({ userId: '', userLabel: '', userSearch: '', content: '' })}
+          className="btn-primary"
+        >
+          <Send size={14} /> Mensaje como plataforma
+        </button>
         <div className="relative max-w-[320px] w-full">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
           <input
@@ -155,6 +185,93 @@ export function Messages() {
           onMessageDeleted={() => qc.invalidateQueries({ queryKey: ['admin', 'messages'] })}
         />
       </div>
+
+      <Modal open={!!composing} onClose={() => setComposing(null)} title="Mensaje como plataforma">
+        {composing && (
+          <div className="space-y-3">
+            <p className="text-xs text-muted">
+              Se enviará como un DM tuyo al usuario. Útil para advertencias formales, avisos de moderación o respuestas oficiales.
+            </p>
+
+            {composing.userId ? (
+              <div className="flex items-center gap-2 p-2 rounded-lg bg-success/10 ring-1 ring-success/30">
+                <span className="text-sm flex-1">{composing.userLabel}</span>
+                <button
+                  type="button"
+                  onClick={() => setComposing({ ...composing, userId: '', userLabel: '', userSearch: '' })}
+                  className="text-xs text-muted hover:text-danger"
+                >
+                  cambiar
+                </button>
+              </div>
+            ) : (
+              <div>
+                <p className="text-[11px] font-bold text-muted tracking-wider uppercase mb-2">Destinatario</p>
+                <div className="relative">
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+                  <input
+                    value={composing.userSearch}
+                    onChange={(e) => setComposing({ ...composing, userSearch: e.target.value })}
+                    placeholder="Buscar usuario por nombre o email…"
+                    className="input-search"
+                  />
+                </div>
+                {composeSearch.trim().length >= 2 && (
+                  <div className="card max-h-[160px] overflow-auto mt-2">
+                    {userSearchQuery.isLoading ? (
+                      <p className="p-3 text-xs text-muted">Buscando…</p>
+                    ) : (userSearchQuery.data ?? []).length === 0 ? (
+                      <p className="p-3 text-xs text-muted">Sin resultados.</p>
+                    ) : (
+                      <ul className="divide-y divide-line/60">
+                        {(userSearchQuery.data ?? []).map((u: any) => (
+                          <li
+                            key={u.id}
+                            onClick={() => setComposing({
+                              ...composing,
+                              userId: u.id,
+                              userLabel: `${u.profile?.firstName ?? ''} ${u.profile?.lastName ?? ''} (${u.email})`.trim(),
+                              userSearch: '',
+                            })}
+                            className="p-2.5 cursor-pointer hover:bg-elevated/40 text-sm"
+                          >
+                            <p className="font-semibold">{u.profile?.firstName ?? ''} {u.profile?.lastName ?? ''}</p>
+                            <p className="text-[11px] text-muted">{u.email}</p>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <Field
+              label="Mensaje"
+              rows={5}
+              required
+              value={composing.content}
+              onChange={(v) => setComposing({ ...composing, content: v })}
+              placeholder="Escribí el mensaje que recibirá el usuario."
+              hint={`${composing.content.length}/2000`}
+            />
+
+            <InlineError message={compose.error ? apiError(compose.error) : null} />
+
+            <div className="flex gap-2 pt-2">
+              <button type="button" onClick={() => setComposing(null)} className="btn-ghost flex-1">Cancelar</button>
+              <button
+                type="button"
+                onClick={() => compose.mutate(composing)}
+                disabled={compose.isPending || !composing.userId || !composing.content.trim()}
+                className="btn-primary flex-1"
+              >
+                <Send size={14} /> {compose.isPending ? 'Enviando…' : 'Enviar mensaje'}
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

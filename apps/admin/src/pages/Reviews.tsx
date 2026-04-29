@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Star, Check, X } from 'lucide-react';
+import { Star, Check, X, Trash2 } from 'lucide-react';
 import { adminApi, apiError } from '@/api/client';
 import {
-  PageHeader, EmptyState, SkeletonRows, InlineError, Segmented, StatusPill,
+  PageHeader, EmptyState, SkeletonRows, InlineError, Segmented, StatusPill, ConfirmDialog,
 } from '@/components/ui';
 
 function unwrap<T = any>(p: any): T {
@@ -28,6 +28,7 @@ const FILTERS = [
 export function Reviews() {
   const qc = useQueryClient();
   const [filter, setFilter] = useState<typeof FILTERS[number]['value']>('PENDING');
+  const [confirmDel, setConfirmDel] = useState<string | null>(null);
 
   const reviewsQuery = useQuery({
     queryKey: ['admin', 'reviews', filter],
@@ -43,6 +44,11 @@ export function Reviews() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'reviews'] }),
   });
 
+  const hardDel = useMutation({
+    mutationFn: (id: string) => adminApi.hardDeleteReview(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'reviews'] }),
+  });
+
   const list: any[] = Array.isArray(reviewsQuery.data) ? reviewsQuery.data : (reviewsQuery.data?.data ?? []);
 
   return (
@@ -54,7 +60,7 @@ export function Reviews() {
         actions={<Segmented options={FILTERS} value={filter} onChange={setFilter} />}
       />
 
-      <InlineError message={moderate.error ? apiError(moderate.error) : null} />
+      <InlineError message={moderate.error ? apiError(moderate.error) : hardDel.error ? apiError(hardDel.error) : null} />
 
       <div className="card flex-1 overflow-auto">
         {reviewsQuery.isLoading ? (
@@ -91,34 +97,55 @@ export function Reviews() {
                     {r.content && <p className="text-sm text-zinc-300 mt-1.5 whitespace-pre-wrap leading-relaxed">{r.content}</p>}
                   </div>
                 </div>
-                {r.status === 'PENDING' && (
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => moderate.mutate({ id: r.id, action: 'APPROVED' })}
-                      disabled={moderate.isPending}
-                      className="btn-success py-1.5 text-xs"
-                    >
-                      <Check size={12} /> Aprobar
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const reason = prompt('Motivo de rechazo (opcional):') || undefined;
-                        moderate.mutate({ id: r.id, action: 'REJECTED', reason });
-                      }}
-                      disabled={moderate.isPending}
-                      className="btn-danger py-1.5 text-xs"
-                    >
-                      <X size={12} /> Rechazar
-                    </button>
-                  </div>
-                )}
+                <div className="flex gap-2">
+                  {r.status === 'PENDING' && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => moderate.mutate({ id: r.id, action: 'APPROVED' })}
+                        disabled={moderate.isPending}
+                        className="btn-success py-1.5 text-xs"
+                      >
+                        <Check size={12} /> Aprobar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const reason = prompt('Motivo de rechazo (opcional):') || undefined;
+                          moderate.mutate({ id: r.id, action: 'REJECTED', reason });
+                        }}
+                        disabled={moderate.isPending}
+                        className="btn-danger py-1.5 text-xs"
+                      >
+                        <X size={12} /> Rechazar
+                      </button>
+                    </>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setConfirmDel(r.id)}
+                    disabled={hardDel.isPending}
+                    title="Eliminar permanentemente (spam, abuso)"
+                    className="btn-ghost py-1.5 text-xs hover:bg-danger/15 hover:text-danger ml-auto"
+                  >
+                    <Trash2 size={12} /> Eliminar
+                  </button>
+                </div>
               </li>
             ))}
           </ul>
         )}
       </div>
+
+      <ConfirmDialog
+        open={!!confirmDel}
+        onClose={() => setConfirmDel(null)}
+        title="Eliminar reseña permanentemente?"
+        message="Esta acción es irreversible. La reseña desaparecerá de la base de datos. Solo para spam, abuso o contenido prohibido."
+        destructive
+        confirmLabel="Eliminar permanente"
+        onConfirm={() => confirmDel && hardDel.mutate(confirmDel)}
+      />
     </div>
   );
 }

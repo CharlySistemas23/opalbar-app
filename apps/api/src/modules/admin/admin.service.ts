@@ -1268,6 +1268,132 @@ export class AdminService {
     return updated;
   }
 
+  // ─────────────────────────────────────────────
+  //  TANDA 2: tickets · reviews · messages · events
+  // ─────────────────────────────────────────────
+
+  async createTicketForUser(
+    adminId: string,
+    body: { userId: string; subject: string; description: string; priority?: string; category?: string },
+  ) {
+    if (!body.userId || !body.subject?.trim() || !body.description?.trim()) {
+      throw new BadRequestException('Faltan campos: userId, subject, description');
+    }
+    const target = await this.prisma.user.findUnique({ where: { id: body.userId } });
+    if (!target) throw new NotFoundException('Usuario no encontrado');
+
+    const ticket = await this.prisma.supportTicket.create({
+      data: {
+        userId: body.userId,
+        assignedToId: adminId,
+        subject: body.subject.trim().slice(0, 200),
+        category: (body.category as any) ?? 'OTHER',
+        priority: (body.priority as any) ?? 'MEDIUM',
+        status: 'OPEN',
+      },
+    });
+
+    // Primer mensaje del ticket = la descripción que dio el admin (como AGENT)
+    await this.prisma.supportMessage.create({
+      data: {
+        ticketId: ticket.id,
+        senderId: adminId,
+        sender: 'AGENT',
+        content: body.description.trim().slice(0, 2000),
+      },
+    });
+
+    this.realtime.toUser(body.userId, 'ticket', 'created', { id: ticket.id });
+    this.realtime.toStaff('ticket', 'created', { id: ticket.id });
+    this.logger.log(`[admin] ticket ${ticket.id} created by admin ${adminId} for user ${body.userId}`);
+    return ticket;
+  }
+
+  async hardDeleteReview(reviewId: string) {
+    const review = await this.prisma.review.findUnique({ where: { id: reviewId } });
+    if (!review) throw new NotFoundException('Reseña no encontrada');
+    // Hard delete de verdad — sin softDelete. Para casos de spam/abuso.
+    await this.prisma.review.delete({ where: { id: reviewId } }).catch(async () => {
+      // Si la FK bloquea (ej. helpfulVotes), caemos a soft-delete + status REJECTED
+      await this.prisma.review.update({
+        where: { id: reviewId },
+        data: {
+          deletedAt: new Date(),
+          status: 'REJECTED',
+          rejectionReason: 'Eliminado permanentemente por moderación.',
+        },
+      });
+    });
+    this.realtime.toStaff('review', 'deleted', { id: reviewId });
+  }
+
+  async sendMessageAsAdmin(adminId: string, userId: string, content: string) {
+    const text = (content ?? '').trim();
+    if (!text) throw new BadRequestException('Mensaje vacío');
+    if (text.length > 2000) throw new BadRequestException('Mensaje demasiado largo (máximo 2000)');
+    const target = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!target) throw new NotFoundException('Usuario no encontrado');
+    if (target.id === adminId) throw new BadRequestException('No te podés mandar un mensaje a vos mismo');
+
+    // Buscar/crear thread entre admin y user. La unique constraint es
+    // (userAId, userBId) — para evitar duplicados ordenamos los IDs.
+    const [a, b] = adminId < userId ? [adminId, userId] : [userId, adminId];
+    let thread = await this.prisma.messageThread.findFirst({
+      where: {
+        OR: [
+          { userAId: a, userBId: b },
+          { userAId: b, userBId: a },
+        ],
+      },
+    });
+    if (!thread) {
+      thread = await this.prisma.messageThread.create({
+        data: { userAId: a, userBId: b, status: 'ACCEPTED', requestedById: adminId },
+      });
+    } else if (thread.status !== 'ACCEPTED') {
+      thread = await this.prisma.messageThread.update({
+        where: { id: thread.id },
+        data: { status: 'ACCEPTED' },
+      });
+    }
+
+    const message = await this.prisma.message.create({
+      data: {
+        threadId: thread.id,
+        senderId: adminId,
+        content: text,
+      },
+    });
+    await this.prisma.messageThread.update({
+      where: { id: thread.id },
+      data: { lastMessageAt: new Date() },
+    });
+
+    this.realtime.toUsers([thread.userAId, thread.userBId], 'message', 'received', {
+      id: message.id,
+      data: { threadId: thread.id, message },
+    });
+    this.logger.log(`[admin] platform message ${message.id} from ${adminId} to ${userId}`);
+    return { thread, message };
+  }
+
+  async duplicateEvent(eventId: string, adminId: string) {
+    const original = await this.prisma.event.findUnique({ where: { id: eventId } });
+    if (!original) throw new NotFoundException('Evento no encontrado');
+    const { id: _id, currentCapacity: _cap, createdAt: _c, updatedAt: _u, ...rest } = original;
+    const dup = await this.prisma.event.create({
+      data: {
+        ...rest,
+        title: `${rest.title} (copia)`,
+        status: 'DRAFT',
+        currentCapacity: 0,
+      },
+    });
+    this.realtime.toStaff('event', 'created', { id: dup.id });
+    this.logger.log(`[admin] event ${eventId} duplicated as ${dup.id} by ${adminId}`);
+    return dup;
+  }
+
   async deleteUserDirect(adminId: string, userId: string) {
     if (userId === adminId) {
       throw new BadRequestException('Cannot delete yourself');

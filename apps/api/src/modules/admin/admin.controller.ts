@@ -273,6 +273,43 @@ export class AdminController {
     return this.adminService.deleteFeatureFlag(key);
   }
 
+  // ── Tanda 2: tickets · reviews · messages · events ──
+
+  @Post('support/tickets')
+  @Audit('ticket.create_admin', { targetType: 'TICKET' })
+  @ApiOperation({ summary: 'Crear ticket de soporte en nombre de un usuario (telefono, email)' })
+  createTicketForUser(
+    @CurrentUser() admin: User,
+    @Body() body: { userId: string; subject: string; description: string; priority?: string; category?: string },
+  ) {
+    return this.adminService.createTicketForUser(admin.id, body);
+  }
+
+  @Delete('reviews/:id') @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Audit('review.hard_delete', { targetType: 'REVIEW', targetIdParam: 'id' })
+  @ApiOperation({ summary: 'Eliminar reseña permanentemente (no soft-delete)' })
+  hardDeleteReview(@Param('id') id: string) {
+    return this.adminService.hardDeleteReview(id);
+  }
+
+  @Post('messages/send')
+  @Audit('message.send_as_platform', { targetType: 'MESSAGE' })
+  @ApiOperation({ summary: 'Enviar mensaje al usuario como plataforma (advertencia, aviso de moderación)' })
+  sendMessageAsAdmin(
+    @CurrentUser() admin: User,
+    @Body() body: { userId: string; content: string },
+  ) {
+    return this.adminService.sendMessageAsAdmin(admin.id, body.userId, body.content);
+  }
+
+  @Post('events/:id/duplicate')
+  @Audit('event.duplicate', { targetType: 'EVENT', targetIdParam: 'id' })
+  @ApiOperation({ summary: 'Duplicar evento (crea uno nuevo con mismos datos, status DRAFT)' })
+  duplicateEvent(@Param('id') id: string, @CurrentUser() admin: User) {
+    return this.adminService.duplicateEvent(id, admin.id);
+  }
+
   // ── Reservations ──────────────────────────
 
   @Get('reservations') @ApiOperation({ summary: 'List all reservations' })

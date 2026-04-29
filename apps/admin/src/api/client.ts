@@ -111,6 +111,13 @@ export const adminApi = {
   createReservation: (data: { userId: string; venueId: string; date: string; timeSlot: string; partySize: number; notes?: string; internalNotes?: string }) =>
     apiClient.post('/admin/reservations', data),
   pinPost: (id: string, pinned: boolean) => apiClient.patch(`/admin/posts/${id}/pin`, { pinned }),
+  // Tanda 2: tickets · reviews · messages · events
+  createTicketForUser: (data: { userId: string; subject: string; description: string; priority?: string; category?: string }) =>
+    apiClient.post('/admin/support/tickets', data),
+  hardDeleteReview: (id: string) => apiClient.delete(`/admin/reviews/${id}`),
+  sendMessageAsAdmin: (data: { userId: string; content: string }) =>
+    apiClient.post('/admin/messages/send', data),
+  duplicateEvent: (id: string) => apiClient.post(`/admin/events/${id}/duplicate`),
 
   // Community moderation
   posts: (params?: any) => apiClient.get('/admin/posts/pending', { params }),
