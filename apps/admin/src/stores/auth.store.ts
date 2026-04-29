@@ -51,6 +51,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
         const { data } = await authApi.login(email, password);
         const body = unwrap<any>(data);
 
+        // 2FA challenge — backend hasn't issued tokens yet, asks for OTP code
         if (body?.requires2FA) {
           const expiresIn = Number(body.expiresIn ?? 300);
           set({
@@ -63,7 +64,16 @@ export const useAuthStore = create<AuthState>((set, get) => {
           return;
         }
 
-        const { user, tokens } = body;
+        const user = body?.user;
+        const tokens = body?.tokens;
+        if (!user || !tokens) {
+          // Defensive: body shape was neither {user,tokens} nor {requires2FA}.
+          // Surface a clear message instead of a generic TypeError so the user
+          // can see what the API actually returned.
+          throw new Error(
+            'Respuesta inesperada del servidor (sin user ni 2FA). Contacta soporte.',
+          );
+        }
         if (!STAFF_ROLES.includes(user.role)) {
           throw new Error('Esta cuenta no tiene permisos de administrador.');
         }
@@ -82,7 +92,12 @@ export const useAuthStore = create<AuthState>((set, get) => {
       set({ loading: true, error: null });
       try {
         const { data } = await authApi.verify2FA(pending.identifier, code.trim());
-        const { user, tokens } = unwrap<any>(data);
+        const body = unwrap<any>(data);
+        const user = body?.user;
+        const tokens = body?.tokens;
+        if (!user || !tokens) {
+          throw new Error('Respuesta inesperada del servidor al verificar el código.');
+        }
         if (!STAFF_ROLES.includes(user.role)) {
           throw new Error('Esta cuenta no tiene permisos de administrador.');
         }
