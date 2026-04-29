@@ -20,6 +20,8 @@
 // ─────────────────────────────────────────────
 
 import { PrismaClient, UserRole, UserStatus } from '@prisma/client';
+import { PrismaPg } from '@prisma/adapter-pg';
+import { Pool } from 'pg';
 import * as bcrypt from 'bcryptjs';
 
 function getArg(name: string): string | undefined {
@@ -48,7 +50,17 @@ async function main() {
     process.exit(1);
   }
 
-  const prisma = new PrismaClient();
+  const dbUrl = process.env.DATABASE_URL;
+  if (!dbUrl) {
+    console.error('DATABASE_URL no está seteada en el entorno.');
+    process.exit(1);
+  }
+  // The schema's datasource block has no `url` field — production wires
+  // it through the pg driver adapter. Mirror that here so the script works
+  // whether DATABASE_URL is internal or public.
+  const pool = new Pool({ connectionString: dbUrl });
+  const adapter = new PrismaPg(pool);
+  const prisma = new PrismaClient({ adapter });
   try {
     const passwordHash = await bcrypt.hash(password, 12);
 

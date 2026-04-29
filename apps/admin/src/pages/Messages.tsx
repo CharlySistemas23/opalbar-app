@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { MessagesSquare, Search, Trash2, Shield, AlertTriangle } from 'lucide-react';
+import { MessagesSquare, Search, Trash2, Shield, AlertTriangle, X } from 'lucide-react';
 import { messagesApi, apiError } from '@/api/client';
 
 type ThreadUser = {
@@ -24,11 +24,25 @@ type Message = {
   id: string;
   threadId: string;
   senderId: string;
-  content: string;
+  content: string | null;
+  imageUrl: string | null;
+  stickerKey: string | null;
+  audioUrl: string | null;
+  audioDurationSec: number | null;
+  replyToId: string | null;
   isRead: boolean;
   createdAt: string;
   deletedAt: string | null;
 };
+
+function lastMessagePreview(m: ThreadRow['lastMessage']): string {
+  if (!m) return '';
+  if (m.deletedAt) return '[mensaje eliminado]';
+  if (m.content && m.content.trim()) return m.content;
+  // Backend's lastMessage select doesn't carry attachments, so we just say
+  // "media" if content is empty and not deleted.
+  return '📎 multimedia';
+}
 
 function userLabel(u: ThreadUser) {
   const fn = u.profile?.firstName?.trim();
@@ -119,7 +133,7 @@ export function Messages() {
                   </p>
                   {t.lastMessage ? (
                     <p className={`text-xs truncate mt-0.5 ${t.lastMessage.deletedAt ? 'text-danger/70 italic' : 'text-muted'}`}>
-                      {t.lastMessage.deletedAt ? '[mensaje eliminado]' : t.lastMessage.content}
+                      {lastMessagePreview(t.lastMessage)}
                     </p>
                   ) : (
                     <p className="text-xs text-muted italic mt-0.5">Sin mensajes</p>
@@ -158,6 +172,7 @@ function Avatar({ user }: { user: ThreadUser }) {
 
 function ThreadView({ threadId, onMessageDeleted }: { threadId: string | null; onMessageDeleted: () => void }) {
   const qc = useQueryClient();
+  const [lightbox, setLightbox] = useState<string | null>(null);
 
   const threadQuery = useQuery({
     enabled: !!threadId,
@@ -229,7 +244,7 @@ function ThreadView({ threadId, onMessageDeleted }: { threadId: string | null; o
                   {deleted && <span className="text-danger">· eliminado</span>}
                 </div>
                 <div
-                  className={`rounded-2xl px-4 py-2.5 text-sm ${
+                  className={`rounded-2xl px-4 py-2.5 text-sm space-y-2 ${
                     deleted
                       ? 'bg-danger/10 text-danger/80 italic border border-danger/30'
                       : isA
@@ -237,7 +252,53 @@ function ThreadView({ threadId, onMessageDeleted }: { threadId: string | null; o
                       : 'bg-accent/20 text-zinc-100'
                   }`}
                 >
-                  <p className="whitespace-pre-wrap">{m.content}</p>
+                  {/* Sticker — emoji glyph rendered large */}
+                  {!deleted && m.stickerKey && (
+                    <div className="text-5xl leading-none select-none">{m.stickerKey}</div>
+                  )}
+
+                  {/* Image — click to open lightbox */}
+                  {!deleted && m.imageUrl && (
+                    <button
+                      type="button"
+                      onClick={() => setLightbox(m.imageUrl!)}
+                      className="block max-w-[260px] rounded-xl overflow-hidden border border-line/40 hover:opacity-90 transition"
+                      title="Click para ampliar"
+                    >
+                      <img
+                        src={m.imageUrl}
+                        alt="Adjunto"
+                        className="block w-full h-auto"
+                        loading="lazy"
+                      />
+                    </button>
+                  )}
+
+                  {/* Audio — native HTML5 player so admin puede escuchar */}
+                  {!deleted && m.audioUrl && (
+                    <div className="space-y-1">
+                      <audio
+                        controls
+                        preload="metadata"
+                        src={m.audioUrl}
+                        className="block w-[260px] max-w-full"
+                      />
+                      {m.audioDurationSec ? (
+                        <span className="text-[10px] text-muted">
+                          {Math.floor(m.audioDurationSec / 60)}:{String(m.audioDurationSec % 60).padStart(2, '0')}
+                        </span>
+                      ) : null}
+                    </div>
+                  )}
+
+                  {/* Text */}
+                  {m.content ? (
+                    <p className="whitespace-pre-wrap">{m.content}</p>
+                  ) : (
+                    !deleted && !m.imageUrl && !m.audioUrl && !m.stickerKey && (
+                      <p className="italic text-muted">[mensaje vacío]</p>
+                    )
+                  )}
                 </div>
                 {!deleted && (
                   <button
@@ -260,6 +321,29 @@ function ThreadView({ threadId, onMessageDeleted }: { threadId: string | null; o
           <p className="text-danger text-xs">{apiError(del.error)}</p>
         )}
       </div>
+
+      {/* Lightbox para fotos */}
+      {lightbox && (
+        <div
+          className="fixed inset-0 z-50 bg-black/85 flex items-center justify-center p-4"
+          onClick={() => setLightbox(null)}
+        >
+          <button
+            type="button"
+            onClick={() => setLightbox(null)}
+            className="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center"
+            aria-label="Cerrar"
+          >
+            <X size={20} className="text-white" />
+          </button>
+          <img
+            src={lightbox}
+            alt="Ampliada"
+            className="max-w-full max-h-full object-contain rounded-lg"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
     </div>
   );
 }
