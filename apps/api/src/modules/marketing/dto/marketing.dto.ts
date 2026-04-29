@@ -91,6 +91,47 @@ export class CampaignContentDto {
   @IsUrl({ require_tld: false })
   @MaxLength(500)
   heroImageUrl?: string;
+
+  // ── Multi-image gallery (rendered below hero) ─────────
+  @ApiPropertyOptional({ type: [String], description: 'URLs adicionales de imágenes para galería' })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(8)
+  @IsUrl({ require_tld: false }, { each: true })
+  images?: string[];
+
+  // ── File attachments (PDF, etc.) ──────────────────────
+  @ApiPropertyOptional({ type: [Object], description: 'Archivos adjuntos: { name, url, sizeBytes, mimeType }' })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(5)
+  @ValidateNested({ each: true })
+  @Type(() => CampaignAttachmentDto)
+  attachments?: CampaignAttachmentDto[];
+}
+
+export class CampaignAttachmentDto {
+  @ApiProperty({ example: 'menu-promocional.pdf' })
+  @IsString()
+  @MaxLength(120)
+  name: string;
+
+  @ApiProperty({ example: 'https://api.opalbar.com/api/v1/email/asset/abc123' })
+  @IsUrl({ require_tld: false })
+  @MaxLength(500)
+  url: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  sizeBytes?: number;
+
+  @ApiPropertyOptional({ example: 'application/pdf' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  mimeType?: string;
 }
 
 export class CampaignAudienceDto {

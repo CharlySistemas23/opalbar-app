@@ -183,6 +183,7 @@ export const adminApi = {
   marketingCancelCampaign: (id: string) => apiClient.patch(`/admin/marketing/campaigns/${id}/cancel`),
   marketingDeleteCampaign: (id: string) => apiClient.delete(`/admin/marketing/campaigns/${id}`),
   marketingAudienceCount: (data: any) => apiClient.post('/admin/marketing/audience-count', data),
+  marketingUploadAsset: (dataUrl: string) => apiClient.post('/admin/marketing/assets', { dataUrl }),
 };
 
 export const eventsApi = {

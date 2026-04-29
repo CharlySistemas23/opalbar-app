@@ -1462,6 +1462,12 @@ model EmailCampaign {
   ctaLabel     String?               @db.VarChar(60)
   ctaUrl       String?               @db.VarChar(500)
   heroImageUrl String?               @db.VarChar(500)
+  // Gallery of additional images (URLs returned by /admin/marketing/assets).
+  // Renders below the hero in the email body.
+  images       String[]              @default([])
+  // File attachments — array of { name, url, sizeBytes, mimeType, assetId }.
+  // Stored as Json for flexibility; fetched on send and passed to nodemailer.
+  attachments  Json?
   template     EmailCampaignTemplate @default(GENERIC)
 
   // Segmentation stored as JSON — flexible filters

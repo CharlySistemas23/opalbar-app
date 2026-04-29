@@ -69,6 +69,11 @@ export interface RenderInput {
   ctaLabel?: string | null;
   ctaUrl?: string | null;
   heroImageUrl?: string | null;
+  /** Galería de imágenes adicionales (después del hero, en grid 2-col) */
+  images?: string[] | null;
+  /** Lista de adjuntos solo para mostrar la mención al pie del email — los archivos
+   *  reales se anexan vía nodemailer en el send, no se renderizan inline. */
+  attachments?: Array<{ name: string; sizeBytes?: number }> | null;
   trackingPixelUrl?: string;
   unsubscribeUrl?: string;
   recipientFirstName?: string;
@@ -96,6 +101,44 @@ export function renderEmailHtml(input: RenderInput): string {
               alt="${escapeAttr(input.headline || 'OPALBAR')}"
               width="560"
               style="display:block;width:100%;max-width:560px;height:auto;background:#EFEDE7;border-radius:2px;" />
+       </td></tr>`
+    : '';
+
+  // Galería: grid 2-col de imágenes adicionales (uses tables for email-client safety)
+  const galleryImages = (input.images ?? []).filter((u) => isPublicHttpUrl(u));
+  let gallery = '';
+  if (galleryImages.length > 0) {
+    const rows: string[] = [];
+    for (let i = 0; i < galleryImages.length; i += 2) {
+      const left = galleryImages[i];
+      const right = galleryImages[i + 1];
+      rows.push(`<tr>
+        <td width="50%" style="padding:0 4px 8px 0;vertical-align:top;">
+          <img src="${escapeAttr(left)}" alt="" width="270" style="display:block;width:100%;max-width:270px;height:auto;background:#EFEDE7;border-radius:2px;" />
+        </td>
+        <td width="50%" style="padding:0 0 8px 4px;vertical-align:top;">
+          ${right ? `<img src="${escapeAttr(right)}" alt="" width="270" style="display:block;width:100%;max-width:270px;height:auto;background:#EFEDE7;border-radius:2px;" />` : ''}
+        </td>
+      </tr>`);
+    }
+    gallery = `<tr><td style="padding:0 0 32px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tbody>${rows.join('')}</tbody></table>
+    </td></tr>`;
+  }
+
+  // Adjuntos: solo mención al pie indicando los archivos anexos
+  const attachmentsList = (input.attachments ?? []).filter((a) => a && a.name);
+  const attachmentsBlock = attachmentsList.length > 0
+    ? `<tr><td style="padding:0 48px 24px;">
+         <div style="border:1px solid #E5E3DD;border-radius:2px;padding:16px;background:#FAFAF7;">
+           <div style="font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#8A8A92;margin-bottom:8px;">
+             ${attachmentsList.length === 1 ? 'Adjunto' : 'Adjuntos'}
+           </div>
+           ${attachmentsList.map((a) => {
+             const size = a.sizeBytes ? ` · ${(a.sizeBytes / 1024).toFixed(0)} KB` : '';
+             return `<div style="font-size:13px;color:#3A3A42;line-height:1.6;">📎 ${escapeHtml(a.name)}<span style="color:#8A8A92;">${size}</span></div>`;
+           }).join('')}
+         </div>
        </td></tr>`
     : '';
 
@@ -151,6 +194,13 @@ export function renderEmailHtml(input: RenderInput): string {
           </td>
         </tr>
 
+        <!-- Gallery (multi-image) -->
+        <tr>
+          <td style="padding:0 48px;">
+            <table role="presentation" width="100%"><tbody>${gallery}</tbody></table>
+          </td>
+        </tr>
+
         <!-- Greeting -->
         <tr>
           <td style="padding:0 48px 16px;font-size:12px;font-weight:600;letter-spacing:2px;text-transform:uppercase;color:#8A8A92;">
@@ -178,6 +228,9 @@ export function renderEmailHtml(input: RenderInput): string {
             <table role="presentation"><tbody>${cta}</tbody></table>
           </td>
         </tr>
+
+        <!-- Attachments (mention block — actual files are added to the email by nodemailer) -->
+        ${attachmentsBlock}
 
         <!-- Divider -->
         <tr>

@@ -223,6 +223,10 @@ export class MarketingService implements OnModuleInit {
         ctaLabel: dto.ctaLabel,
         ctaUrl: dto.ctaUrl,
         heroImageUrl: dto.heroImageUrl,
+        images: dto.images && dto.images.length > 0 ? dto.images : [],
+        attachments: dto.attachments && dto.attachments.length > 0
+          ? (dto.attachments as unknown as Prisma.InputJsonValue)
+          : Prisma.JsonNull,
         template: dto.template,
         audienceType: dto.audienceType,
         audienceFilter: dto.audienceFilter
@@ -430,6 +434,14 @@ export class MarketingService implements OnModuleInit {
     let sent = 0;
     let failed = 0;
 
+    // Resolver una sola vez los binarios de los adjuntos para toda la campaña
+    // (no los traemos en cada iteración del recipient).
+    const attachmentsMeta: Array<{ name: string; sizeBytes?: number; mimeType?: string; url?: string }> =
+      Array.isArray(campaign.attachments)
+        ? (campaign.attachments as any[]).filter((a) => a && a.name && a.url)
+        : [];
+    const attachmentBinaries = await this.resolveAttachmentBinaries(attachmentsMeta);
+
     for (let i = 0; i < recipients.length; i += BATCH_SIZE) {
       const batch = recipients.slice(i, i + BATCH_SIZE);
 
@@ -447,6 +459,8 @@ export class MarketingService implements OnModuleInit {
             ctaLabel: campaign.ctaLabel,
             ctaUrl: campaign.ctaUrl,
             heroImageUrl: campaign.heroImageUrl,
+            images: Array.isArray(campaign.images) ? campaign.images : [],
+            attachments: attachmentsMeta.map((a) => ({ name: a.name, sizeBytes: a.sizeBytes })),
             recipientFirstName: nameMap.get(r.userId) ?? undefined,
             trackingPixelUrl,
             unsubscribeUrl,
@@ -469,6 +483,7 @@ export class MarketingService implements OnModuleInit {
               subject: campaign.subject,
               html,
               text,
+              attachments: attachmentBinaries,
               headers: {
                 'List-Unsubscribe': `<${unsubscribeUrl}>`,
                 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
@@ -545,30 +560,48 @@ export class MarketingService implements OnModuleInit {
   //  Assets (hero images uploaded from mobile)
   // ─────────────────────────────────────────
 
-  private readonly ALLOWED_MIME = new Set([
+  // Imágenes — embed-ables en HTML
+  private readonly ALLOWED_IMAGE_MIME = new Set([
     'image/jpeg',
     'image/jpg',
     'image/png',
     'image/webp',
     'image/gif',
   ]);
-  private readonly MAX_ASSET_BYTES = 8 * 1024 * 1024; // 8 MB binary
+  // Archivos adjuntos — pasados a nodemailer como attachments
+  private readonly ALLOWED_ATTACHMENT_MIME = new Set([
+    'application/pdf',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.ms-powerpoint',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    'text/plain',
+    'text/csv',
+    'application/zip',
+  ]);
+  private readonly MAX_ASSET_BYTES = 12 * 1024 * 1024; // 12 MB binary
+  private readonly MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024; // 8 MB por adjunto (límite Gmail)
 
-  async uploadAsset(dto: UploadAssetDto, adminId: string): Promise<{ id: string; url: string }> {
+  async uploadAsset(dto: UploadAssetDto, adminId: string): Promise<{ id: string; url: string; mimeType: string; sizeBytes: number }> {
     const match = /^data:([\w+/.-]+);base64,(.+)$/.exec(dto.dataUrl.trim());
     if (!match) {
       throw new BadRequestException('Invalid data URI');
     }
     const mimeType = match[1].toLowerCase();
-    if (!this.ALLOWED_MIME.has(mimeType)) {
-      throw new BadRequestException(`Unsupported image type: ${mimeType}`);
+    const isImage = this.ALLOWED_IMAGE_MIME.has(mimeType);
+    const isAttachment = this.ALLOWED_ATTACHMENT_MIME.has(mimeType);
+    if (!isImage && !isAttachment) {
+      throw new BadRequestException(`Tipo de archivo no soportado: ${mimeType}`);
     }
     const data = Buffer.from(match[2], 'base64');
     if (data.length === 0) {
-      throw new BadRequestException('Empty image payload');
+      throw new BadRequestException('Archivo vacío');
     }
-    if (data.length > this.MAX_ASSET_BYTES) {
-      throw new BadRequestException('Image exceeds 8MB limit');
+    const limit = isImage ? this.MAX_ASSET_BYTES : this.MAX_ATTACHMENT_BYTES;
+    if (data.length > limit) {
+      throw new BadRequestException(`El archivo supera el límite de ${Math.round(limit / 1024 / 1024)}MB`);
     }
 
     const asset = await this.prisma.marketingAsset.create({
@@ -585,7 +618,36 @@ export class MarketingService implements OnModuleInit {
     const apiPrefix = this.config.get<string>('apiPrefix') || 'api/v1';
     const url = `${appUrl.replace(/\/$/, '')}/${apiPrefix.replace(/^\/|\/$/g, '')}/email/asset/${asset.id}`;
 
-    return { id: asset.id, url };
+    return { id: asset.id, url, mimeType, sizeBytes: data.length };
+  }
+
+  /**
+   * Para cada adjunto guardado en una campaña (con su URL pública del asset),
+   * resuelve el assetId desde la URL y carga el binario para pasarlo a
+   * nodemailer como `attachments[]`. Si el asset no se encuentra se omite
+   * silenciosamente (mejor enviar el email sin ese adjunto que fallar todo).
+   */
+  private async resolveAttachmentBinaries(
+    items: Array<{ name: string; url?: string; mimeType?: string }>,
+  ): Promise<Array<{ filename: string; content: Buffer; contentType?: string }>> {
+    if (!items.length) return [];
+    const out: Array<{ filename: string; content: Buffer; contentType?: string }> = [];
+    for (const it of items) {
+      const m = it.url ? /\/email\/asset\/([\w-]+)/.exec(it.url) : null;
+      if (!m) continue;
+      const assetId = m[1];
+      const asset = await this.prisma.marketingAsset.findUnique({
+        where: { id: assetId },
+        select: { mimeType: true, data: true },
+      });
+      if (!asset) continue;
+      out.push({
+        filename: it.name,
+        content: Buffer.isBuffer(asset.data) ? asset.data : Buffer.from(asset.data),
+        contentType: it.mimeType ?? asset.mimeType,
+      });
+    }
+    return out;
   }
 
   async getAsset(id: string): Promise<{ mimeType: string; data: Buffer } | null> {
