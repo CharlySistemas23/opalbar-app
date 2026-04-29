@@ -35,7 +35,7 @@ export function Layout() {
   const { warning, stayActive } = useIdleLogout(!!user, onIdleLogout);
 
   return (
-    <div className="min-h-screen flex">
+    <div className="h-screen flex overflow-hidden">
       <aside className="w-64 shrink-0 bg-zinc-950 border-r border-line flex flex-col">
         <div className="p-5 border-b border-line flex items-center gap-3">
           <div className="w-9 h-9 rounded-xl bg-accent/15 border border-accent/40 flex items-center justify-center">
