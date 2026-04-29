@@ -186,20 +186,28 @@ export default function PostDetail() {
 
   async function togglePostEmojiReaction(emoji: string) {
     if (!isAuthenticated) return router.push('/(auth)/login' as never);
+    // FB-style: at most one emoji per user per post.
     setPostEmojiReactions((prev) => {
-      const arr = [...prev];
-      const idx = arr.findIndex((r) => r.emoji === emoji);
-      if (idx >= 0) {
-        const cur = arr[idx];
-        if (cur.mine) {
-          const nextCount = cur.count - 1;
-          if (nextCount <= 0) arr.splice(idx, 1);
-          else arr[idx] = { ...cur, count: nextCount, mine: false };
+      const arr = prev.map((r) => ({ ...r }));
+      const myPriorIdx = arr.findIndex((r) => r.mine);
+      const myPriorEmoji = myPriorIdx >= 0 ? arr[myPriorIdx].emoji : null;
+      const isToggleOff = myPriorEmoji === emoji;
+
+      // Drop my prior reaction (if any)
+      if (myPriorIdx >= 0) {
+        const prior = arr[myPriorIdx];
+        const nextCount = prior.count - 1;
+        if (nextCount <= 0) arr.splice(myPriorIdx, 1);
+        else arr[myPriorIdx] = { ...prior, count: nextCount, mine: false };
+      }
+
+      if (!isToggleOff) {
+        const idx = arr.findIndex((r) => r.emoji === emoji);
+        if (idx >= 0) {
+          arr[idx] = { ...arr[idx], count: arr[idx].count + 1, mine: true };
         } else {
-          arr[idx] = { ...cur, count: cur.count + 1, mine: true };
+          arr.push({ emoji, count: 1, mine: true });
         }
-      } else {
-        arr.push({ emoji, count: 1, mine: true });
       }
       return arr;
     });
@@ -353,31 +361,42 @@ export default function PostDetail() {
 
   async function onReactToComment(commentId: string, emoji: string) {
     if (!isAuthenticated) return router.push('/(auth)/login' as never);
-    const toggleReactionInTree = (nodes: any[]): any[] =>
+    // FB-style: at most one emoji per user per comment.
+    //  · Tap same emoji you have → remove.
+    //  · Tap different → swap (drop your prior, add new).
+    const swapReactionInTree = (nodes: any[]): any[] =>
       nodes.map((n) => {
         if (n.id === commentId) {
-          const arr: Array<{ emoji: string; count: number; mine: boolean }> = [
-            ...(n.reactions ?? []),
-          ];
-          const idx = arr.findIndex((r) => r.emoji === emoji);
-          if (idx >= 0) {
-            const cur = arr[idx];
-            if (cur.mine) {
-              const nextCount = cur.count - 1;
-              if (nextCount <= 0) arr.splice(idx, 1);
-              else arr[idx] = { ...cur, count: nextCount, mine: false };
+          const arr: Array<{ emoji: string; count: number; mine: boolean }> = (
+            n.reactions ?? []
+          ).map((r: any) => ({ ...r }));
+          const myPriorIdx = arr.findIndex((r) => r.mine);
+          const myPriorEmoji = myPriorIdx >= 0 ? arr[myPriorIdx].emoji : null;
+          const isToggleOff = myPriorEmoji === emoji;
+
+          // Drop my prior reaction (if any)
+          if (myPriorIdx >= 0) {
+            const prior = arr[myPriorIdx];
+            const nextCount = prior.count - 1;
+            if (nextCount <= 0) arr.splice(myPriorIdx, 1);
+            else arr[myPriorIdx] = { ...prior, count: nextCount, mine: false };
+          }
+
+          // Add the new emoji unless we're toggling off
+          if (!isToggleOff) {
+            const idx = arr.findIndex((r) => r.emoji === emoji);
+            if (idx >= 0) {
+              arr[idx] = { ...arr[idx], count: arr[idx].count + 1, mine: true };
             } else {
-              arr[idx] = { ...cur, count: cur.count + 1, mine: true };
+              arr.push({ emoji, count: 1, mine: true });
             }
-          } else {
-            arr.push({ emoji, count: 1, mine: true });
           }
           return { ...n, reactions: arr };
         }
-        return { ...n, replies: toggleReactionInTree(n.replies || []) };
+        return { ...n, replies: swapReactionInTree(n.replies || []) };
       });
 
-    setComments((prev) => toggleReactionInTree(prev));
+    setComments((prev) => swapReactionInTree(prev));
     fb.tap();
     try {
       await communityApi.reactComment(commentId, emoji);

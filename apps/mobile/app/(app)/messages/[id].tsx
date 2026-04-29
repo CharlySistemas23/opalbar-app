@@ -613,25 +613,32 @@ export default function MessageThread() {
   }, [recording, recordingDur, replyTo?.id, sendPayload, fb, emitRecording]);
 
   // ── Reactions ─────────────────────────────────
+  // FB/IG-style: user has AT MOST one emoji per message.
+  //  · Tap same emoji you have → remove.
+  //  · Tap different → swap (drop prior, add new).
   const reactToMessage = useCallback(async (msg: any, emoji: string) => {
     if (!me?.id) return;
-    const existing = (msg.reactions ?? []).some((r: any) => r.userId === me.id && r.emoji === emoji);
-    // Optimistic
-    setMessages((prev) => prev.map((m) => {
-      if (m.id !== msg.id) return m;
-      const cur = m.reactions ?? [];
-      const next = existing
-        ? cur.filter((r: any) => !(r.userId === me.id && r.emoji === emoji))
-        : [...cur, { userId: me.id, emoji }];
-      return { ...m, reactions: next };
-    }));
+    const cur = (msg.reactions ?? []) as Array<{ userId: string; emoji: string }>;
+    const myPrior = cur.find((r) => r.userId === me.id)?.emoji ?? null;
+    const isToggleOff = myPrior === emoji;
+
+    const next = cur.filter((r) => r.userId !== me.id);
+    if (!isToggleOff) next.push({ userId: me.id, emoji });
+
+    setMessages((prev) => prev.map((m) => (m.id === msg.id ? { ...m, reactions: next } : m)));
     fb.tap();
+
     try {
-      if (existing) await messagesApi.unreact(msg.id, emoji);
-      else await messagesApi.react(msg.id, emoji);
+      if (isToggleOff) {
+        await messagesApi.unreact(msg.id, emoji);
+      } else {
+        // Server now does FB-style swap when called with `react` — single call
+        // suffices regardless of whether there was a prior emoji.
+        await messagesApi.react(msg.id, emoji);
+      }
     } catch {
       // Revert on failure
-      setMessages((prev) => prev.map((m) => (m.id === msg.id ? { ...m, reactions: msg.reactions ?? [] } : m)));
+      setMessages((prev) => prev.map((m) => (m.id === msg.id ? { ...m, reactions: cur } : m)));
     }
   }, [me?.id, fb]);
 

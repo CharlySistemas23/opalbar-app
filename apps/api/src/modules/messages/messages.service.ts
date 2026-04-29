@@ -516,11 +516,28 @@ export class MessagesService {
       throw new ForbiddenException('Invalid emoji');
     }
     const msg = await this.assertMessageMembership(meId, messageId);
-    await this.prisma.messageReaction.upsert({
-      where: { messageId_userId_emoji: { messageId, userId: meId, emoji: trimmed } },
-      update: {},
-      create: { messageId, userId: meId, emoji: trimmed },
+
+    // FB/IG-style: each user has AT MOST one emoji per message.
+    //  · Tap same emoji → remove (toggle off).
+    //  · Tap different → swap (delete prior, set new).
+    const mine = await this.prisma.messageReaction.findMany({
+      where: { messageId, userId: meId },
     });
+    const sameEmoji = mine.find((r) => r.emoji === trimmed);
+
+    if (sameEmoji) {
+      await this.prisma.messageReaction.delete({ where: { id: sameEmoji.id } });
+    } else {
+      if (mine.length > 0) {
+        await this.prisma.messageReaction.deleteMany({
+          where: { id: { in: mine.map((r) => r.id) } },
+        });
+      }
+      await this.prisma.messageReaction.create({
+        data: { messageId, userId: meId, emoji: trimmed },
+      });
+    }
+
     const reactions = await this.prisma.messageReaction.findMany({
       where: { messageId },
       select: { emoji: true, userId: true },

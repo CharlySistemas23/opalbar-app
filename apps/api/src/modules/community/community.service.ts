@@ -387,18 +387,26 @@ export class CommunityService {
     const comment = await this.prisma.comment.findUnique({ where: { id: commentId } });
     if (!comment || comment.deletedAt) throw new NotFoundException('Comment not found');
 
-    const existing = await this.prisma.commentReaction.findUnique({
-      where: { commentId_userId_emoji: { commentId, userId, emoji: clean } },
+    // FB-style: at most one emoji per user per comment.
+    const mine = await this.prisma.commentReaction.findMany({
+      where: { commentId, userId },
     });
+    const sameEmoji = mine.find((r) => r.emoji === clean);
 
-    if (existing) {
-      await this.prisma.commentReaction.delete({ where: { id: existing.id } });
+    if (sameEmoji) {
+      await this.prisma.commentReaction.delete({ where: { id: sameEmoji.id } });
       this.communityGateway.emitChanged({
         type: 'comment_reacted',
         postId: comment.postId,
         commentId,
       });
       return { reacted: false, emoji: clean };
+    }
+
+    if (mine.length > 0) {
+      await this.prisma.commentReaction.deleteMany({
+        where: { id: { in: mine.map((r) => r.id) } },
+      });
     }
 
     await this.prisma.commentReaction.create({ data: { commentId, userId, emoji: clean } });
