@@ -1,27 +1,13 @@
 // ─────────────────────────────────────────────
 //  Sentry — admin web crash reporting
-//  No-op when VITE_SENTRY_DSN is not set.
+//  Currently a no-op. The previous implementation imported `@sentry/react`
+//  but that package is not in package.json, so Vercel builds were failing.
+//  If/when crash reporting is wanted again: `npm i @sentry/react` and
+//  restore the original init block here.
 // ─────────────────────────────────────────────
-import * as Sentry from '@sentry/react';
 
-const dsn = import.meta.env.VITE_SENTRY_DSN;
-
-if (dsn) {
-  Sentry.init({
-    dsn,
-    environment: import.meta.env.MODE,
-    release: import.meta.env.VITE_APP_VERSION || '1.0.0',
-    tracesSampleRate: parseFloat(import.meta.env.VITE_SENTRY_TRACES_SAMPLE_RATE || '0.2'),
-    integrations: [Sentry.browserTracingIntegration()],
-    sendDefaultPii: false,
-    beforeSend(event) {
-      if (event.request?.headers) {
-        delete (event.request.headers as Record<string, string>)['authorization'];
-        delete (event.request.headers as Record<string, string>)['cookie'];
-      }
-      return event;
-    },
-  });
-}
-
-export { Sentry };
+export const Sentry = {
+  init: () => {},
+  captureException: () => {},
+  captureMessage: () => {},
+};
