@@ -241,14 +241,13 @@ export class CommunityService {
     return updated;
   }
 
-  async deletePost(postId: string, userId: string) {
-    const post = await this.prisma.post.findUnique({ where: { id: postId } });
-    if (!post || post.deletedAt) throw new NotFoundException('Post not found');
-    if (post.userId !== userId) throw new ForbiddenException('Not authorized');
-    await this.prisma.post.update({ where: { id: postId }, data: { deletedAt: new Date() } });
-    await this.invalidateFeed();
-    this.communityGateway.emitChanged({ type: 'post_deleted', postId });
-    this.realtime.broadcast('post', 'deleted', { id: postId });
+  async deletePost(_postId: string, _userId: string) {
+    // Politica de moderacion: los usuarios no pueden eliminar publicaciones.
+    // Solo ADMIN/SUPER_ADMIN/MODERATOR via /admin/posts/:id. Si el contenido
+    // viola las normas de la comunidad, el flujo correcto es Reportar.
+    throw new ForbiddenException(
+      'Los usuarios no pueden eliminar publicaciones. Si esta publicación viola las normas, usa la opción Reportar.',
+    );
   }
 
   // ── COMMENTS ──────────────────────────────
@@ -554,20 +553,13 @@ export class CommunityService {
     return updated;
   }
 
-  async deleteComment(commentId: string, userId: string) {
-    const comment = await this.prisma.comment.findUnique({ where: { id: commentId } });
-    if (!comment || comment.deletedAt) throw new NotFoundException('Comment not found');
-    if (comment.userId !== userId) throw new ForbiddenException('Not authorized');
-    await this.prisma.$transaction([
-      this.prisma.comment.update({ where: { id: commentId }, data: { deletedAt: new Date() } }),
-      this.prisma.post.update({ where: { id: comment.postId }, data: { commentsCount: { decrement: 1 } } }),
-    ]);
-    this.communityGateway.emitChanged({
-      type: 'comment_deleted',
-      postId: comment.postId,
-      commentId,
-    });
-    this.realtime.broadcast('comment', 'deleted', { id: commentId, data: { postId: comment.postId } });
+  async deleteComment(_commentId: string, _userId: string) {
+    // Politica de moderacion: los usuarios no pueden eliminar comentarios.
+    // Solo ADMIN/SUPER_ADMIN/MODERATOR. Para contenido inapropiado el flujo
+    // es Reportar.
+    throw new ForbiddenException(
+      'Los usuarios no pueden eliminar comentarios. Si este comentario viola las normas, usa la opción Reportar.',
+    );
   }
 
   // ── REACTIONS ─────────────────────────────

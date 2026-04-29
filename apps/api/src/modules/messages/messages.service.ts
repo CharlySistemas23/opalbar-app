@@ -470,26 +470,14 @@ export class MessagesService {
     return updated;
   }
 
-  async deleteMessage(meId: string, messageId: string) {
-    const msg = await this.prisma.message.findUnique({ where: { id: messageId } });
-    if (!msg) throw new NotFoundException('Message not found');
-    if (msg.senderId !== meId) throw new ForbiddenException('Not your message');
-    const r = await this.prisma.message.update({
-      where: { id: messageId },
-      data: { deletedAt: new Date() },
-    });
-    const thread = await this.prisma.messageThread.findUnique({
-      where: { id: msg.threadId },
-      select: { userAId: true, userBId: true },
-    });
-    if (thread) {
-      this.realtime.toUsers([thread.userAId, thread.userBId], 'message', 'deleted', {
-        id: messageId,
-        data: { threadId: msg.threadId },
-      });
-    }
-    this.realtime.toStaff('message', 'deleted', { id: messageId });
-    return r;
+  async deleteMessage(_meId: string, _messageId: string) {
+    // Por politica de moderacion los usuarios NO pueden borrar mensajes.
+    // Solo el equipo (ADMIN/SUPER_ADMIN/MODERATOR) puede eliminar via
+    // /admin/messages/:id. Asi mantenemos la cadena de evidencia para
+    // moderacion + reportes.
+    throw new ForbiddenException(
+      'Los usuarios no pueden eliminar mensajes. Si necesitas reportar este mensaje, usa la opción Reportar.',
+    );
   }
 
   // ─────────────────────────────────────────

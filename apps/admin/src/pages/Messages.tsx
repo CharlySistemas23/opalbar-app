@@ -235,30 +235,43 @@ function ThreadView({ threadId, onMessageDeleted }: { threadId: string | null; o
           const isA = thread && m.senderId === thread.userA.id;
           const sender = thread ? (isA ? thread.userA : thread.userB) : null;
           const deleted = !!m.deletedAt;
+          // Detectamos si fue eliminado por moderacion (admin) — el content
+          // queda con el marker "[Eliminado por moderación · ...]". Cualquier
+          // otro deletedAt = eliminado por usuario, en cuyo caso preservamos
+          // y mostramos la media original con un badge de evidencia.
+          const deletedByMod = deleted && (m.content?.startsWith('[Eliminado por moderación') ?? false);
+          const deletedByUser = deleted && !deletedByMod;
           return (
             <div key={m.id} className={`flex ${isA ? 'justify-start' : 'justify-end'}`}>
               <div className={`max-w-[78%] group`}>
                 <div className="flex items-center gap-2 mb-1 text-[10px] text-muted">
                   {sender && <span className="font-semibold">{userLabel(sender)}</span>}
                   <span>{new Date(m.createdAt).toLocaleString('es')}</span>
-                  {deleted && <span className="text-danger">· eliminado</span>}
+                  {deletedByUser && <span className="text-warning font-bold">· ELIMINADO POR USUARIO</span>}
+                  {deletedByMod && <span className="text-danger font-bold">· ELIMINADO POR MODERACIÓN</span>}
                 </div>
                 <div
-                  className={`rounded-2xl px-4 py-2.5 text-sm space-y-2 ${
-                    deleted
+                  className={`rounded-2xl px-4 py-2.5 text-sm space-y-2 relative ${
+                    deletedByMod
                       ? 'bg-danger/10 text-danger/80 italic border border-danger/30'
+                      : deletedByUser
+                      ? 'bg-warning/5 border border-warning/30 ring-1 ring-warning/30'
                       : isA
                       ? 'bg-elevated text-zinc-100'
                       : 'bg-accent/20 text-zinc-100'
                   }`}
                 >
-                  {/* Sticker — emoji glyph rendered large */}
-                  {!deleted && m.stickerKey && (
+                  {/* Sticker — emoji glyph rendered large.
+                      En "deleted by user" lo seguimos mostrando como evidencia. */}
+                  {!deletedByMod && m.stickerKey && (
                     <div className="text-5xl leading-none select-none">{m.stickerKey}</div>
                   )}
 
-                  {/* Image — click to open lightbox */}
-                  {!deleted && m.imageUrl && (
+                  {/* Image — click to open lightbox.
+                      Para mensajes eliminados por usuario seguimos mostrandola
+                      (evidencia para moderacion). Solo se oculta cuando fue
+                      borrada por un mod. */}
+                  {!deletedByMod && m.imageUrl && (
                     <button
                       type="button"
                       onClick={() => setLightbox(m.imageUrl!)}
@@ -274,8 +287,9 @@ function ThreadView({ threadId, onMessageDeleted }: { threadId: string | null; o
                     </button>
                   )}
 
-                  {/* Audio — native HTML5 player so admin puede escuchar */}
-                  {!deleted && m.audioUrl && (
+                  {/* Audio — native HTML5 player. Tambien se preserva en
+                      "deleted by user" como evidencia. */}
+                  {!deletedByMod && m.audioUrl && (
                     <div className="space-y-1">
                       <audio
                         controls

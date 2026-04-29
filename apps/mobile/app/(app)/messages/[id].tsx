@@ -674,28 +674,6 @@ export default function MessageThread() {
     setActionMsg(null);
   }, [actionMsg]);
 
-  const menuDelete = useCallback(async () => {
-    if (!actionMsg) return;
-    const m = actionMsg;
-    setActionMsg(null);
-    if (m.senderId !== me?.id) return;
-    Alert.alert(
-      t ? 'Eliminar mensaje' : 'Delete message',
-      t ? '¿Eliminar este mensaje? No se podrá recuperar.' : 'Delete this message? It cannot be recovered.',
-      [
-        { text: t ? 'Cancelar' : 'Cancel', style: 'cancel' },
-        {
-          text: t ? 'Eliminar' : 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            setMessages((prev) => prev.filter((x) => x.id !== m.id));
-            try { await messagesApi.deleteMessage(m.id); } catch {}
-          },
-        },
-      ],
-    );
-  }, [actionMsg, me?.id, t]);
-
   // ── GIF picker ────────────────────────────────
   const searchGifs = useCallback(async (q: string) => {
     setGifLoading(true);
@@ -1380,14 +1358,8 @@ export default function MessageThread() {
                 <Text style={styles.sheetLabel}>{t ? 'Copiar' : 'Copy'}</Text>
               </Pressable>
             )}
-            {actionMsg?.senderId === me?.id && (
-              <Pressable style={({ pressed }) => [styles.sheetRow, pressed && { opacity: 0.7 }]} onPress={menuDelete}>
-                <View style={[styles.sheetIcon, { backgroundColor: Colors.accentDanger + '14', borderColor: Colors.accentDanger + '33' }]}>
-                  <Feather name="trash-2" size={18} color={Colors.accentDanger} />
-                </View>
-                <Text style={[styles.sheetLabel, { color: Colors.accentDanger }]}>{t ? 'Eliminar' : 'Delete'}</Text>
-              </Pressable>
-            )}
+            {/* Eliminar deshabilitado por politica de moderacion. Si un mensaje
+                viola las normas el usuario lo reporta; el equipo decide. */}
           </Pressable>
         </Pressable>
       </Modal>

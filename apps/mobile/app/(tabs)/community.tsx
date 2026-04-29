@@ -311,49 +311,23 @@ export default function Community() {
     return reactWithEmoji(post, emoji);
   }
 
-  async function deletePost(post: CommunityPost) {
-    Alert.alert(
-      t ? 'Borrar publicación' : 'Delete post',
-      t ? '¿Seguro que quieres borrarla?' : 'Are you sure?',
-      [
-        { text: t ? 'Cancelar' : 'Cancel', style: 'cancel' },
-        {
-          text: t ? 'Borrar' : 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await communityApi.deletePost(post.id);
-              setPosts((prev) => prev.filter((p) => p.id !== post.id));
-            } catch (err: any) {
-              Alert.alert(t ? 'Error' : 'Error', apiError(err));
-            }
-          },
-        },
-      ],
-    );
-  }
-
   function openPostOptions(post: CommunityPost) {
-    const isMine = post.userId === user?.id;
-    if (isMine) {
-      Alert.alert(t ? 'Opciones' : 'Options', post.author.name, [
-        { text: t ? 'Borrar' : 'Delete', style: 'destructive', onPress: () => deletePost(post) },
-        { text: t ? 'Cancelar' : 'Cancel', style: 'cancel' },
-      ]);
-    } else {
-      Alert.alert(t ? 'Opciones' : 'Options', post.author.name, [
-        {
-          text: t ? 'Reportar' : 'Report',
-          onPress: async () => {
-            try {
-              await communityApi.reportPost(post.id, { reason: 'OTHER' });
-              Alert.alert(t ? 'Gracias' : 'Thanks', t ? 'Publicación reportada.' : 'Post reported.');
-            } catch {}
-          },
+    // Politica de moderacion: los usuarios NO pueden borrar publicaciones
+    // (ni propias ni ajenas). El unico flujo es Reportar — el equipo decide
+    // si retira el contenido. Mantiene la cadena de evidencia y evita que
+    // alguien borre algo justo despues de ser reportado.
+    Alert.alert(t ? 'Opciones' : 'Options', post.author.name, [
+      {
+        text: t ? 'Reportar' : 'Report',
+        onPress: async () => {
+          try {
+            await communityApi.reportPost(post.id, { reason: 'OTHER' });
+            Alert.alert(t ? 'Gracias' : 'Thanks', t ? 'Publicación reportada.' : 'Post reported.');
+          } catch {}
         },
-        { text: t ? 'Cancelar' : 'Cancel', style: 'cancel' },
-      ]);
-    }
+      },
+      { text: t ? 'Cancelar' : 'Cancel', style: 'cancel' },
+    ]);
   }
 
   return (

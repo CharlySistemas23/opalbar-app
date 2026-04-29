@@ -412,6 +412,9 @@ export default function PostDetail() {
   function onCommentOptions(c: any) {
     const mine = c.user?.id === me?.id;
     const buttons: any[] = [];
+    // Politica de moderacion: los usuarios NO pueden borrar comentarios.
+    // Solo se permite Editar el propio (el contenido queda registrado igual)
+    // y Reportar los ajenos. Si algo viola las normas, lo decide el equipo.
     if (mine) {
       buttons.push({
         text: t ? 'Editar' : 'Edit',
@@ -419,18 +422,6 @@ export default function PostDetail() {
           setEditingComment({ id: c.id });
           setReplyTo(null);
           setComment(c.content ?? '');
-        },
-      });
-      buttons.push({
-        text: t ? 'Borrar' : 'Delete',
-        style: 'destructive' as const,
-        onPress: async () => {
-          try {
-            await communityApi.deleteComment(c.id);
-            load();
-          } catch (err) {
-            Alert.alert('Error', apiError(err));
-          }
         },
       });
     } else {
