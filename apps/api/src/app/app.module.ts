@@ -46,6 +46,7 @@ import { PushModule } from '../modules/push/push.module';
 import { MarketingModule } from '../modules/marketing/marketing.module';
 import { RealtimeModule } from '../modules/realtime/realtime.module';
 import { AuditModule } from '../modules/audit/audit.module';
+import { LegalModule } from '../modules/legal/legal.module';
 
 @Module({
   imports: [
@@ -97,6 +98,7 @@ import { AuditModule } from '../modules/audit/audit.module';
     NotificationsModule,
     AdminModule,
     HealthModule,
+    LegalModule,
     ReservationsModule,
     SupportModule,
     ContentMonitorModule,
