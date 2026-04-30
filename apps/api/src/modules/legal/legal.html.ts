@@ -195,6 +195,74 @@ export const PRIVACY_POLICY_HTML = shell(
 );
 
 // ─────────────────────────────────────────────
+//  ACCOUNT DELETION (Play Store requirement)
+//  Google exige una URL pública dedicada con instrucciones claras
+//  de como pedir el borrado de cuenta. Tiene que decir explicitamente:
+//   - Nombre de la app/desarrollador
+//   - Pasos para solicitar el borrado
+//   - Qué datos se borran y cuáles se conservan + plazos
+// ─────────────────────────────────────────────
+export const ACCOUNT_DELETION_HTML = shell(
+  'Eliminación de cuenta',
+  `
+  <h1>Eliminar mi cuenta de OPAL BAR</h1>
+  <p class="subtitle">Cómo solicitar la eliminación de tu cuenta y de los datos asociados.</p>
+
+  <p>En <strong>OPAL BAR</strong> (desarrollada por OPAL BAR PV, Puerto Vallarta) podés solicitar la eliminación de tu cuenta y de los datos personales asociados en cualquier momento. A continuación te explicamos cómo hacerlo y qué pasa con tus datos.</p>
+
+  <h2>Opción 1 — Desde la app (recomendado)</h2>
+  <ol>
+    <li>Abrí la app OPAL BAR e iniciá sesión.</li>
+    <li>Andá a <strong>Perfil</strong> (icono inferior derecho).</li>
+    <li>Tocá el icono de <strong>Configuración</strong> (engranaje arriba a la derecha).</li>
+    <li>Bajá hasta la sección <strong>Privacidad y datos</strong>.</li>
+    <li>Tocá <strong>"Eliminar mi cuenta"</strong>.</li>
+    <li>Confirmá tu contraseña y la solicitud.</li>
+  </ol>
+  <p>La solicitud queda registrada inmediatamente y entra en período de gracia de 7 días (durante ese tiempo podés cancelarla volviendo a iniciar sesión).</p>
+
+  <h2>Opción 2 — Por email</h2>
+  <p>Si no podés acceder a la app, escribí a <a href="mailto:carlosalonsog966@gmail.com">carlosalonsog966@gmail.com</a> desde el email registrado en tu cuenta con el asunto <strong>"Eliminar mi cuenta"</strong>. Te respondemos en un plazo máximo de 30 días confirmando la eliminación.</p>
+
+  <h2>Qué datos se eliminan</h2>
+  <p>Al confirmarse el borrado de tu cuenta, eliminamos o anonimizamos:</p>
+  <ul>
+    <li>Tu perfil (nombre, foto, email, teléfono, fecha de nacimiento, ciudad, idioma).</li>
+    <li>Tus publicaciones, comentarios, reacciones e historias en la comunidad.</li>
+    <li>Tus mensajes privados (DMs) son anonimizados — el contenido se elimina pero la conversación queda como "Usuario eliminado".</li>
+    <li>Tus reseñas de venues.</li>
+    <li>Tus reservaciones futuras (las pasadas se anonimizan para registros operativos del bar).</li>
+    <li>Tus tickets de soporte abiertos.</li>
+    <li>Sesiones activas, push tokens, intereses, consentimientos.</li>
+    <li>Foto de perfil y portada (almacenadas en Cloudinary).</li>
+  </ul>
+
+  <h2>Qué datos se conservan y por cuánto tiempo</h2>
+  <p>Por requisitos legales y de cumplimiento, retenemos cierta información de forma anonimizada:</p>
+  <ul>
+    <li><strong>Logs de auditoría de acciones de moderación</strong> en los que tu cuenta haya estado involucrada (reportes, sanciones): hasta <strong>730 días</strong> (configurable vía <code>DATA_RETENTION_DAYS</code>).</li>
+    <li><strong>Registros de transacciones agregadas</strong> (cantidad de reservaciones por noche, eventos, etc.): de forma anónima e indefinida (sin tu nombre ni contacto).</li>
+    <li><strong>Logs técnicos</strong> (errores, accesos a la API): hasta 90 días con tu ID anonimizado.</li>
+    <li><strong>Registros de cumplimiento legal</strong> (solicitudes de autoridades, si hubo): según lo exija la autoridad correspondiente.</li>
+  </ul>
+  <p>Después de los plazos indicados, esos registros también se eliminan de forma definitiva.</p>
+
+  <h2>Período de gracia y cancelación</h2>
+  <p>Una vez solicitada la eliminación, tu cuenta queda en estado <strong>"pendiente de eliminación"</strong> durante 7 días. En ese plazo podés cancelar la solicitud volviendo a iniciar sesión y aceptando un mensaje de confirmación. Después de 7 días la eliminación es <strong>irreversible</strong>.</p>
+
+  <h2>Datos de menores</h2>
+  <p>OPAL BAR es una app dirigida a personas mayores de 18 años. Si descubrimos que existe una cuenta de un menor, la eliminamos inmediatamente sin necesidad de solicitud previa.</p>
+
+  <h2>Contacto</h2>
+  <p>Para cualquier pregunta sobre el proceso de eliminación o sobre tus datos:</p>
+  <ul>
+    <li>Email: <a href="mailto:carlosalonsog966@gmail.com">carlosalonsog966@gmail.com</a></li>
+    <li>Política de privacidad completa: <a href="/api/v1/legal/privacy">/api/v1/legal/privacy</a></li>
+  </ul>
+  `,
+);
+
+// ─────────────────────────────────────────────
 //  TERMS OF SERVICE
 // ─────────────────────────────────────────────
 export const TERMS_OF_SERVICE_HTML = shell(

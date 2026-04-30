@@ -10,7 +10,7 @@ import { Controller, Get, Header, HttpCode, HttpStatus } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Public } from '../../common/decorators/public.decorator';
 import { SkipThrottle } from '@nestjs/throttler';
-import { PRIVACY_POLICY_HTML, TERMS_OF_SERVICE_HTML } from './legal.html';
+import { PRIVACY_POLICY_HTML, TERMS_OF_SERVICE_HTML, ACCOUNT_DELETION_HTML } from './legal.html';
 
 @ApiTags('Legal')
 @Controller('legal')
@@ -35,5 +35,16 @@ export class LegalController {
   @ApiOperation({ summary: 'Términos de servicio (HTML público)' })
   terms(): string {
     return TERMS_OF_SERVICE_HTML;
+  }
+
+  @Get('account-deletion')
+  @Public()
+  @SkipThrottle()
+  @HttpCode(HttpStatus.OK)
+  @Header('Content-Type', 'text/html; charset=utf-8')
+  @Header('Cache-Control', 'public, max-age=3600')
+  @ApiOperation({ summary: 'Instrucciones de eliminación de cuenta (Play Store requirement)' })
+  accountDeletion(): string {
+    return ACCOUNT_DELETION_HTML;
   }
 }
