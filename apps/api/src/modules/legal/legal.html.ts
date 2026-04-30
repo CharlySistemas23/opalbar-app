@@ -339,3 +339,92 @@ export const TERMS_OF_SERVICE_HTML = shell(
   <p>Cualquier consulta o reclamo: <a href="mailto:carlosalonsog966@gmail.com">carlosalonsog966@gmail.com</a></p>
   `,
 );
+
+// ─────────────────────────────────────────────
+//  Estándares de Seguridad Infantil (CSAE) — requerido por Google Play
+//  para apps de categoría Social/Citas. Debe estar publicado en una URL
+//  pública, no editable, no ser PDF.
+//  Cubre:
+//   - Postura cero tolerancia contra CSAM
+//   - Mecanismo de denuncia interno
+//   - Cooperación con autoridades
+//   - Punto de contacto designado
+// ─────────────────────────────────────────────
+export const CHILD_SAFETY_HTML = shell(
+  'Estándares de Seguridad Infantil',
+  `
+  <h1>Estándares de Seguridad Infantil</h1>
+  <p class="subtitle">Política contra la explotación y abuso sexual infantil (CSAE/CSAM) — OPAL BAR</p>
+
+  <h2>1. Compromiso de tolerancia cero</h2>
+  <p>OPAL BAR mantiene una postura de <strong>tolerancia cero</strong> hacia cualquier forma de explotación o abuso sexual infantil (CSAE) y contra cualquier material de abuso sexual infantil (CSAM). Está estrictamente prohibido publicar, compartir, almacenar, solicitar o transmitir contenido de esta naturaleza en cualquier parte de la aplicación, incluyendo publicaciones, comentarios, mensajes directos, historias, transmisiones, perfiles y avatares.</p>
+
+  <h2>2. Edad mínima de uso</h2>
+  <p>OPAL BAR es una aplicación destinada exclusivamente a personas <strong>mayores de 18 años</strong>, dado que el servicio promociona y gestiona reservas en establecimientos de venta de bebidas alcohólicas. Los menores de edad no están autorizados a registrarse ni utilizar la app. Las cuentas que se determinen como pertenecientes a menores serán deshabilitadas y eliminadas.</p>
+
+  <h2>3. Medidas de prevención</h2>
+  <ul>
+    <li><strong>Verificación de edad</strong> en el registro mediante declaración explícita de mayoría de edad y aceptación de términos.</li>
+    <li><strong>Moderación humana y automatizada</strong> de contenido público (publicaciones, comentarios, historias, fotos de perfil) para detectar y eliminar contenido potencialmente ilícito.</li>
+    <li><strong>Restricciones técnicas</strong> sobre los mensajes directos: los mensajes entre usuarios que no son contactos requieren aceptación previa (sistema de "solicitudes de mensaje").</li>
+    <li><strong>Filtros de palabras prohibidas</strong> en envíos públicos y nombres de usuario.</li>
+    <li><strong>Bloqueo y eliminación inmediata</strong> de cuentas que violen esta política, sin posibilidad de re-registro con la misma identidad.</li>
+  </ul>
+
+  <h2>4. Mecanismo de denuncia interno</h2>
+  <p>OPAL BAR pone a disposición de todos los usuarios un sistema visible y accesible para denunciar cualquier sospecha de CSAE, CSAM o conducta inapropiada hacia menores:</p>
+  <ul>
+    <li>Botón <strong>"Denunciar"</strong> en cada publicación, comentario, historia, mensaje y perfil de usuario dentro de la aplicación.</li>
+    <li>Categoría específica <strong>"Seguridad infantil / CSAM"</strong> en el formulario de denuncia, priorizada sobre otras categorías.</li>
+    <li>Canal directo de denuncia por correo electrónico: <a href="mailto:carlosalonsog966@gmail.com">carlosalonsog966@gmail.com</a></li>
+  </ul>
+  <p>Las denuncias relacionadas con seguridad infantil son tratadas con <strong>máxima prioridad</strong> y revisadas en un plazo objetivo de <strong>24 horas</strong> desde su recepción.</p>
+
+  <h2>5. Acción frente a una denuncia</h2>
+  <p>Al recibir una denuncia o detectar contenido sospechoso, OPAL BAR procede de la siguiente manera:</p>
+  <ul>
+    <li>Suspensión inmediata de la cuenta del presunto infractor mientras dura la revisión.</li>
+    <li>Preservación de la evidencia (publicaciones, mensajes, metadatos, dirección IP, fechas) conforme a las obligaciones legales de retención.</li>
+    <li>Eliminación del contenido infractor de todos los canales públicos y privados de la aplicación.</li>
+    <li>Reporte a las <strong>autoridades pertinentes</strong> cuando exista sospecha razonable de comisión de un delito (ver sección 6).</li>
+    <li>Cierre definitivo de la cuenta una vez confirmada la infracción.</li>
+  </ul>
+
+  <h2>6. Cooperación con autoridades</h2>
+  <p>OPAL BAR cumple con todas las leyes de seguridad infantil aplicables y coopera con las autoridades competentes:</p>
+  <ul>
+    <li>En <strong>México</strong>: Fiscalía General de la República (FGR), Policía Cibernética de la Guardia Nacional, Sistema Nacional de Protección Integral de Niñas, Niños y Adolescentes (SIPINNA).</li>
+    <li>En <strong>Estados Unidos</strong>: National Center for Missing &amp; Exploited Children (NCMEC) a través del CyberTipline cuando corresponda por la jurisdicción del contenido o del usuario.</li>
+    <li>En cualquier otra jurisdicción donde se identifique al usuario, se cooperará con las autoridades nacionales y regionales correspondientes.</li>
+  </ul>
+  <p>OPAL BAR responde a las órdenes legales válidas (oficios, citatorios, órdenes judiciales) y entrega la información preservada conforme al marco legal aplicable.</p>
+
+  <h2>7. Punto de contacto designado para CSAE/CSAM</h2>
+  <p>El punto de contacto designado de OPAL BAR para asuntos relativos a la prevención de CSAM y al cumplimiento de esta política es:</p>
+  <ul>
+    <li><strong>Nombre:</strong> Carlos Alonso (representante legal de OPAL BAR)</li>
+    <li><strong>Correo electrónico:</strong> <a href="mailto:carlosalonsog966@gmail.com">carlosalonsog966@gmail.com</a></li>
+    <li><strong>Tiempo de respuesta objetivo:</strong> 24 horas para asuntos de seguridad infantil; 72 horas para otras consultas.</li>
+  </ul>
+  <p>Este punto de contacto está disponible para hablar con autoridades, plataformas y socios sobre las prácticas de prevención contra CSAM y el cumplimiento de la app.</p>
+
+  <h2>8. Capacitación interna</h2>
+  <p>El equipo de moderación y soporte de OPAL BAR recibe lineamientos escritos sobre la identificación, manejo y reporte de potenciales incidentes de CSAE/CSAM. La capacitación se actualiza anualmente o cuando cambian las regulaciones aplicables.</p>
+
+  <h2>9. Revisión de esta política</h2>
+  <p>OPAL BAR revisa estos estándares al menos una vez al año, o antes si surgen cambios regulatorios o nuevas amenazas de seguridad infantil. La versión vigente es siempre la publicada en esta URL.</p>
+
+  <h2>10. Contacto general y reportes urgentes</h2>
+  <p>Para cualquier consulta sobre esta política o para reportar incidentes urgentes de seguridad infantil que requieran atención inmediata fuera del flujo de denuncia in-app:</p>
+  <ul>
+    <li>Correo electrónico: <a href="mailto:carlosalonsog966@gmail.com">carlosalonsog966@gmail.com</a></li>
+    <li>En caso de emergencia que involucre riesgo inmediato a un menor, contacte primero a las autoridades locales (911 en México y Estados Unidos).</li>
+  </ul>
+
+  <div class="meta">
+    <p><strong>Última actualización:</strong> 30 de abril de 2026</p>
+    <p><strong>Versión:</strong> 1.0</p>
+    <p>OPAL BAR — Puerto Vallarta, Jalisco, México</p>
+  </div>
+  `,
+);
