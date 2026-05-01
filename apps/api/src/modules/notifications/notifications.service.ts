@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { NotificationType } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
+import { RedisService } from '../../database/redis.service';
 import { paginate, getPaginationOffset, PaginationDto } from '../../common/dto/pagination.dto';
 import { PushService } from '../push/push.service';
 import { RealtimeService } from '../realtime/realtime.service';
@@ -13,6 +14,7 @@ export class NotificationsService {
     private readonly prisma: PrismaService,
     private readonly push: PushService,
     private readonly realtime: RealtimeService,
+    private readonly redis: RedisService,
   ) {}
 
   async getNotifications(userId: string, pagination: PaginationDto) {
@@ -163,10 +165,17 @@ export class NotificationsService {
         data: updated,
       });
 
-      // Send push only if this is the SECOND interaction or every 5th —
-      // avoids "Ana liked your post" five times in a row.
-      if (count === 2 || count % 5 === 0) {
+      // Audit fix: la regla anterior (count===2 || count%5===0) dejaba huecos
+      // raros: 1=push, 2=push, 3=NO, 4=NO, 5=push... La UI muestra "3 personas
+      // reaccionaron" pero el push se saltaba a la #3. Ahora envia siempre y
+      // el body actualizado refleja el conteo agregado, con un soft-throttle
+      // por usuario+aggregationKey en Redis para evitar spam (max 1 push/min
+      // por agregacion).
+      const throttleKey = RedisService.cacheKey('notif', 'agg', input.userId, input.aggregationKey);
+      const recentlySent = await this.redis.get(throttleKey).catch(() => null);
+      if (!recentlySent) {
         await this.sendPush(input.userId, title, input.body ?? '', nextData, input.imageUrl ?? input.actor.avatarUrl);
+        await this.redis.set(throttleKey, '1', 60).catch(() => {});
       }
 
       return updated;
