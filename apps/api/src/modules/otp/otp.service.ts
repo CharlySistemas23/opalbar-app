@@ -1,6 +1,7 @@
 // ─────────────────────────────────────────────
 //  OtpService — genera, envía y verifica OTPs
-//  Canal email → Nodemailer | Canal SMS → Twilio
+//  Email transaccional → Resend (preferido) con fallback a SMTP/Nodemailer
+//  SMS → Twilio Verify
 // ─────────────────────────────────────────────
 import {
   BadRequestException,
@@ -11,6 +12,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { OtpType } from '@prisma/client';
 import * as nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 import { PrismaService } from '../../database/prisma.service';
 import { RedisService } from '../../database/redis.service';
 import { SendOtpDto, VerifyOtpDto } from './dto/otp.dto';
@@ -18,30 +20,43 @@ import { SendOtpDto, VerifyOtpDto } from './dto/otp.dto';
 @Injectable()
 export class OtpService {
   private readonly logger = new Logger(OtpService.name);
-  private transporter: nodemailer.Transporter;
+  private transporter: nodemailer.Transporter | null = null;
+  private resend: Resend | null = null;
+  private readonly fromAddr: string;
+  private readonly replyToAddr: string;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
     private readonly config: ConfigService,
   ) {
-    this.transporter = nodemailer.createTransport({
-      host: config.get<string>('email.host'),
-      port: config.get<number>('email.port'),
-      secure: config.get<boolean>('email.secure'),
-      auth: {
-        user: config.get<string>('email.user'),
-        pass: config.get<string>('email.pass'),
-      },
-      connectionTimeout: 10_000,
-      greetingTimeout: 10_000,
-      socketTimeout: 15_000,
-    });
+    this.fromAddr = config.get<string>('email.from') ?? 'OPAL BAR <onboarding@resend.dev>';
+    this.replyToAddr = config.get<string>('email.replyTo') ?? 'carlosalonsog966@gmail.com';
 
-    this.transporter.verify().then(
-      () => this.logger.log(`[SMTP] SMTP connected (${config.get<string>('email.user')})`),
-      (err) => this.logger.error(`[SMTP] Connection failed: ${err?.message ?? err}`),
-    );
+    const resendApiKey = config.get<string>('email.resendApiKey');
+    if (resendApiKey) {
+      this.resend = new Resend(resendApiKey);
+      this.logger.log(`[Mail] Resend client inicializado (from=${this.fromAddr})`);
+    } else {
+      // SMTP fallback (Gmail u otro). Solo se inicializa si no hay Resend.
+      this.transporter = nodemailer.createTransport({
+        host: config.get<string>('email.host'),
+        port: config.get<number>('email.port'),
+        secure: config.get<boolean>('email.secure'),
+        auth: {
+          user: config.get<string>('email.user'),
+          pass: config.get<string>('email.pass'),
+        },
+        connectionTimeout: 10_000,
+        greetingTimeout: 10_000,
+        socketTimeout: 15_000,
+      });
+
+      this.transporter.verify().then(
+        () => this.logger.log(`[SMTP] SMTP connected (${config.get<string>('email.user')})`),
+        (err) => this.logger.error(`[SMTP] Connection failed: ${err?.message ?? err}`),
+      );
+    }
   }
 
   // ─────────────────────────────────────────
@@ -199,30 +214,12 @@ export class OtpService {
   // ─────────────────────────────────────────
 
   /**
-   * Generic transactional email sender. Reuses the same SMTP transport as OTP
-   * so any module (admin, GDPR, broadcast follow-ups) can send mail without
-   * standing up its own mailer.
+   * Generic transactional email sender. Other modules (admin, GDPR, broadcast
+   * follow-ups) lo usan sin necesidad de su propio mailer. Si Resend está
+   * configurado lo usa; si no, cae a SMTP/Nodemailer.
    */
   async sendEmail(to: string, subject: string, html: string, text: string): Promise<void> {
-    const fromAddr = this.config.get<string>('email.user');
-    try {
-      const info = await this.transporter.sendMail({
-        from: this.config.get<string>('email.from'),
-        to,
-        replyTo: fromAddr,
-        subject,
-        html,
-        text,
-        headers: {
-          'X-Entity-Ref-ID': `txn-${Date.now()}`,
-          'List-Unsubscribe': `<mailto:${fromAddr}?subject=unsubscribe>`,
-        },
-      });
-      this.logger.log(`[Mail] Sent to ${to} - subject="${subject}" messageId=${info.messageId}`);
-    } catch (error: any) {
-      this.logger.error(`[Mail] Failed to send to ${to}: ${error?.message ?? error}`);
-      throw error;
-    }
+    await this.dispatchEmail({ to, subject, html, text, refIdPrefix: 'txn' });
   }
 
   private async sendEmailOtp(
@@ -234,27 +231,71 @@ export class OtpService {
     const subject = this.getEmailSubject(type);
     const html = this.buildEmailHtml(code, type, expiresMinutes);
     const text = this.buildEmailText(code, type, expiresMinutes);
-    const fromAddr = this.config.get<string>('email.user');
 
     try {
-      const info = await this.transporter.sendMail({
-        from: this.config.get<string>('email.from'),
-        to: email,
-        replyTo: fromAddr,
-        subject,
-        html,
-        text,
-        headers: {
-          'X-Entity-Ref-ID': `otp-${Date.now()}`,
-          'List-Unsubscribe': `<mailto:${fromAddr}?subject=unsubscribe>`,
-        },
-      });
-      this.logger.log(`[OTP] Sent to ${email} - messageId=${info.messageId}`);
+      await this.dispatchEmail({ to: email, subject, html, text, refIdPrefix: 'otp' });
+      this.logger.log(`[OTP] Sent to ${email}`);
     } catch (error: any) {
       this.logger.error(`[OTP] Failed to send to ${email}: ${error?.message ?? error}`);
       if (process.env.NODE_ENV !== 'production') {
         this.logger.warn(`[DEV] Fallback — OTP for ${email}: ${code}`);
       }
+    }
+  }
+
+  // Centraliza el envío para que /sendEmail/ y /sendEmailOtp/ compartan la
+  // misma lógica de selección Resend vs SMTP y los mismos headers (List-
+  // Unsubscribe, X-Entity-Ref-ID) sin duplicar código.
+  private async dispatchEmail(opts: {
+    to: string;
+    subject: string;
+    html: string;
+    text: string;
+    refIdPrefix: 'otp' | 'txn';
+  }): Promise<void> {
+    const refId = `${opts.refIdPrefix}-${Date.now()}`;
+    const headers = {
+      'X-Entity-Ref-ID': refId,
+      'List-Unsubscribe': `<mailto:${this.replyToAddr}?subject=unsubscribe>`,
+    };
+
+    if (this.resend) {
+      try {
+        const { data, error } = await this.resend.emails.send({
+          from: this.fromAddr,
+          to: opts.to,
+          replyTo: this.replyToAddr,
+          subject: opts.subject,
+          html: opts.html,
+          text: opts.text,
+          headers,
+        });
+        if (error) throw error;
+        this.logger.log(`[Mail/Resend] Sent to ${opts.to} - id=${data?.id ?? '?'}`);
+        return;
+      } catch (error: any) {
+        this.logger.error(`[Mail/Resend] Failed to send to ${opts.to}: ${error?.message ?? error}`);
+        throw error;
+      }
+    }
+
+    if (!this.transporter) {
+      throw new Error('No email transport configured (set RESEND_API_KEY or SMTP_* vars)');
+    }
+    try {
+      const info = await this.transporter.sendMail({
+        from: this.fromAddr,
+        to: opts.to,
+        replyTo: this.replyToAddr,
+        subject: opts.subject,
+        html: opts.html,
+        text: opts.text,
+        headers,
+      });
+      this.logger.log(`[Mail/SMTP] Sent to ${opts.to} - messageId=${info.messageId}`);
+    } catch (error: any) {
+      this.logger.error(`[Mail/SMTP] Failed to send to ${opts.to}: ${error?.message ?? error}`);
+      throw error;
     }
   }
 
