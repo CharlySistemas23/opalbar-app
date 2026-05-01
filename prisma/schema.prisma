@@ -272,9 +272,11 @@ model User {
   status        UserStatus    @default(PENDING_VERIFICATION)
   isVerified    Boolean       @default(false)
   points        Int           @default(0)
-  dmPolicy      DmPolicy      @default(EVERYONE)
+  // Defaults estrictos: requerimos amistad confirmada antes de DMs y menciones.
+  // Para abrir, el usuario puede cambiar su politica desde ajustes de privacidad.
+  dmPolicy      DmPolicy      @default(FRIENDS_ONLY)
   friendPolicy  FriendPolicy  @default(EVERYONE)
-  mentionPolicy MentionPolicy @default(EVERYONE)
+  mentionPolicy MentionPolicy @default(FRIENDS_ONLY)
   isPrivate     Boolean       @default(false)
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
