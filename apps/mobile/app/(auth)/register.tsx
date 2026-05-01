@@ -7,6 +7,7 @@ import { authApi } from '@/api/client';
 import { useAppStore } from '@/stores/app.store';
 import { apiError } from '@/api/errors';
 import { Colors, Radius } from '@/constants/tokens';
+import { PhonePicker } from '@/components/PhonePicker';
 
 export default function Register() {
   const router = useRouter();
@@ -17,6 +18,7 @@ export default function Register() {
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
+  const [phoneIsValid, setPhoneIsValid] = useState(false);
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -24,7 +26,8 @@ export default function Register() {
 
   const passOk = password.length >= 8 && /[A-Z]/.test(password) && /[0-9]/.test(password) && /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password);
   const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim().toLowerCase());
-  const phoneOk = phone.trim().length === 0 || /^\+[1-9]\d{7,14}$/.test(phone.trim());
+  // El picker emite E.164 + flag de validez. Si está vacío es válido (es opcional).
+  const phoneOk = phone.length === 0 || phoneIsValid;
 
   async function handleRegister() {
     setError(null);
@@ -150,19 +153,17 @@ export default function Register() {
                 : "We'll email you a 6-digit verification code."}
             </Text>
 
-            <View style={[styles.inputBox, phone.length > 0 ? (phoneOk ? styles.inputBoxOk : styles.inputBoxWarn) : null]}>
-              <Feather name="phone" size={18} color={Colors.textMuted} />
-              <TextInput
-                style={styles.input}
-                value={phone}
-                onChangeText={(v) => setPhone(v.replace(/[^\d+]/g, ''))}
-                placeholder={t ? '+525512345678 (opcional)' : '+525512345678 (optional)'}
-                placeholderTextColor={Colors.textMuted}
-                keyboardType="phone-pad"
-                autoComplete="tel"
-                maxLength={16}
-              />
-            </View>
+            <PhonePicker
+              value={phone}
+              onChange={(e164, valid) => {
+                setPhone(e164);
+                setPhoneIsValid(valid);
+              }}
+              placeholder={t ? 'Teléfono (opcional)' : 'Phone (optional)'}
+              defaultCountry="MX"
+              isValid={phone.length > 0 && phoneOk}
+              hasError={phone.length > 0 && !phoneOk}
+            />
 
             <View style={[styles.inputBox, password ? (passOk ? styles.inputBoxOk : styles.inputBoxWarn) : null]}>
               <Feather name="lock" size={18} color={Colors.textMuted} />
