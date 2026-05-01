@@ -30,46 +30,37 @@ export class OtpService {
     private readonly redis: RedisService,
     private readonly config: ConfigService,
   ) {
-    this.fromAddr = config.get<string>('email.from') ?? 'OPAL BAR <onboarding@resend.dev>';
+    this.fromAddr = config.get<string>('email.from') ?? 'OPAL BAR <carlosalonsog966@gmail.com>';
     this.replyToAddr = config.get<string>('email.replyTo') ?? 'carlosalonsog966@gmail.com';
 
-    // Resend solo se activa si: (1) hay API key, Y (2) el FROM NO usa el
-    // dominio de prueba `onboarding@resend.dev`. Esto evita el bug de la
-    // cuenta gratis sin dominio verificado, que solo permite enviar al
-    // owner del API key (devuelve 403 a cualquier otro recipient).
-    // Cuando verifiques un dominio en resend.com/domains, basta cambiar
-    // EMAIL_FROM a `noreply@tudominio.com` y Resend se activa automaticamente.
-    const resendApiKey = config.get<string>('email.resendApiKey');
-    const fromUsesOnboardingDomain = /onboarding@resend\.dev/i.test(this.fromAddr);
-    if (resendApiKey && !fromUsesOnboardingDomain) {
-      this.resend = new Resend(resendApiKey);
-      this.logger.log(`[Mail] Resend client inicializado (from=${this.fromAddr})`);
-    } else {
-      if (resendApiKey && fromUsesOnboardingDomain) {
-        this.logger.warn(
-          '[Mail] RESEND_API_KEY presente pero EMAIL_FROM usa onboarding@resend.dev. ' +
-            'Resend free no permite enviar a terceros con ese dominio. Usando SMTP fallback. ' +
-            'Verifica un dominio en resend.com/domains y cambia EMAIL_FROM para activar Resend.',
-        );
-      }
-      // SMTP fallback (Gmail u otro). Solo se inicializa si no hay Resend.
-      this.transporter = nodemailer.createTransport({
-        host: config.get<string>('email.host'),
-        port: config.get<number>('email.port'),
-        secure: config.get<boolean>('email.secure'),
-        auth: {
-          user: config.get<string>('email.user'),
-          pass: config.get<string>('email.pass'),
-        },
-        connectionTimeout: 10_000,
-        greetingTimeout: 10_000,
-        socketTimeout: 15_000,
-      });
+    // SMTP siempre activo. Resend queda integrado pero opt-in explicito:
+    // para activarlo hay que setear EMAIL_TRANSPORT=resend EN ADICION a
+    // RESEND_API_KEY y a un EMAIL_FROM con dominio verificado en Resend.
+    // Mientras esa flag no este, todos los correos salen por Gmail SMTP
+    // garantizando entrega a cualquier destinatario.
+    this.transporter = nodemailer.createTransport({
+      host: config.get<string>('email.host'),
+      port: config.get<number>('email.port'),
+      secure: config.get<boolean>('email.secure'),
+      auth: {
+        user: config.get<string>('email.user'),
+        pass: config.get<string>('email.pass'),
+      },
+      connectionTimeout: 10_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 15_000,
+    });
 
-      this.transporter.verify().then(
-        () => this.logger.log(`[SMTP] SMTP connected (${config.get<string>('email.user')})`),
-        (err) => this.logger.error(`[SMTP] Connection failed: ${err?.message ?? err}`),
-      );
+    this.transporter.verify().then(
+      () => this.logger.log(`[SMTP] SMTP connected (${config.get<string>('email.user')})`),
+      (err) => this.logger.error(`[SMTP] Connection failed: ${err?.message ?? err}`),
+    );
+
+    const transport = (process.env.EMAIL_TRANSPORT ?? 'smtp').toLowerCase();
+    const resendApiKey = config.get<string>('email.resendApiKey');
+    if (transport === 'resend' && resendApiKey) {
+      this.resend = new Resend(resendApiKey);
+      this.logger.log(`[Mail] Resend ACTIVO (from=${this.fromAddr}). SMTP queda como fallback.`);
     }
   }
 
