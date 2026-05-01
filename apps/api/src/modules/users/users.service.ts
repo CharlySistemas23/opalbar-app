@@ -194,14 +194,16 @@ export class UsersService {
     const q = query.trim();
     if (!q) return [];
     // Audit fix: el endpoint era @Public y devolvia emails reales + cuentas
-    // privadas/baneadas/soft-deleted. Ahora: solo ACTIVE no eliminados, sin
-    // email (PII), y filtra busqueda por email solo si el query parece un
-    // email completo (no fragmento — evita enumeracion).
+    // baneadas/soft-deleted. Excluimos BANNED y DELETED — pero PENDING_VERIFICATION
+    // (default al registrarse) sigue siendo searchable porque la verificacion
+    // toma minutos y la gente quiere encontrar amigos apenas se registra.
+    // Tampoco devolvemos email (PII), y la busqueda por email exige el email
+    // completo (no fragmento) para evitar enumeracion.
     const looksLikeEmail = /^[^@\s]+@[^@\s]+/.test(q);
     return this.prisma.user.findMany({
       where: {
         deletedAt: null,
-        status: 'ACTIVE',
+        status: { notIn: ['BANNED', 'DELETED'] },
         OR: [
           ...(looksLikeEmail ? [{ email: q.toLowerCase() }] : []),
           { profile: { firstName: { contains: q, mode: 'insensitive' as const } } },
