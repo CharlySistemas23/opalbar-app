@@ -99,7 +99,18 @@ function setupInterceptors(client: typeof apiClient) {
 
       try {
         const refreshToken = tokenStore.getRefreshToken();
-        if (!refreshToken) throw new Error('No refresh token available');
+        if (!refreshToken) {
+          // No active session (fresh install / guest mode / cleared storage).
+          // Don't surface an English "No refresh token available" error to the UI.
+          // Just fire the auth-failed hook and re-reject with the original 401 so
+          // the screen shows whatever friendly message the backend already returned.
+          _isRefreshing = false;
+          _refreshQueue.forEach(({ reject }) => reject(error as Error));
+          _refreshQueue = [];
+          tokenStore.clear();
+          _onAuthFailed?.();
+          return Promise.reject(error);
+        }
 
         const { data } = await axios.post(`${BASE_URL}/auth/refresh`, { refreshToken });
         // Backend wraps responses in { data: ... }. The refresh endpoint returns
@@ -127,8 +138,7 @@ function setupInterceptors(client: typeof apiClient) {
         const refreshStatus = refreshErr.response?.status;
         const refreshTokenInvalid =
           refreshStatus === 401 ||
-          refreshStatus === 403 ||
-          (refreshErr as Error).message === 'No refresh token available';
+          refreshStatus === 403;
 
         if (refreshTokenInvalid) {
           tokenStore.clear();
