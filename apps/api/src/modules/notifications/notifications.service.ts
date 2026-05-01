@@ -268,12 +268,57 @@ export class NotificationsService {
     data?: Record<string, unknown>;
     imageUrl?: string;
   }) {
-    // Only users with at least one push token — saves work in the very common
-    // case of accounts that never installed the APK (admin, seed, web-only).
+    // Audit fix: antes incluiamos a TODOS los users ACTIVE con push token,
+    // ignorando notificationSettings. Si un user apago "newEvents" o
+    // "pushEnabled" en sus ajustes, igual recibia broadcasts. Ahora filtramos
+    // por settings segun el tipo del broadcast.
+    const settingField = NotificationsService.notificationSettingFieldFor(payload.type);
     const rows = await this.prisma.user.findMany({
-      where: { status: 'ACTIVE', pushTokens: { some: {} } },
+      where: {
+        status: 'ACTIVE',
+        pushTokens: { some: {} },
+        // Si el user no tiene NotificationSettings (defaults), todos estan en
+        // true por schema → recibe el broadcast. Si los tiene, respetamos
+        // pushEnabled global + el flag especifico del tipo.
+        OR: [
+          { notificationSettings: null },
+          {
+            notificationSettings: {
+              pushEnabled: true,
+              ...(settingField ? { [settingField]: true } : {}),
+            },
+          },
+        ],
+      },
       select: { id: true },
     });
     return this.createForUsers(rows.map((r) => r.id), payload);
+  }
+
+  // Mapea NotificationType al boolean correspondiente en NotificationSettings.
+  // Devuelve null para tipos sin granular control (siempre se respeta
+  // pushEnabled global). Mantener sincronizado al agregar tipos nuevos.
+  private static notificationSettingFieldFor(type: NotificationType): keyof Pick<
+    {
+      pushEnabled: boolean; emailEnabled: boolean; eventReminders: boolean;
+      newEvents: boolean; newOffers: boolean; communityReplies: boolean;
+      communityReactions: boolean; pointsUpdates: boolean;
+      marketingEmails: boolean; weeklyDigest: boolean;
+    },
+    'eventReminders' | 'newEvents' | 'newOffers' | 'communityReplies' | 'communityReactions' | 'pointsUpdates'
+  > | null {
+    const map: Record<string, any> = {
+      EVENT_NEW: 'newEvents',
+      EVENT_REMINDER: 'eventReminders',
+      OFFER_NEW: 'newOffers',
+      OFFER_EXPIRING: 'newOffers',
+      COMMUNITY_COMMENT: 'communityReplies',
+      COMMUNITY_REACTION: 'communityReactions',
+      POST_LIKE: 'communityReactions',
+      POST_REACTION: 'communityReactions',
+      POINTS_EARNED: 'pointsUpdates',
+      LOYALTY_LEVEL_UP: 'pointsUpdates',
+    };
+    return map[type] ?? null;
   }
 }
