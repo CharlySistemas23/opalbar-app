@@ -11,6 +11,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Res,
 } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
@@ -111,13 +112,16 @@ export class EmailPublicController {
 
   @Public()
   @Get('track/open/:recipientId.gif')
-  @ApiOperation({ summary: 'Open-tracking pixel (1×1 gif)' })
+  @ApiOperation({ summary: 'Open-tracking pixel (1×1 gif) — requires HMAC ?s=' })
   async trackOpen(
     @Param('recipientId') recipientId: string,
+    @Query('s') sig: string | undefined,
     @Res() res: Response,
   ) {
-    // Record asynchronously; always respond with the pixel regardless.
-    this.marketing.markOpened(recipientId).catch(() => undefined);
+    // Always respond with the pixel — markOpened internally validates HMAC y
+    // descarta cuentas de open si la firma no es valida (evita inflar metricas
+    // por curl manual a /track/open/<anyId>.gif).
+    this.marketing.markOpened(recipientId, sig).catch(() => undefined);
     res.setHeader('Content-Type', 'image/gif');
     res.setHeader('Content-Length', PIXEL_GIF.length.toString());
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');

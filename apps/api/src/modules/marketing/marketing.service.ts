@@ -447,7 +447,11 @@ export class MarketingService implements OnModuleInit {
 
       await Promise.all(
         batch.map(async (r) => {
-          const trackingPixelUrl = `${appUrl}/${apiPrefix}/email/track/open/${r.id}.gif`;
+          // Audit fix: el pixel de open-rate aceptaba cualquier recipientId
+          // sin firma — alguien con un ID podia inflar metricas con un curl.
+          // Ahora firmamos con HMAC y el endpoint valida antes de incrementar.
+          const sig = MarketingService.signPixel(r.id);
+          const trackingPixelUrl = `${appUrl}/${apiPrefix}/email/track/open/${r.id}.gif?s=${sig}`;
           const unsubscribeUrl = `${appUrl}/${apiPrefix}/email/unsubscribe/${r.unsubToken}`;
 
           const html = renderEmailHtml({
@@ -538,7 +542,11 @@ export class MarketingService implements OnModuleInit {
   //  Tracking (public endpoints)
   // ─────────────────────────────────────────
 
-  async markOpened(recipientId: string): Promise<void> {
+  async markOpened(recipientId: string, sig?: string): Promise<void> {
+    // Audit fix: requiere HMAC valida en query `?s=` para incrementar.
+    // Sin firma valida → silencio, devolvemos pixel igual pero no contamos.
+    if (!sig || !MarketingService.verifyPixel(recipientId, sig)) return;
+
     const recipient = await this.prisma.emailCampaignRecipient.findUnique({
       where: { id: recipientId },
     });
@@ -554,6 +562,26 @@ export class MarketingService implements OnModuleInit {
         data: { openCount: { increment: 1 } },
       }),
     ]);
+  }
+
+  // HMAC del pixel — usa MARKETING_PIXEL_SECRET (env) o cae a JWT_SECRET para
+  // no romper si la env no esta seteada. Truncamos a 12 chars (suficiente
+  // entropy para tokens unicos por recipient sin URLs gigantes).
+  private static signPixel(recipientId: string): string {
+    const crypto = require('node:crypto');
+    const secret = process.env.MARKETING_PIXEL_SECRET || process.env.JWT_SECRET || 'opalbar-default-pixel-secret';
+    return crypto.createHmac('sha256', secret).update(recipientId).digest('hex').slice(0, 12);
+  }
+  private static verifyPixel(recipientId: string, sig: string): boolean {
+    const expected = MarketingService.signPixel(recipientId);
+    if (expected.length !== sig.length) return false;
+    // timingSafeEqual evita timing attacks en la comparacion
+    const crypto = require('node:crypto');
+    try {
+      return crypto.timingSafeEqual(Buffer.from(expected, 'utf8'), Buffer.from(sig, 'utf8'));
+    } catch {
+      return false;
+    }
   }
 
   // ─────────────────────────────────────────

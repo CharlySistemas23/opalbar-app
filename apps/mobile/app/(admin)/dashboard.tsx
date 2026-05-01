@@ -45,7 +45,7 @@ const INBOX_META: Record<string, { icon: FeatherIcon; color: string }> = {
 
 function relTime(d?: string) {
   if (!d) return '';
-  const diff = Math.floor((Date.now() - new Date(d).getTime()) / 1000);
+  const diff = Math.max(0, Math.floor((Date.now() - new Date(d).getTime()) / 1000));
   if (diff < 60) return `${diff}s`;
   if (diff < 3600) return `${Math.floor(diff / 60)}m`;
   if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
