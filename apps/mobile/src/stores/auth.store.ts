@@ -6,6 +6,7 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import { Platform } from 'react-native';
 import { authApi, tokenStore, onAuthFailed, onTokensRefreshed } from '../api/client';
 import { closeSocket, updateSocketToken } from '../api/socket';
+import { closeRtSocket, getRtSocket, updateRtToken } from '../api/rt-socket';
 
 // Cross-platform storage: localStorage on web, AsyncStorage on native
 function getPlatformStorage() {
@@ -113,6 +114,11 @@ export const useAuthStore = create<AuthState>()(
 
           // Store tokens in memory (interceptor uses these)
           tokenStore.setTokens(tokens.accessToken, tokens.refreshToken);
+          // Sincroniza el socket /rt para que NotificationListener reciba
+          // banners en tiempo real apenas el usuario entra. Sin esta linea
+          // el socket queda con auth vacia → eventos no llegan.
+          updateRtToken(tokens.accessToken);
+          getRtSocket();
 
           set({
             user,
@@ -138,6 +144,7 @@ export const useAuthStore = create<AuthState>()(
         } finally {
           tokenStore.clear();
           closeSocket();
+          closeRtSocket();
           set({ user: null, tokens: null, isAuthenticated: false, isGuest: false, isLoading: false, error: null });
         }
       },
@@ -151,6 +158,8 @@ export const useAuthStore = create<AuthState>()(
 
       completeOtpLogin: (user, tokens) => {
         tokenStore.setTokens(tokens.accessToken, tokens.refreshToken);
+        updateRtToken(tokens.accessToken);
+        getRtSocket();
         set({
           user,
           tokens,
@@ -190,6 +199,10 @@ export const useAuthStore = create<AuthState>()(
         // Restore tokens to memory on app start
         if (state?.tokens) {
           tokenStore.setTokens(state.tokens.accessToken, state.tokens.refreshToken);
+          // Pre-arma el socket /rt con el token persistido para que cuando
+          // NotificationListener monte, ya este conectado y autenticado.
+          updateRtToken(state.tokens.accessToken);
+          if (state.isAuthenticated) getRtSocket();
         }
         // Persist rotated tokens so a reload doesn't reuse a spent refresh token
         onTokensRefreshed((accessToken, refreshToken) => {
@@ -201,8 +214,9 @@ export const useAuthStore = create<AuthState>()(
               expiresIn: current?.expiresIn ?? 900,
             },
           });
-          // Keep any active realtime socket auth in sync
+          // Keep both sockets (legacy + /rt) in sync con el token rotado
           updateSocketToken(accessToken);
+          updateRtToken(accessToken);
         });
         // Refresh truly rejected (401/403 from /auth/refresh) → tokens are dead.
         // Clear them so we stop using bad tokens, but DON'T force a redirect.
@@ -223,6 +237,7 @@ export const useAuthStore = create<AuthState>()(
           // de repente me sacó" UX.
           tokenStore.clear();
           closeSocket();
+          closeRtSocket();
           useAuthStore.setState({
             user: null,
             tokens: null,
