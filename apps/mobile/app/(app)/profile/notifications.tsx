@@ -76,7 +76,7 @@ function iconForType(type: string): { icon: FeatherIcon; color: string } {
 
 function relTime(d?: string, es = true) {
   if (!d) return '';
-  const diff = Math.floor((Date.now() - new Date(d).getTime()) / 1000);
+  const diff = Math.max(0, Math.floor((Date.now() - new Date(d).getTime()) / 1000));
   if (diff < 60) return es ? 'ahora' : 'now';
   if (diff < 3600) return `${Math.floor(diff / 60)} min`;
   if (diff < 86400) return `${Math.floor(diff / 3600)} h`;

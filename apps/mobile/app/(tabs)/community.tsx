@@ -30,6 +30,7 @@ import { useFeedback } from '@/hooks/useFeedback';
 import { useCommunityRealtime } from '@/hooks/useCommunityRealtime';
 import { useRealtime } from '@/hooks/useRealtime';
 import { sharePost } from '@/utils/share';
+import { relativeTime } from '@/utils/time';
 
 // ─────────────────────────────────────────────
 //  Community Feed — Instagram-style
@@ -69,13 +70,8 @@ function colorFor(id: string) {
   return AVATAR_COLORS[idx];
 }
 
-function relativeTime(date: Date, t: boolean): string {
-  const d = Math.floor((Date.now() - date.getTime()) / 1000);
-  if (d < 60) return `${d}s`;
-  if (d < 3600) return `${Math.floor(d / 60)}m`;
-  if (d < 86400) return `${Math.floor(d / 3600)}h`;
-  return `${Math.floor(d / 86400)}d`;
-}
+// relativeTime importada desde @/utils/time — clampea diffs negativos a 0
+// para evitar "-3594s" cuando el reloj del device está atrasado vs server.
 
 function adaptPost(row: any, t: boolean): CommunityPost {
   const first = row?.user?.profile?.firstName ?? '';

@@ -47,7 +47,8 @@ function colorFor(id: string) {
 
 function formatRelativeTime(d?: string) {
   if (!d) return '';
-  const diff = Math.floor((Date.now() - new Date(d).getTime()) / 1000);
+  const diff = Math.max(0, Math.floor((Date.now() - new Date(d).getTime()) / 1000));
+  if (diff < 5) return 'ahora';
   if (diff < 60) return `${diff}s`;
   if (diff < 3600) return `${Math.floor(diff / 60)}m`;
   if (diff < 86400) return `${Math.floor(diff / 3600)}h`;

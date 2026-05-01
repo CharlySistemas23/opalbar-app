@@ -39,6 +39,19 @@ export default function Login() {
       fb.success();
       router.replace('/(tabs)/home' as never);
     } catch (err: any) {
+      // Email no verificado: el backend ya reenvió el OTP, ruteamos a verify
+      if (err?.code === 'EMAIL_NOT_VERIFIED') {
+        const verifyEmail: string = err.identifier || mail;
+        router.push({
+          pathname: '/(auth)/otp-email',
+          params: {
+            email: verifyEmail,
+            password,
+            purpose: 'EMAIL_VERIFICATION',
+          },
+        } as never);
+        return;
+      }
       if (err?.response?.status === 429) {
         const retryAfter = err.response.headers?.['retry-after'] ?? '300';
         router.replace({

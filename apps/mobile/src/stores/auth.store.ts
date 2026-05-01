@@ -98,6 +98,17 @@ export const useAuthStore = create<AuthState>()(
             throw new Error(msg);
           }
 
+          // Backend devuelve este flag cuando el usuario se registró pero
+          // nunca verificó su email. Lanzamos un Error con shape estable
+          // para que la pantalla de login lo detecte y rutee al OTP screen.
+          if (response?.data?.requiresEmailVerification) {
+            set({ isLoading: false, error: null });
+            const verifyErr: any = new Error('EMAIL_NOT_VERIFIED');
+            verifyErr.code = 'EMAIL_NOT_VERIFIED';
+            verifyErr.identifier = response.data.identifier;
+            throw verifyErr;
+          }
+
           const { user, tokens } = response.data;
 
           // Store tokens in memory (interceptor uses these)

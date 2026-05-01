@@ -34,7 +34,8 @@ export interface AuthResponse {
 }
 
 export interface TwoFactorChallenge {
-  requires2FA: true;
+  requires2FA?: true;
+  requiresEmailVerification?: true;
   identifier: string;
   expiresIn: number;
 }
@@ -228,6 +229,30 @@ export class AuthService {
     if (user.status === UserStatus.DELETED) {
       await logAttempt(false, 'ACCOUNT_DELETED');
       throw new UnauthorizedException('Invalid credentials');
+    }
+
+    // ── Verificación de email obligatoria ──
+    // Antes podías registrarte, NO confirmar el código y aun así entrar
+    // con email + password. Bloquea esa puerta y reenvia un OTP nuevo
+    // para que el cliente rutee a la pantalla de verificación sin que
+    // el usuario tenga que pedirlo a mano.
+    if (!user.isVerified && user.email) {
+      await logAttempt(false, 'EMAIL_NOT_VERIFIED');
+      try {
+        await this.otpService.sendOtp({
+          email: user.email,
+          type: OtpType.EMAIL_VERIFICATION,
+        });
+      } catch (err: unknown) {
+        // No bloqueamos el flujo si Resend/SMTP falla — el front ofrece "reenviar"
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`Failed to auto-resend verification OTP to ${user.email}: ${msg}`);
+      }
+      return {
+        requiresEmailVerification: true,
+        identifier: user.email,
+        expiresIn: 600,
+      } as TwoFactorChallenge;
     }
 
     // ── 2FA gate for SUPER_ADMIN ──
