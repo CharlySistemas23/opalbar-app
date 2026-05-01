@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { DmPolicy, NotificationType } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { RealtimeService } from '../realtime/realtime.service';
@@ -193,17 +193,23 @@ export class UsersService {
   async search(query: string, limit: number) {
     const q = query.trim();
     if (!q) return [];
+    // Audit fix: el endpoint era @Public y devolvia emails reales + cuentas
+    // privadas/baneadas/soft-deleted. Ahora: solo ACTIVE no eliminados, sin
+    // email (PII), y filtra busqueda por email solo si el query parece un
+    // email completo (no fragmento — evita enumeracion).
+    const looksLikeEmail = /^[^@\s]+@[^@\s]+/.test(q);
     return this.prisma.user.findMany({
       where: {
         deletedAt: null,
+        status: 'ACTIVE',
         OR: [
-          { email: { contains: q, mode: 'insensitive' } },
-          { profile: { firstName: { contains: q, mode: 'insensitive' } } },
-          { profile: { lastName: { contains: q, mode: 'insensitive' } } },
+          ...(looksLikeEmail ? [{ email: q.toLowerCase() }] : []),
+          { profile: { firstName: { contains: q, mode: 'insensitive' as const } } },
+          { profile: { lastName: { contains: q, mode: 'insensitive' as const } } },
         ],
       },
       select: {
-        id: true, email: true, points: true,
+        id: true, points: true, isPrivate: true,
         profile: { select: { firstName: true, lastName: true, avatarUrl: true, bio: true } },
         _count: { select: { followers: true, following: true, posts: true, events: true } },
       },
@@ -257,8 +263,53 @@ export class UsersService {
     }
     // friendsCount derived once so the UI can show "X amigos" alongside followers/following.
     const friendIds = await this.friendships.getFriendIds(id);
+
+    // Audit fix: si la cuenta es privada y el viewer no es el dueño / amigo /
+    // follower aceptado, ocultamos los campos sensibles (bio, ciudad, fecha de
+    // nacimiento, genero, ocupacion). Mantenemos la misma SHAPE para no romper
+    // el front (todos los campos siguen presentes, simplemente vacios/null).
+    const isOwner = !!viewerId && viewerId === id;
+    const hasAccess = isOwner || isFollowing || friendship.isFriend;
+    if (user.isPrivate && !hasAccess) {
+      return {
+        id: user.id,
+        email: null,
+        createdAt: user.createdAt,
+        points: 0,
+        friendPolicy: user.friendPolicy,
+        isPrivate: true,
+        profile: {
+          firstName: user.profile?.firstName ?? '',
+          lastName: user.profile?.lastName ?? '',
+          avatarUrl: user.profile?.avatarUrl ?? null,
+          coverUrl: null,
+          bio: null,
+          city: null,
+          country: null,
+          birthDate: null,
+          gender: null,
+          occupation: null,
+          language: user.profile?.language ?? 'es',
+          loyaltyLevel: null,
+        },
+        isFollowing,
+        friendship,
+        _count: {
+          followers: user._count.followers,
+          following: user._count.following,
+          posts: 0,
+          events: 0,
+          offerRedemptions: 0,
+          friends: 0,
+        },
+      };
+    }
+
     return {
       ...user,
+      // Audit fix: nunca devuelvas el email del usuario en perfil publico,
+      // independientemente de privacidad. Solo el dueno via /me lo ve.
+      email: isOwner ? user.email : null,
       isFollowing,
       friendship,
       _count: { ...user._count, friends: friendIds.length },
@@ -314,7 +365,10 @@ export class UsersService {
     return { ok: true, isFollowing: false };
   }
 
-  async listFollowers(userId: string, limit: number) {
+  async listFollowers(userId: string, limit: number, viewerId?: string) {
+    // Audit fix: si la cuenta es privada, solo el dueno + sus followers /
+    // amigos pueden ver el listado de seguidores. Antes era @Public abierto.
+    await this.assertCanViewFollowList(userId, viewerId);
     const rows = await this.prisma.follow.findMany({
       where: { followingId: userId },
       include: {
@@ -331,7 +385,8 @@ export class UsersService {
     return rows.map((r) => r.follower);
   }
 
-  async listFollowing(userId: string, limit: number) {
+  async listFollowing(userId: string, limit: number, viewerId?: string) {
+    await this.assertCanViewFollowList(userId, viewerId);
     const rows = await this.prisma.follow.findMany({
       where: { followerId: userId },
       include: {
@@ -346,6 +401,29 @@ export class UsersService {
       take: Math.min(limit, 100),
     });
     return rows.map((r) => r.following);
+  }
+
+  // Helper: la lista de followers/following solo es visible para el dueno,
+  // para alguien que ya sigue al user, o para amigos. Anonimos pueden verla
+  // SOLO si la cuenta es publica (no isPrivate). Devuelve void o lanza 403.
+  private async assertCanViewFollowList(targetId: string, viewerId?: string): Promise<void> {
+    const target = await this.prisma.user.findUnique({
+      where: { id: targetId },
+      select: { isPrivate: true },
+    });
+    if (!target) throw new NotFoundException('User not found');
+    if (!target.isPrivate) return; // cuenta publica → cualquiera puede ver
+    if (!viewerId) throw new ForbiddenException('Private account');
+    if (viewerId === targetId) return;
+    const [follow, fctx] = await Promise.all([
+      this.prisma.follow.findUnique({
+        where: { followerId_followingId: { followerId: viewerId, followingId: targetId } },
+      }),
+      this.friendships.getProfileContext(viewerId, targetId),
+    ]);
+    if (!follow && !fctx.isFriend) {
+      throw new ForbiddenException('Private account — follow first to see this list');
+    }
   }
 
   // ─────────────────────────────────────────────

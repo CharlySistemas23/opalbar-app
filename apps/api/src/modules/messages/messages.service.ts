@@ -55,6 +55,24 @@ export class MessagesService {
 
     if (!recipient) throw new NotFoundException('User not found');
 
+    // Audit fix: si EL RECIPIENT ya bloqueo previamente al sender en CUALQUIER
+    // thread (incluido un thread distinto que se cerro como BLOCKED), el sender
+    // no debe poder reabrir un thread fresco. Antes solo se chequeaba BLOCKED
+    // si el thread del par sender↔recipient existia, asi que crear uno nuevo
+    // saltaba el bloqueo.
+    const [uA, uB] = this.pair(senderId, recipientId);
+    const blockedThread = await this.prisma.messageThread.findFirst({
+      where: {
+        userAId: uA,
+        userBId: uB,
+        status: MessageThreadStatus.BLOCKED,
+      },
+      select: { id: true },
+    });
+    if (blockedThread) {
+      throw new ForbiddenException('You have been blocked by this user');
+    }
+
     const senderIsStaff = !!sender && STAFF_ROLES.includes(sender.role);
     const recipientIsStaff = STAFF_ROLES.includes(recipient.role);
     if (senderIsStaff || recipientIsStaff) return MessageThreadStatus.ACCEPTED;

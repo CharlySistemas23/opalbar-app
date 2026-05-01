@@ -264,8 +264,40 @@ export class ReservationsService {
         ...(dto.cancelReason && { cancelReason: dto.cancelReason }),
         ...timestamps,
       },
+      include: { venue: { select: { name: true } } },
     });
     this.realtime.toUserAndStaff(reservation.userId, 'reservation', 'status_changed', { id, data: { status: dto.status } });
+
+    // Audit fix: cuando staff cambia status del lado admin, antes solo
+    // emitiamos realtime — si la app del cliente estaba cerrada nunca se
+    // enteraba de la confirmacion/cancelacion. Ahora mandamos push tambien.
+    if (reservation.status !== dto.status) {
+      const venueName = updated.venue?.name ?? 'OPAL BAR';
+      let pushTitle: string | null = null;
+      let pushBody: string | null = null;
+      if (dto.status === ReservationStatus.CONFIRMED) {
+        pushTitle = 'Reserva confirmada';
+        pushBody = `Tu reserva en ${venueName} fue confirmada.`;
+      } else if (dto.status === ReservationStatus.CANCELLED) {
+        pushTitle = 'Reserva cancelada';
+        pushBody = dto.cancelReason
+          ? `Cancelada: ${dto.cancelReason}`
+          : `Tu reserva en ${venueName} fue cancelada.`;
+      } else if (dto.status === ReservationStatus.COMPLETED) {
+        pushTitle = '¡Gracias por tu visita!';
+        pushBody = `Esperamos verte pronto en ${venueName}.`;
+      }
+      if (pushTitle && pushBody) {
+        this.push
+          .sendToUser(reservation.userId, {
+            title: pushTitle,
+            body: pushBody,
+            data: { type: 'RESERVATION_STATUS', reservationId: id, status: dto.status },
+          })
+          .catch(() => {});
+      }
+    }
+
     return updated;
   }
 }

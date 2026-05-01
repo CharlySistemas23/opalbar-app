@@ -89,18 +89,19 @@ export class UsersController {
 
   // ── FOLLOW / FOLLOWERS ────────────────────────
 
+  // Audit fix: bajo @Public, anonimos podian listar followers de cuentas
+  // privadas. Ahora exige login Y el service chequea visibilidad por
+  // privacidad. JwtAuthGuard ya esta global, asi que basta con quitar @Public.
   @Get(':id/followers')
-  @Public()
-  @ApiOperation({ summary: 'List followers of user' })
-  getFollowers(@Param('id') id: string, @Query('limit') limit?: string) {
-    return this.usersService.listFollowers(id, parseInt(limit || '30', 10));
+  @ApiOperation({ summary: 'List followers of user (respeta isPrivate)' })
+  getFollowers(@Param('id') id: string, @Query('limit') limit?: string, @CurrentUser() me?: User) {
+    return this.usersService.listFollowers(id, parseInt(limit || '30', 10), me?.id);
   }
 
   @Get(':id/following')
-  @Public()
-  @ApiOperation({ summary: 'List users that :id is following' })
-  getFollowing(@Param('id') id: string, @Query('limit') limit?: string) {
-    return this.usersService.listFollowing(id, parseInt(limit || '30', 10));
+  @ApiOperation({ summary: 'List users that :id is following (respeta isPrivate)' })
+  getFollowing(@Param('id') id: string, @Query('limit') limit?: string, @CurrentUser() me?: User) {
+    return this.usersService.listFollowing(id, parseInt(limit || '30', 10), me?.id);
   }
 
   @Post(':id/follow')

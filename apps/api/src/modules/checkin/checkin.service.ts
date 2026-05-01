@@ -37,7 +37,11 @@ export class CheckinService {
     const updated = await this.prisma.reservation.update({
       where: { id: reservation.id },
       data: {
-        status: ReservationStatus.CONFIRMED,
+        // Audit fix: el flow oficial usa SEATED para reservas con cliente
+        // dentro del local. Antes se grababa CONFIRMED y la query del staff
+        // dashboard "reservas activas hoy" filtra por SEATED → la entrada
+        // via QR no aparecia en el panel y staff no veia la mesa ocupada.
+        status: ReservationStatus.SEATED,
         seatedAt: new Date(),
         confirmedAt: reservation.confirmedAt ?? new Date(),
         internalNotes: reservation.internalNotes

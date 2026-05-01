@@ -101,6 +101,24 @@ export class CommunityService {
         where = { ...where, NOT: { mediaUrls: { has: WALL_MARKER } } };
       }
 
+      // Audit fix: ocultar posts de cuentas privadas a quienes no las siguen.
+      // Anonimos: solo ven publicas. Logged-in: publicas + privadas que sigue
+      // o que son su misma cuenta. Si el filtro pide explicitamente userId
+      // (perfil de un user), el respeto es: si es privada y no soy follower
+      // ni dueno, devuelvo lista vacia.
+      if (!userId || userId !== currentUserId) {
+        const visibilityClauses: any[] = [{ user: { isPrivate: false } }];
+        if (currentUserId) {
+          visibilityClauses.push({ userId: currentUserId });
+          visibilityClauses.push({
+            user: {
+              followers: { some: { followerId: currentUserId } },
+            },
+          });
+        }
+        where = { ...where, OR: visibilityClauses };
+      }
+
       // Real "following" feed: only posts from users I follow + my own posts.
       if (scope === CommunityFeedScope.FOLLOWING) {
         if (!currentUserId) return paginate([], 0, page, limit);
@@ -150,7 +168,10 @@ export class CommunityService {
       const post = await this.prisma.post.findUnique({
         where: { id },
         include: {
-          user: { select: { id: true, profile: { select: { firstName: true, lastName: true, avatarUrl: true } } } },
+          // Audit fix: traer isPrivate del autor para chequear acceso antes de
+          // devolver el detalle. Antes el endpoint @Public devolvia cualquier
+          // post si conocias el id (enumeracion).
+          user: { select: { id: true, isPrivate: true, profile: { select: { firstName: true, lastName: true, avatarUrl: true } } } },
           _count: { select: { reactions: true, comments: true } },
           reactions: currentUserId
             ? { where: { userId: currentUserId }, select: { id: true }, take: 1 }
@@ -159,6 +180,19 @@ export class CommunityService {
         },
       });
       if (!post || post.deletedAt) throw new NotFoundException('Post not found');
+
+      // Privacy check: si el author es privado y el viewer no es el dueno
+      // ni un follower, devolver 404 (mismo shape de "no existe" para no
+      // filtrar metadata del post).
+      const author = (post as any).user as { id: string; isPrivate: boolean };
+      if (author?.isPrivate && currentUserId !== author.id) {
+        if (!currentUserId) throw new NotFoundException('Post not found');
+        const follow = await this.prisma.follow.findUnique({
+          where: { followerId_followingId: { followerId: currentUserId, followingId: author.id } },
+          select: { id: true },
+        });
+        if (!follow) throw new NotFoundException('Post not found');
+      }
       const hasReacted =
         Array.isArray((post as any).reactions) && (post as any).reactions.length > 0;
       return {
@@ -886,6 +920,22 @@ export class CommunityService {
 
   /** Active stories for a single user (used when tapping a profile avatar). */
   async getUserStories(userId: string, currentUserId?: string) {
+    // Audit fix: bajo @Public, anonimos podian leer stories de cuentas
+    // privadas si conocian el userId. Ahora si el target es privado y el
+    // viewer no es dueno ni follower, devolvemos vacio (mismo shape).
+    const target = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { isPrivate: true },
+    });
+    if (target?.isPrivate && currentUserId !== userId) {
+      if (!currentUserId) return { user: null, stories: [], hasUnseen: false };
+      const follow = await this.prisma.follow.findUnique({
+        where: { followerId_followingId: { followerId: currentUserId, followingId: userId } },
+        select: { id: true },
+      });
+      if (!follow) return { user: null, stories: [], hasUnseen: false };
+    }
+
     const now = new Date();
     const rows = await this.prisma.story.findMany({
       where: { userId, scope: StoryScope.PERSONAL, expiresAt: { gt: now } },

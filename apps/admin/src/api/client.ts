@@ -1,4 +1,5 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
+import { closeRtSocket, refreshRtToken } from './rt-socket';
 
 const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1';
 
@@ -62,12 +63,20 @@ apiClient.interceptors.response.use(
       const { data } = await axios.post(`${BASE_URL}/auth/refresh`, { refreshToken: _refresh });
       const { accessToken, refreshToken } = data.data.tokens;
       tokenStore.set(accessToken, refreshToken);
+      // Audit fix: el socket /rt nunca se sincronizaba en el admin web tras
+      // un refresh — el socket se quedaba con el token viejo (expirado) y el
+      // server lo rechazaba en el siguiente reconnect, dejando al admin sin
+      // notificaciones realtime hasta que recargara la pagina manualmente.
+      refreshRtToken();
       _queue.forEach((q) => q.resolve(accessToken));
       _queue = [];
       original.headers.Authorization = `Bearer ${accessToken}`;
       return apiClient(original);
     } catch (e) {
       tokenStore.clear();
+      // Si el refresh falla del todo (sesion muerta), tambien cerramos el
+      // socket /rt para no dejar conexiones zombies.
+      closeRtSocket();
       _queue.forEach((q) => q.reject(e as Error));
       _queue = [];
       _onAuthFailed?.();

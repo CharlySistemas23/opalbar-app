@@ -231,26 +231,31 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    // ── Verificación de email obligatoria ──
+    // ── Verificación obligatoria (email O telefono) ──
     // Antes podías registrarte, NO confirmar el código y aun así entrar
-    // con email + password. Bloquea esa puerta y reenvia un OTP nuevo
-    // para que el cliente rutee a la pantalla de verificación sin que
-    // el usuario tenga que pedirlo a mano.
-    if (!user.isVerified && user.email) {
-      await logAttempt(false, 'EMAIL_NOT_VERIFIED');
+    // con email + password. El check anterior solo bloqueaba si el user
+    // tenia email — los registrados con phone bypassean. Ahora se aplica
+    // a ambos canales: email → reenvia OTP email, phone → SMS.
+    if (!user.isVerified) {
+      await logAttempt(false, 'NOT_VERIFIED');
+      const channel: 'email' | 'phone' = user.email ? 'email' : 'phone';
+      const identifier = user.email ?? user.phone;
+      if (!identifier) {
+        // No tiene ni email ni phone — caso raro (cuenta corrupta). Bloquear.
+        throw new UnauthorizedException('Account requires verification but no contact channel');
+      }
       try {
         await this.otpService.sendOtp({
-          email: user.email,
-          type: OtpType.EMAIL_VERIFICATION,
+          ...(channel === 'email' ? { email: user.email! } : { phone: user.phone! }),
+          type: channel === 'email' ? OtpType.EMAIL_VERIFICATION : OtpType.PHONE_VERIFICATION,
         });
       } catch (err: unknown) {
-        // No bloqueamos el flujo si Resend/SMTP falla — el front ofrece "reenviar"
         const msg = err instanceof Error ? err.message : String(err);
-        this.logger.warn(`Failed to auto-resend verification OTP to ${user.email}: ${msg}`);
+        this.logger.warn(`Failed to auto-resend verification OTP to ${identifier}: ${msg}`);
       }
       return {
         requiresEmailVerification: true,
-        identifier: user.email,
+        identifier,
         expiresIn: 600,
       } as TwoFactorChallenge;
     }

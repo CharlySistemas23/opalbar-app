@@ -95,7 +95,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
       const count = (this.online.get(userId) ?? 0) + 1;
       this.online.set(userId, count);
       if (count === 1) {
-        this.server.emit('presence:online', { userId, at: new Date().toISOString() });
+        await this.broadcastPresence('presence:online', userId);
       }
 
       socket.emit('rt:ready', { userId, role });
@@ -113,9 +113,48 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     const count = (this.online.get(userId) ?? 1) - 1;
     if (count <= 0) {
       this.online.delete(userId);
-      this.server.emit('presence:offline', { userId, at: new Date().toISOString() });
+      // fire-and-forget; broadcast helper resolve los followers/friends del user
+      this.broadcastPresence('presence:offline', userId).catch(() => {});
     } else {
       this.online.set(userId, count);
+    }
+  }
+
+  // Audit fix: antes `this.server.emit('presence:online', ...)` se mandaba a
+  // TODOS los sockets conectados, leakeando online/offline de cuentas
+  // privadas/bloqueadas. Ahora lo emitimos solo a (1) staff (para dashboard
+  // moderacion) y (2) los followers + amigos del user, que son quienes en una
+  // app social estandar deberian ver presencia.
+  private async broadcastPresence(event: 'presence:online' | 'presence:offline', userId: string) {
+    const payload = { userId, at: new Date().toISOString() };
+    // Staff siempre puede ver presencia para herramientas internas.
+    this.server.to('staff').emit(event, payload);
+    try {
+      const [followers, friendships] = await Promise.all([
+        this.prisma.follow.findMany({
+          where: { followingId: userId },
+          select: { followerId: true },
+        }),
+        this.prisma.friendship.findMany({
+          where: {
+            status: 'ACCEPTED',
+            OR: [{ requesterId: userId }, { addresseeId: userId }],
+          },
+          select: { requesterId: true, addresseeId: true },
+        }),
+      ]);
+      const targets = new Set<string>();
+      for (const f of followers) targets.add(f.followerId);
+      for (const f of friendships) {
+        targets.add(f.requesterId === userId ? f.addresseeId : f.requesterId);
+      }
+      // El propio user tambien recibe (sus otros dispositivos sincronizan estado)
+      targets.add(userId);
+      for (const uid of targets) {
+        this.server.to(`user:${uid}`).emit(event, payload);
+      }
+    } catch (err) {
+      this.logger.warn(`broadcastPresence failed for ${userId}: ${(err as Error).message}`);
     }
   }
 
