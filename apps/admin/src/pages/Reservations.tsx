@@ -4,7 +4,7 @@ import { Calendar, Check, X, ChevronLeft, ChevronRight, Plus, Search } from 'luc
 import { adminApi, venuesApi, apiError } from '@/api/client';
 import {
   PageHeader, EmptyState, SkeletonRows, StatusPill, InlineError,
-  Modal, Field, useDebounced,
+  Modal, Field, useDebounced, ConfirmDialog,
 } from '@/components/ui';
 
 const STATUSES = ['', 'PENDING', 'CONFIRMED', 'SEATED', 'COMPLETED', 'CANCELLED', 'NO_SHOW'];
@@ -21,6 +21,7 @@ export function Reservations() {
     userId: string; userLabel: string; userSearch: string;
     venueId: string; date: string; timeSlot: string; partySize: string; notes: string;
   } | null>(null);
+  const [pendingTransition, setPendingTransition] = useState<{ id: string; status: string; label: string; destructive: boolean } | null>(null);
   const qc = useQueryClient();
 
   const { data, isLoading } = useQuery({
@@ -132,14 +133,14 @@ export function Reservations() {
                       <>
                         <button
                           type="button"
-                          onClick={() => update.mutate({ id: r.id, status: 'CONFIRMED' })}
+                          onClick={() => setPendingTransition({ id: r.id, status: 'CONFIRMED', label: 'Confirmar reserva', destructive: false })}
                           className="text-success text-xs font-bold hover:underline inline-flex items-center gap-1 mr-3"
                         >
                           <Check size={12} /> Confirmar
                         </button>
                         <button
                           type="button"
-                          onClick={() => update.mutate({ id: r.id, status: 'CANCELLED' })}
+                          onClick={() => setPendingTransition({ id: r.id, status: 'CANCELLED', label: 'Rechazar reserva', destructive: true })}
                           className="text-danger text-xs font-bold hover:underline inline-flex items-center gap-1"
                         >
                           <X size={12} /> Rechazar
@@ -149,7 +150,7 @@ export function Reservations() {
                     {r.status === 'CONFIRMED' && (
                       <button
                         type="button"
-                        onClick={() => update.mutate({ id: r.id, status: 'SEATED' })}
+                        onClick={() => setPendingTransition({ id: r.id, status: 'SEATED', label: 'Marcar como sentado', destructive: false })}
                         className="text-accent text-xs font-bold hover:underline"
                       >
                         Marcar sentado
@@ -158,7 +159,7 @@ export function Reservations() {
                     {r.status === 'SEATED' && (
                       <button
                         type="button"
-                        onClick={() => update.mutate({ id: r.id, status: 'COMPLETED' })}
+                        onClick={() => setPendingTransition({ id: r.id, status: 'COMPLETED', label: 'Completar reserva', destructive: false })}
                         className="text-accent text-xs font-bold hover:underline"
                       >
                         Completar
@@ -194,6 +195,18 @@ export function Reservations() {
           />
         )}
       </Modal>
+
+      <ConfirmDialog
+        open={!!pendingTransition}
+        title={pendingTransition?.label ?? ''}
+        message="El cliente recibirá una notificación push con este cambio."
+        destructive={pendingTransition?.destructive}
+        confirmLabel={pendingTransition?.destructive ? 'Cancelar reserva' : 'Confirmar'}
+        onConfirm={() => {
+          if (pendingTransition) update.mutate({ id: pendingTransition.id, status: pendingTransition.status });
+        }}
+        onClose={() => setPendingTransition(null)}
+      />
     </div>
   );
 }

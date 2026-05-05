@@ -18,6 +18,9 @@ export function Users() {
   const [createdResult, setCreatedResult] = useState<{ email: string; tempPassword: string } | null>(null);
   const [resetTarget, setResetTarget] = useState<{ id: string; email: string } | null>(null);
   const [resetResult, setResetResult] = useState<{ email: string; tempPassword: string } | null>(null);
+  const [banTarget, setBanTarget] = useState<{ id: string; label: string } | null>(null);
+  const [banReason, setBanReason] = useState('');
+  const [unbanTarget, setUnbanTarget] = useState<{ id: string; label: string } | null>(null);
   const qc = useQueryClient();
   const { user: me } = useAuthStore();
   const isSuper = me?.role === 'SUPER_ADMIN';
@@ -184,7 +187,7 @@ export function Users() {
                       {u.status === 'BANNED' ? (
                         <button
                           type="button"
-                          onClick={() => unban.mutate(u.id)}
+                          onClick={() => setUnbanTarget({ id: u.id, label: u.email ?? u.phone ?? u.id })}
                           disabled={unban.isPending}
                           className="text-xs text-success font-bold hover:underline flex items-center gap-1"
                         >
@@ -194,8 +197,8 @@ export function Users() {
                         <button
                           type="button"
                           onClick={() => {
-                            const reason = prompt('Motivo del ban:');
-                            if (reason) ban.mutate({ id: u.id, reason });
+                            setBanReason('');
+                            setBanTarget({ id: u.id, label: u.email ?? u.phone ?? u.id });
                           }}
                           disabled={ban.isPending}
                           className="text-xs text-danger font-bold hover:underline flex items-center gap-1"
@@ -285,6 +288,45 @@ export function Users() {
         destructive
         confirmLabel="Resetear contraseña"
         onConfirm={() => resetTarget && resetPwd.mutate(resetTarget.id)}
+      />
+
+      {/* Banear usuario (audit fix: replaces native prompt() that silent-failed in iframes) */}
+      <Modal open={!!banTarget} onClose={() => setBanTarget(null)} title={`Banear a ${banTarget?.label ?? ''}`} size="sm">
+        <div className="space-y-3">
+          <Field
+            label="Motivo del ban"
+            value={banReason}
+            onChange={setBanReason}
+            placeholder="Spam, abuso, etc."
+            rows={3}
+          />
+          <div className="flex gap-2 pt-2">
+            <button type="button" onClick={() => setBanTarget(null)} className="btn-ghost flex-1">Cancelar</button>
+            <button
+              type="button"
+              disabled={!banReason.trim() || ban.isPending}
+              onClick={() => {
+                if (banTarget && banReason.trim()) {
+                  ban.mutate({ id: banTarget.id, reason: banReason.trim() });
+                  setBanTarget(null);
+                }
+              }}
+              className="btn-danger flex-1"
+            >
+              Banear
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Confirmar desbaneo */}
+      <ConfirmDialog
+        open={!!unbanTarget}
+        onClose={() => setUnbanTarget(null)}
+        title={`¿Desbanear a ${unbanTarget?.label ?? ''}?`}
+        message="El usuario podrá volver a iniciar sesión y usar la app normalmente."
+        confirmLabel="Desbanear"
+        onConfirm={() => unbanTarget && unban.mutate(unbanTarget.id)}
       />
 
       {/* Resultado: contraseña reseteada */}

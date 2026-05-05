@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bell, Send, History } from 'lucide-react';
 import { adminApi, apiError } from '@/api/client';
-import { PageHeader, Field, InlineError, Segmented, EmptyState, SkeletonRows, StatusPill } from '@/components/ui';
+import { PageHeader, Field, InlineError, Segmented, EmptyState, SkeletonRows, StatusPill, ConfirmDialog } from '@/components/ui';
 
 const AUDIENCES = [
   { value: 'ALL', label: 'Todos los usuarios' },
@@ -15,6 +15,7 @@ export function PushBroadcast() {
   const [body, setBody] = useState('');
   const [audience, setAudience] = useState<'ALL' | 'ADMINS'>('ALL');
   const [result, setResult] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
 
   const history = useQuery({
     queryKey: ['admin', 'broadcasts'],
@@ -73,10 +74,22 @@ export function PushBroadcast() {
           <InlineError message={send.isError ? result : null} />
 
           <div className="flex gap-3 pt-2">
-            <button type="button" onClick={() => send.mutate()} disabled={!canSend} className="btn-primary">
+            <button type="button" onClick={() => setConfirming(true)} disabled={!canSend} className="btn-primary">
               <Send size={14} /> {send.isPending ? 'Enviando…' : 'Enviar ahora'}
             </button>
           </div>
+
+          <ConfirmDialog
+            open={confirming}
+            destructive
+            title={audience === 'ALL' ? '¿Enviar a TODOS los usuarios?' : '¿Enviar al staff?'}
+            message={audience === 'ALL'
+              ? 'Este push se entregará a toda la base de usuarios activos. No se puede deshacer.'
+              : 'Este push se entregará a moderadores, admins y super admins.'}
+            confirmLabel="Enviar"
+            onConfirm={() => send.mutate()}
+            onClose={() => setConfirming(false)}
+          />
 
           {send.isSuccess && result && (
             <div className="p-3 rounded-xl bg-success/10 border border-success/30 text-success text-sm animate-fade-in">
