@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { NotificationType, WalletTransactionType, WalletReferenceType } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { paginate, getPaginationOffset, PaginationDto } from '../../common/dto/pagination.dto';
@@ -92,28 +92,31 @@ export class WalletService {
   }
 
   async deductPoints(userId: string, points: number, description: string, referenceId?: string) {
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user) throw new NotFoundException('User not found');
+    if (points <= 0) throw new BadRequestException('Points to deduct must be positive');
 
-    const newBalance = Math.max(0, user.points - points);
-
-    return this.prisma.$transaction([
-      this.prisma.walletTransaction.create({
+    // Atomic deduct — fails with P2025 if balance < points (no negative balance).
+    // Audit fix: previously read-then-write outside transaction allowed concurrent
+    // redemptions to drive balance negative.
+    return this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.update({
+        where: { id: userId, points: { gte: points } } as any,
+        data: { points: { decrement: points } },
+        select: { points: true },
+      }).catch(() => {
+        throw new BadRequestException('Insufficient points');
+      });
+      return tx.walletTransaction.create({
         data: {
           userId,
           type: WalletTransactionType.REDEEM,
           points: -points,
-          balance: newBalance,
+          balance: user.points,
           description,
           referenceId,
           referenceType: WalletReferenceType.OFFER_REDEMPTION,
         },
-      }),
-      this.prisma.user.update({
-        where: { id: userId },
-        data: { points: { decrement: points } },
-      }),
-    ]);
+      });
+    });
   }
 
   private async updateLoyaltyLevel(userId: string, points: number) {

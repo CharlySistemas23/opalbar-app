@@ -13,6 +13,18 @@ function isSameDay(a: Date, b: Date): boolean {
       && a.getDate() === b.getDate();
 }
 
+// Allowed reservation status transitions. Terminal states (COMPLETED, CANCELLED,
+// NO_SHOW) cannot transition further — prevents resurrecting a closed reservation
+// from admin UI which would corrupt event capacity counters and audit logs.
+const RESERVATION_TRANSITIONS: Record<ReservationStatus, ReservationStatus[]> = {
+  PENDING: [ReservationStatus.CONFIRMED, ReservationStatus.CANCELLED],
+  CONFIRMED: [ReservationStatus.SEATED, ReservationStatus.CANCELLED, ReservationStatus.NO_SHOW],
+  SEATED: [ReservationStatus.COMPLETED],
+  COMPLETED: [],
+  CANCELLED: [],
+  NO_SHOW: [],
+};
+
 @Injectable()
 export class ReservationsService {
   constructor(
@@ -250,21 +262,45 @@ export class ReservationsService {
     const reservation = await this.prisma.reservation.findUnique({ where: { id } });
     if (!reservation) throw new NotFoundException('Reservation not found');
 
+    // Validate transition is allowed (audit fix: previously any->any was accepted).
+    const allowed = RESERVATION_TRANSITIONS[reservation.status] ?? [];
+    if (reservation.status !== dto.status && !allowed.includes(dto.status)) {
+      throw new BadRequestException(
+        `Cannot transition reservation from ${reservation.status} to ${dto.status}`,
+      );
+    }
+
     const timestamps: any = {};
     if (dto.status === ReservationStatus.CONFIRMED) timestamps.confirmedAt = new Date();
     if (dto.status === ReservationStatus.SEATED) timestamps.seatedAt = new Date();
     if (dto.status === ReservationStatus.COMPLETED) timestamps.completedAt = new Date();
     if (dto.status === ReservationStatus.CANCELLED) timestamps.cancelledAt = new Date();
 
-    const updated = await this.prisma.reservation.update({
-      where: { id },
-      data: {
-        status: dto.status,
-        ...(dto.internalNotes !== undefined && { internalNotes: dto.internalNotes }),
-        ...(dto.cancelReason && { cancelReason: dto.cancelReason }),
-        ...timestamps,
-      },
-      include: { venue: { select: { name: true } } },
+    // Free event capacity when going to a terminal non-attended state.
+    const releasesCapacity =
+      reservation.eventId &&
+      (dto.status === ReservationStatus.CANCELLED || dto.status === ReservationStatus.NO_SHOW) &&
+      reservation.status !== ReservationStatus.CANCELLED &&
+      reservation.status !== ReservationStatus.NO_SHOW;
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const r = await tx.reservation.update({
+        where: { id },
+        data: {
+          status: dto.status,
+          ...(dto.internalNotes !== undefined && { internalNotes: dto.internalNotes }),
+          ...(dto.cancelReason && { cancelReason: dto.cancelReason }),
+          ...timestamps,
+        },
+        include: { venue: { select: { name: true } } },
+      });
+      if (releasesCapacity && reservation.eventId) {
+        await tx.event.update({
+          where: { id: reservation.eventId },
+          data: { currentCapacity: { decrement: reservation.partySize } },
+        });
+      }
+      return r;
     });
     this.realtime.toUserAndStaff(reservation.userId, 'reservation', 'status_changed', { id, data: { status: dto.status } });
 

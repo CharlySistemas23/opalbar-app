@@ -230,20 +230,13 @@ export class OffersService {
       throw new ConflictException('You have already redeemed this offer the maximum number of times');
     }
 
-    // Points check
-    if (offer.pointsRequired > 0) {
-      const user = await this.prisma.user.findUnique({ where: { id: userId } });
-      if (!user || user.points < offer.pointsRequired) {
-        throw new BadRequestException(`Insufficient points. Required: ${offer.pointsRequired}`);
-      }
-    }
-
-    // Redeem in transaction
-    const [redemption] = await this.prisma.$transaction([
-      this.prisma.offerRedemption.create({
+    // Redeem atomically — points check happens inside the user.update guard
+    // so two concurrent redemptions can't both pass and overspend.
+    const redemption = await this.prisma.$transaction(async (tx) => {
+      const r = await tx.offerRedemption.create({
         data: { userId, offerId, expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000) },
-      }),
-      this.prisma.offer.update({
+      });
+      await tx.offer.update({
         where: { id: offerId },
         data: {
           currentRedemptions: { increment: 1 },
@@ -251,28 +244,29 @@ export class OffersService {
             status: OfferStatus.DEPLETED,
           }),
         },
-      }),
-      // Deduct points if required
-      ...(offer.pointsRequired > 0
-        ? [
-            this.prisma.user.update({
-              where: { id: userId },
-              data: { points: { decrement: offer.pointsRequired } },
-            }),
-            this.prisma.walletTransaction.create({
-              data: {
-                userId,
-                type: 'REDEEM',
-                points: -offer.pointsRequired,
-                balance: 0, // will be updated by wallet service
-                description: `Canje de oferta: ${offer.title}`,
-                referenceId: offerId,
-                referenceType: 'OFFER_REDEMPTION',
-              },
-            }),
-          ]
-        : []),
-    ]);
+      });
+      if (offer.pointsRequired > 0) {
+        const updated = await tx.user.update({
+          where: { id: userId, points: { gte: offer.pointsRequired } } as any,
+          data: { points: { decrement: offer.pointsRequired } },
+          select: { points: true },
+        }).catch(() => {
+          throw new BadRequestException(`Insufficient points. Required: ${offer.pointsRequired}`);
+        });
+        await tx.walletTransaction.create({
+          data: {
+            userId,
+            type: 'REDEEM',
+            points: -offer.pointsRequired,
+            balance: updated.points, // real post-decrement balance
+            description: `Canje de oferta: ${offer.title}`,
+            referenceId: offerId,
+            referenceType: 'OFFER_REDEMPTION',
+          },
+        });
+      }
+      return r;
+    });
 
     await this.invalidate();
     this.realtime.toUserAndStaff(userId, 'offer', 'updated', { id: offerId, data: { redeemed: true, redemptionId: redemption.id } });
