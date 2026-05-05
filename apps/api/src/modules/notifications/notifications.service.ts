@@ -108,24 +108,23 @@ export class NotificationsService {
     const window = input.windowMs ?? 24 * 60 * 60 * 1000;
     const since = new Date(Date.now() - window);
 
-    // Find an unread, recent notification with the same aggregation key
+    // Find an unread, recent notification with the SAME aggregation key.
+    // Audit fix: previously orderBy createdAt desc + post-match meant that
+    // when 2+ posts had unread aggregations, the query picked the most recent
+    // unrelated one and matchesKey failed → new notification created instead
+    // of merging. Now we filter by aggregationKey JSON path directly.
     const existing = await this.prisma.notification.findFirst({
       where: {
         userId: input.userId,
         type: input.type,
         read: false,
         createdAt: { gte: since },
+        data: { path: ['aggregationKey'], equals: input.aggregationKey } as any,
       },
       orderBy: { createdAt: 'desc' },
     });
 
-    const matchesKey =
-      existing &&
-      typeof existing.data === 'object' &&
-      existing.data !== null &&
-      (existing.data as any).aggregationKey === input.aggregationKey;
-
-    if (existing && matchesKey) {
+    if (existing) {
       const prev = (existing.data as any) ?? {};
       const actors: Array<{ id: string; name?: string; avatarUrl?: string }> = Array.isArray(prev.actors)
         ? prev.actors
@@ -307,9 +306,14 @@ export class NotificationsService {
     },
     'eventReminders' | 'newEvents' | 'newOffers' | 'communityReplies' | 'communityReactions' | 'pointsUpdates'
   > | null {
+    // Audit fix: VENUE_STORY_NEW was missing → broadcast bypassed the user's
+    // newEvents toggle. LOYALTY_LEVEL_UP did not exist in the enum (correct
+    // value is LEVEL_UP), so the pointsUpdates toggle never applied to that
+    // type. Both fixed below.
     const map: Record<string, any> = {
       EVENT_NEW: 'newEvents',
       EVENT_REMINDER: 'eventReminders',
+      VENUE_STORY_NEW: 'newEvents',
       OFFER_NEW: 'newOffers',
       OFFER_EXPIRING: 'newOffers',
       COMMUNITY_COMMENT: 'communityReplies',
@@ -317,7 +321,7 @@ export class NotificationsService {
       POST_LIKE: 'communityReactions',
       POST_REACTION: 'communityReactions',
       POINTS_EARNED: 'pointsUpdates',
-      LOYALTY_LEVEL_UP: 'pointsUpdates',
+      LEVEL_UP: 'pointsUpdates',
     };
     return map[type] ?? null;
   }
