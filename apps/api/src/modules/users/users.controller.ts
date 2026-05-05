@@ -2,7 +2,6 @@ import { BadRequestException, Body, Controller, Delete, Get, HttpCode, HttpStatu
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { DmPolicy, User } from '@prisma/client';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { Public } from '../../common/decorators/public.decorator';
 import { UsersService } from './users.service';
 import { UpdateProfileDto, UpdateInterestsDto } from './dto/update-profile.dto';
 
@@ -69,8 +68,7 @@ export class UsersController {
   // ── SEARCH / DIRECTORY ────────────────────────
 
   @Get('search')
-  @Public()
-  @ApiOperation({ summary: 'Search users by name/handle' })
+  @ApiOperation({ summary: 'Search users by name/handle (auth required, anti-scraping)' })
   search(@Query('q') q: string, @Query('limit') limit?: string) {
     return this.usersService.search(q || '', parseInt(limit || '20', 10));
   }
@@ -120,9 +118,10 @@ export class UsersController {
 
   // ── PUBLIC PROFILE ────────────────────────────
 
+  // Audit fix: removed @Public to prevent anonymous user enumeration.
+  // Privacy gating in service still hides fields based on viewer relationship.
   @Get(':id')
-  @Public()
-  @ApiOperation({ summary: 'Get public profile of any user' })
+  @ApiOperation({ summary: 'Get profile of any user (auth required, respects isPrivate)' })
   getUser(@Param('id') id: string, @CurrentUser() me?: User) {
     return this.usersService.getPublicProfile(id, me?.id);
   }

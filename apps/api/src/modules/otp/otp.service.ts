@@ -144,15 +144,27 @@ export class OtpService {
 
     if (isEmail) {
       const otpKey = RedisService.otpKey(dto.identifier, dto.type);
+      const attemptsKey = RedisService.otpAttemptsKey(dto.identifier, dto.type);
+      const maxAttempts = this.config.get<number>('otp.maxAttempts', 5);
 
       // Try Redis first (fast path)
       const cached = await this.redis.getJson<{ code: string; expiresAt: string }>(otpKey);
       if (cached) {
         if (new Date(cached.expiresAt) < new Date()) {
           await this.redis.del(otpKey);
+          await this.redis.del(attemptsKey);
           throw new BadRequestException('OTP has expired. Please request a new code.');
         }
         if (cached.code !== dto.code) {
+          const attempts = await this.redis.incr(attemptsKey);
+          if (attempts === 1) {
+            // First failure — bind counter TTL to OTP TTL
+            await this.redis.expire(attemptsKey, this.config.get<number>('otp.expiresMinutes', 10) * 60);
+          }
+          if (attempts >= maxAttempts) {
+            await this.redis.del(otpKey);
+            throw new TooManyRequestsException('Too many failed attempts. Please request a new code.');
+          }
           throw new BadRequestException('Invalid OTP code');
         }
         await this.redis.del(otpKey);
@@ -239,9 +251,9 @@ export class OtpService {
 
     try {
       await this.dispatchEmail({ to: email, subject, html, text, refIdPrefix: 'otp' });
-      this.logger.log(`[OTP] Sent to ${email}`);
+      this.logger.log(`[OTP] Sent to ${this.maskEmail(email)}`);
     } catch (error: any) {
-      this.logger.error(`[OTP] Failed to send to ${email}: ${error?.message ?? error}`);
+      this.logger.error(`[OTP] Failed to send to ${this.maskEmail(email)}: ${error?.message ?? error}`);
       if (process.env.NODE_ENV !== 'production') {
         this.logger.warn(`[DEV] Fallback — OTP for ${email}: ${code}`);
       }
@@ -363,10 +375,10 @@ export class OtpService {
           channel: 'sms',
           locale,
         });
-      this.logger.log(`[Verify] SMS OTP sent to ${phone} (type: ${type})`);
+      this.logger.log(`[Verify] SMS OTP sent to ${this.maskPhone(phone)} (type: ${type})`);
     } catch (error: any) {
       this.logger.error(
-        `[Verify] Failed to send SMS OTP to ${phone}: ${error?.message ?? error}`,
+        `[Verify] Failed to send SMS OTP to ${this.maskPhone(phone)}: ${error?.message ?? error}`,
       );
       throw new BadRequestException(
         error?.message || 'No se pudo enviar el código SMS. Intenta de nuevo.',

@@ -75,4 +75,6 @@ apps/mobile/.expo/
 
 # Logs
 *.log
-apps/admin/tsconfig.tsbuildinfo
+
+# TypeScript incremental build info
+*.tsbuildinfo

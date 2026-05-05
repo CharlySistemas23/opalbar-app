@@ -152,7 +152,7 @@ export class AuthService {
       return newUser;
     });
 
-    this.logger.log(`New user registered: ${user.id} (${dto.email})`);
+    this.logger.log(`New user registered: ${user.id}`);
 
     // Auto-send EMAIL_VERIFICATION OTP so the user lands on the verify screen
     let expiresIn = 600;

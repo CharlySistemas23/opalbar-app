@@ -25,12 +25,10 @@ export default () => ({
   jwt: {
     accessSecret: process.env.JWT_ACCESS_SECRET,
     refreshSecret: process.env.JWT_REFRESH_SECRET,
-    // Long TTLs: revocation is enforced via Redis blocklist on logout, so short
-    // access tokens add no real security here — only friction. The user shouldn't
-    // see "sesion expirada" mid-session because of a 15-min token expiring
-    // during a slow request.
-    accessExpiresIn: process.env.JWT_ACCESS_EXPIRES_IN || '4h',
-    refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '90d',
+    // 1h access / 30d refresh: refresh rotation + Redis blocklist handle revocation.
+    // Audit 2026-05-05 reduced from 4h/90d (token-theft window minimization).
+    accessExpiresIn: process.env.JWT_ACCESS_EXPIRES_IN || '1h',
+    refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '30d',
   },
 
   otp: {
@@ -101,8 +99,8 @@ export default () => ({
   },
 
   admin: {
-    email: process.env.ADMIN_EMAIL || 'carlosalonsog966@gmail.com',
-    password: process.env.ADMIN_PASSWORD || 'Admin@123456',
+    email: process.env.ADMIN_EMAIL,
+    password: process.env.ADMIN_PASSWORD,
   },
 
   gdpr: {

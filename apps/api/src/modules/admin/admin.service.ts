@@ -992,7 +992,10 @@ export class AdminService {
   }
 
   private signExportToken(requestId: string, expiresAtMs: number): string {
-    const secret = this.config.get<string>('jwt.accessSecret') ?? process.env['JWT_ACCESS_SECRET'] ?? 'dev-secret';
+    const secret = this.config.get<string>('jwt.accessSecret');
+    if (!secret) {
+      throw new Error('JWT_ACCESS_SECRET is not configured');
+    }
     return crypto
       .createHmac('sha256', secret)
       .update(`gdpr-export:${requestId}:${expiresAtMs}`)

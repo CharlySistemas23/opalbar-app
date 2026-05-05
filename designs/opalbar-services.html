@@ -1,0 +1,854 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#0a0014" />
+<title>OPAL BAR — Centro de control</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  :root {
+    --bg: #0a0014;
+    --bg-card: #14001f;
+    --bg-card-hover: #1a0033;
+    --border: rgba(255, 100, 220, 0.12);
+    --border-strong: rgba(255, 100, 220, 0.28);
+    --text: #fff;
+    --text-muted: #9b8aa8;
+    --neon-pink: #ff00cc;
+    --neon-cyan: #66eeff;
+    --neon-gold: #ffd966;
+    --neon-purple: #aa44ff;
+    --green: #4ade80;
+    --red: #f87171;
+    --amber: #fbbf24;
+  }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    background:
+      radial-gradient(ellipse 800px 500px at 80% 0%, rgba(255, 0, 200, 0.15) 0%, transparent 60%),
+      radial-gradient(ellipse 600px 400px at 0% 30%, rgba(0, 200, 255, 0.10) 0%, transparent 65%),
+      radial-gradient(ellipse 700px 500px at 50% 100%, rgba(170, 0, 255, 0.10) 0%, transparent 70%),
+      var(--bg);
+    min-height: 100vh;
+    background-attachment: fixed;
+  }
+
+  /* ── Header ─────────────────────── */
+  header {
+    padding: 40px 24px 32px;
+    text-align: center;
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    background: rgba(10, 0, 20, 0.85);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    z-index: 10;
+  }
+  .brand {
+    font-size: 32px;
+    font-weight: 900;
+    letter-spacing: 4px;
+    margin: 0 0 4px;
+    background: linear-gradient(90deg, #ff00cc 0%, #ff66ee 25%, #ffe066 55%, #66eeff 85%, #aa44ff 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    filter: drop-shadow(0 0 20px rgba(255, 0, 170, 0.4));
+  }
+  .subtitle {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 13px;
+    letter-spacing: 0.5px;
+  }
+  .legend {
+    display: flex;
+    justify-content: center;
+    gap: 14px;
+    margin-top: 14px;
+    font-size: 11px;
+    color: var(--text-muted);
+    flex-wrap: wrap;
+  }
+  .legend-item { display: inline-flex; align-items: center; gap: 6px; }
+  .legend-dot { width: 8px; height: 8px; border-radius: 50%; }
+  .dot-live { background: var(--green); box-shadow: 0 0 8px var(--green); }
+  .dot-paid { background: var(--neon-gold); box-shadow: 0 0 8px var(--neon-gold); }
+  .dot-pending { background: var(--amber); box-shadow: 0 0 8px var(--amber); }
+  .dot-missing { background: var(--red); box-shadow: 0 0 8px var(--red); }
+
+  /* ── Search ─────────────────────── */
+  .search-wrap {
+    max-width: 1200px;
+    margin: 24px auto 0;
+    padding: 0 24px;
+  }
+  .search {
+    width: 100%;
+    height: 48px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 0 20px 0 48px;
+    color: var(--text);
+    font-size: 15px;
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%239b8aa8' stroke-width='2'><circle cx='11' cy='11' r='8'/><path d='m21 21-4.35-4.35'/></svg>");
+    background-repeat: no-repeat;
+    background-position: 18px center;
+  }
+  .search:focus {
+    border-color: var(--neon-pink);
+    box-shadow: 0 0 0 3px rgba(255, 0, 200, 0.15);
+  }
+
+  /* ── Layout ─────────────────────── */
+  main {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 32px 24px 80px;
+  }
+  section {
+    margin-bottom: 40px;
+  }
+  .section-title {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 16px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .section-title h2 {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 2.5px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+  .section-emoji { font-size: 18px; margin-right: 6px; }
+  .section-count {
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 500;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 12px;
+  }
+
+  /* ── Card ─────────────────────── */
+  .card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 16px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    text-decoration: none;
+    color: inherit;
+    transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+    position: relative;
+    overflow: hidden;
+  }
+  .card:hover {
+    transform: translateY(-2px);
+    border-color: var(--border-strong);
+    background: var(--bg-card-hover);
+    box-shadow: 0 8px 24px rgba(255, 0, 200, 0.08);
+  }
+  .card:active { transform: translateY(0); }
+  .card-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .card-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    display: grid;
+    place-items: center;
+    font-size: 18px;
+    background: rgba(255, 100, 220, 0.08);
+    flex-shrink: 0;
+  }
+  .card-name {
+    font-size: 14px;
+    font-weight: 700;
+    margin: 0;
+    line-height: 1.2;
+  }
+  .card-status {
+    margin-left: auto;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .card-desc {
+    color: var(--text-muted);
+    font-size: 12px;
+    margin: 0;
+    line-height: 1.4;
+  }
+  .card-meta {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-top: 4px;
+  }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+  }
+  .badge.green { color: var(--green); border-color: rgba(74, 222, 128, 0.25); background: rgba(74, 222, 128, 0.08); }
+  .badge.gold { color: var(--neon-gold); border-color: rgba(255, 217, 102, 0.25); background: rgba(255, 217, 102, 0.08); }
+  .badge.amber { color: var(--amber); border-color: rgba(251, 191, 36, 0.25); background: rgba(251, 191, 36, 0.08); }
+  .badge.red { color: var(--red); border-color: rgba(248, 113, 113, 0.25); background: rgba(248, 113, 113, 0.08); }
+  .badge.cyan { color: var(--neon-cyan); border-color: rgba(102, 238, 255, 0.25); background: rgba(102, 238, 255, 0.08); }
+  .badge.purple { color: var(--neon-purple); border-color: rgba(170, 68, 255, 0.25); background: rgba(170, 68, 255, 0.08); }
+  .external-icon {
+    color: var(--text-muted);
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+  .card:hover .external-icon { opacity: 1; }
+
+  /* ── Footer ─────────────────────── */
+  footer {
+    text-align: center;
+    padding: 24px;
+    color: var(--text-muted);
+    font-size: 11px;
+    border-top: 1px solid var(--border);
+  }
+  footer a { color: var(--neon-cyan); text-decoration: none; }
+  .cost-box {
+    max-width: 600px;
+    margin: 32px auto 16px;
+    padding: 20px 24px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-strong);
+    border-radius: 16px;
+  }
+  .cost-box h3 {
+    margin: 0 0 12px;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--neon-gold);
+  }
+  .cost-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+    font-size: 13px;
+    border-bottom: 1px dashed var(--border);
+  }
+  .cost-row:last-child { border-bottom: none; }
+  .cost-row strong { color: var(--text); }
+  .cost-row span { color: var(--text-muted); }
+
+  /* ── Responsive ─────────────────────── */
+  @media (max-width: 600px) {
+    header { padding: 32px 16px 24px; }
+    .brand { font-size: 24px; letter-spacing: 3px; }
+    main { padding: 24px 16px 60px; }
+    .grid { grid-template-columns: 1fr; }
+    .search-wrap { padding: 0 16px; }
+  }
+
+  /* ── Hidden state when filtering ─── */
+  .hidden { display: none !important; }
+  .empty-msg {
+    text-align: center;
+    color: var(--text-muted);
+    padding: 40px;
+    font-size: 14px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1 class="brand">OPAL BAR</h1>
+  <p class="subtitle">Centro de control · Todos tus servicios en un solo lugar</p>
+  <div class="legend">
+    <span class="legend-item"><span class="legend-dot dot-live"></span>Activo</span>
+    <span class="legend-item"><span class="legend-dot dot-paid"></span>De pago</span>
+    <span class="legend-item"><span class="legend-dot dot-pending"></span>Pendiente</span>
+    <span class="legend-item"><span class="legend-dot dot-missing"></span>No contratado</span>
+  </div>
+</header>
+
+<div class="search-wrap">
+  <input type="text" id="search" class="search" placeholder="Buscar servicio (resend, railway, push, dominio…)" autocomplete="off" />
+</div>
+
+<main>
+
+<!-- ===== Stores ===== -->
+<section data-cat="stores">
+  <div class="section-title">
+    <h2><span class="section-emoji">📱</span>Stores · Distribución de la app</h2>
+    <span class="section-count">2 servicios</span>
+  </div>
+  <div class="grid">
+    <a href="https://play.google.com/console/u/0/developers" target="_blank" rel="noopener" class="card" data-search="play store google android console">
+      <div class="card-header">
+        <div class="card-icon">🤖</div>
+        <h3 class="card-name">Google Play Console</h3>
+        <span class="card-status dot-live"></span>
+      </div>
+      <p class="card-desc">Distribución Android · Closed Alpha en revisión</p>
+      <div class="card-meta">
+        <span class="badge gold">$25 USD único</span>
+        <span class="badge">pandacharlypc@gmail.com</span>
+      </div>
+    </a>
+    <a href="https://developer.apple.com/account" target="_blank" rel="noopener" class="card" data-search="apple developer ios iphone">
+      <div class="card-header">
+        <div class="card-icon">🍎</div>
+        <h3 class="card-name">Apple Developer</h3>
+        <span class="card-status dot-missing"></span>
+      </div>
+      <p class="card-desc">Distribución iOS · No contratado todavía</p>
+      <div class="card-meta">
+        <span class="badge red">$99 USD/año</span>
+      </div>
+    </a>
+  </div>
+</section>
+
+<!-- ===== Backend ===== -->
+<section data-cat="backend">
+  <div class="section-title">
+    <h2><span class="section-emoji">🚂</span>Backend · Servidor + base de datos + código</h2>
+    <span class="section-count">3 servicios</span>
+  </div>
+  <div class="grid">
+    <a href="https://railway.com/dashboard" target="_blank" rel="noopener" class="card" data-search="railway servidor api postgres database">
+      <div class="card-header">
+        <div class="card-icon">🚂</div>
+        <h3 class="card-name">Railway Dashboard</h3>
+        <span class="card-status dot-live"></span>
+      </div>
+      <p class="card-desc">Hosting de la API NestJS + base de datos PostgreSQL · Logs en tiempo real</p>
+      <div class="card-meta">
+        <span class="badge gold">~$5 USD/mes</span>
+        <span class="badge cyan">Plan Hobby</span>
+      </div>
+    </a>
+    <a href="https://github.com/CharlySistemas23/opalbar-app" target="_blank" rel="noopener" class="card" data-search="github codigo source repositorio git">
+      <div class="card-header">
+        <div class="card-icon">🐙</div>
+        <h3 class="card-name">GitHub Repo</h3>
+        <span class="card-status dot-live"></span>
+      </div>
+      <p class="card-desc">Código fuente · Commits · Cada push redeploya Railway automático</p>
+      <div class="card-meta">
+        <span class="badge green">Free</span>
+        <span class="badge">CharlySistemas23</span>
+      </div>
+    </a>
+    <a href="https://opalbar-app-production.up.railway.app/api/v1/health" target="_blank" rel="noopener" class="card" data-search="health api status check produccion live">
+      <div class="card-header">
+        <div class="card-icon">❤️</div>
+        <h3 class="card-name">API Health Check</h3>
+        <span class="card-status dot-live"></span>
+      </div>
+      <p class="card-desc">Verifica si la API está viva · Te debe devolver JSON con status: ok</p>
+      <div class="card-meta">
+        <span class="badge cyan">Producción</span>
+      </div>
+    </a>
+  </div>
+</section>
+
+<!-- ===== Email ===== -->
+<section data-cat="email">
+  <div class="section-title">
+    <h2><span class="section-emoji">📧</span>Email transaccional</h2>
+    <span class="section-count">4 servicios</span>
+  </div>
+  <div class="grid">
+    <a href="https://resend.com/emails" target="_blank" rel="noopener" class="card" data-search="resend email correo otp transaccional">
+      <div class="card-header">
+        <div class="card-icon">✉️</div>
+        <h3 class="card-name">Resend · Emails enviados</h3>
+        <span class="card-status dot-live"></span>
+      </div>
+      <p class="card-desc">Cada OTP, marketing y notificación enviada · Status delivered/bounced/spam</p>
+      <div class="card-meta">
+        <span class="badge green">Free 3000/mes</span>
+        <span class="badge cyan">noreply@opalbar.com.mx</span>
+      </div>
+    </a>
+    <a href="https://resend.com/domains" target="_blank" rel="noopener" class="card" data-search="resend dominio dominios verificacion dns">
+      <div class="card-header">
+        <div class="card-icon">🌐</div>
+        <h3 class="card-name">Resend · Dominios</h3>
+        <span class="card-status dot-live"></span>
+      </div>
+      <p class="card-desc">Estado de verificación de opalbar.com.mx · DNS records</p>
+      <div class="card-meta">
+        <span class="badge green">Verified</span>
+      </div>
+    </a>
+    <a href="https://resend.com/api-keys" target="_blank" rel="noopener" class="card" data-search="resend api keys tokens credenciales">
+      <div class="card-header">
+        <div class="card-icon">🔑</div>
+        <h3 class="card-name">Resend · API Keys</h3>
+        <span class="card-status dot-live"></span>
+      </div>
+      <p class="card-desc">Rotar tokens · Crear nuevas keys (sending vs full access)</p>
+      <div class="card-meta">
+        <span class="badge cyan">opalbar-app-production</span>
+      </div>
+    </a>
+    <a href="https://mail.google.com" target="_blank" rel="noopener" class="card" data-search="gmail correo personal admin reply">
+      <div class="card-header">
+        <div class="card-icon">📬</div>
+        <h3 class="card-name">Gmail · Cuenta principal</h3>
+        <span class="card-status dot-live"></span>
+      </div>
+      <p class="card-desc">Reply-to de todos los correos de OPAL · Respuestas de users llegan aquí</p>
+      <div class="card-meta">
+        <span class="badge">carlosalonsog966@gmail.com</span>
+      </div>
+    </a>
+  </div>
+</section>
+
+<!-- ===== Push ===== -->
+<section data-cat="push">
+  <div class="section-title">
+    <h2><span class="section-emoji">🔔</span>Push notifications</h2>
+    <span class="section-count">3 servicios</span>
+  </div>
+  <div class="grid">
+    <a href="https://console.firebase.google.com/project/opalbar-a0a5e" target="_blank" rel="noopener" class="card" data-search="firebase console fcm push notificaciones android">
+      <div class="card-header">
+        <div class="card-icon">🔥</div>
+        <h3 class="card-name">Firebase Console</h3>
+        <span class="card-status dot-live"></span>
+      </div>
+      <p class="card-desc">Proyecto FCM opalbar-a0a5e · Settings de la app Android</p>
+      <div class="card-meta">
+        <span class="badge green">Free Spark</span>
+        <span class="badge">pandacharlypc@gmail.com</span>
+      </div>
+    </a>
+    <a href="https://console.firebase.google.com/project/opalbar-a0a5e/notification" target="_blank" rel="noopener" class="card" data-search="firebase fcm cloud messaging push manual debug">
+      <div class="card-header">
+        <div class="card-icon">📲</div>
+        <h3 class="card-name">FCM · Cloud Messaging</h3>
+        <span class="card-status dot-live"></span>
+      </div>
+      <p class="card-desc">Enviar push manuales para debug · Test del token</p>
+      <div class="card-meta">
+        <span class="badge cyan">Debug only</span>
+      </div>
+    </a>
+    <a href="https://console.cloud.google.com/iam-admin/serviceaccounts?project=opalbar-a0a5e" target="_blank" rel="noopener" class="card" data-search="google cloud service account fcm credenciales eas submit">
+      <div class="card-header">
+        <div class="card-icon">☁️</div>
+        <h3 class="card-name">Google Cloud · Service Accounts</h3>
+        <span class="card-status dot-live"></span>
+      </div>
+      <p class="card-desc">Credenciales FCM · Necesarias para EAS Submit automatizado</p>
+      <div class="card-meta">
+        <span class="badge">Mismo proyecto opalbar-a0a5e</span>
+      </div>
+    </a>
+  </div>
+</section>
+
+<!-- ===== Build / Deploy ===== -->
+<section data-cat="build">
+  <div class="section-title">
+    <h2><span class="section-emoji">📦</span>Build &amp; Deploy de la app</h2>
+    <span class="section-count">5 servicios</span>
+  </div>
+  <div class="grid">
+    <a href="https://expo.dev/accounts/carlosg2026/projects/opalbar-app" target="_blank" rel="noopener" class="card" data-search="expo dashboard proyecto mobile app eas">
+      <div class="card-header">
+        <div class="card-icon">🎯</div>
+        <h3 class="card-name">Expo · Project Dashboard</h3>
+        <span class="card-status dot-live"></span>
+      </div>
+      <p class="card-desc">Vista general del proyecto opalbar-app · Builds · OTAs · Submissions</p>
+      <div class="card-meta">
+        <span class="badge green">Free</span>
+        <span class="badge">@carlosg2026</span>
+      </div>
+    </a>
+    <a href="https://expo.dev/accounts/carlosg2026/projects/opalbar-app/builds" target="_blank" rel="noopener" class="card" data-search="eas builds aab apk historial android ios">
+      <div class="card-header">
+        <div class="card-icon">🏗️</div>
+        <h3 class="card-name">EAS · Builds</h3>
+        <span class="card-status dot-live"></span>
+      </div>
+      <p class="card-desc">Historial de AABs/APKs · Descargar versiones anteriores</p>
+      <div class="card-meta">
+        <span class="badge cyan">v1.0.0 vc3 actual</span>
+      </div>
+    </a>
+    <a href="https://expo.dev/accounts/carlosg2026/projects/opalbar-app/updates" target="_blank" rel="noopener" class="card" data-search="eas updates ota over the air actualizaciones">
+      <div class="card-header">
+        <div class="card-icon">🔄</div>
+        <h3 class="card-name">EAS · OTA Updates</h3>
+        <span class="card-status dot-live"></span>
+      </div>
+      <p class="card-desc">Updates over-the-air · Sin pasar por revisión Google</p>
+      <div class="card-meta">
+        <span class="badge cyan">Channel: production</span>
+      </div>
+    </a>
+    <a href="https://expo.dev/accounts/carlosg2026/projects/opalbar-app/submissions" target="_blank" rel="noopener" class="card" data-search="eas submit play store envios automatizados">
+      <div class="card-header">
+        <div class="card-icon">📤</div>
+        <h3 class="card-name">EAS · Submissions</h3>
+        <span class="card-status dot-live"></span>
+      </div>
+      <p class="card-desc">Estado de submits automatizados a Play Store</p>
+      <div class="card-meta">
+        <span class="badge amber">Manual upload por ahora</span>
+      </div>
+    </a>
+    <a href="https://vercel.com/dashboard" target="_blank" rel="noopener" class="card" data-search="vercel admin web hosting react vite panel">
+      <div class="card-header">
+        <div class="card-icon">▲</div>
+        <h3 class="card-name">Vercel · Admin Web Dashboard</h3>
+        <span class="card-status dot-live"></span>
+      </div>
+      <p class="card-desc">Hosting del panel admin web (React + Vite)</p>
+      <div class="card-meta">
+        <span class="badge green">Free Hobby</span>
+      </div>
+    </a>
+  </div>
+</section>
+
+<!-- ===== Dominios ===== -->
+<section data-cat="dominio">
+  <div class="section-title">
+    <h2><span class="section-emoji">🌐</span>Dominios &amp; DNS</h2>
+    <span class="section-count">1 servicio</span>
+  </div>
+  <div class="grid">
+    <a href="https://financeiro.hostgator.com.mx/clientarea.php" target="_blank" rel="noopener" class="card" data-search="hostgator dominio dns opalbar.com.mx zona registros">
+      <div class="card-header">
+        <div class="card-icon">🦎</div>
+        <h3 class="card-name">HostGator · Panel cliente</h3>
+        <span class="card-status dot-live"></span>
+      </div>
+      <p class="card-desc">Dominio opalbar.com.mx · Zona DNS · Renovación</p>
+      <div class="card-meta">
+        <span class="badge gold">$210 año 1 / $500 renovación</span>
+      </div>
+    </a>
+  </div>
+</section>
+
+<!-- ===== Storage ===== -->
+<section data-cat="storage">
+  <div class="section-title">
+    <h2><span class="section-emoji">🖼️</span>Storage de imágenes</h2>
+    <span class="section-count">2 servicios</span>
+  </div>
+  <div class="grid">
+    <a href="https://console.cloudinary.com/console" target="_blank" rel="noopener" class="card" data-search="cloudinary imagenes storage cdn fotos avatars">
+      <div class="card-header">
+        <div class="card-icon">☁️</div>
+        <h3 class="card-name">Cloudinary · Console</h3>
+        <span class="card-status dot-live"></span>
+      </div>
+      <p class="card-desc">Imágenes de posts, perfiles, eventos, marketing · CDN global</p>
+      <div class="card-meta">
+        <span class="badge green">Free 25 GB</span>
+        <span class="badge cyan">cloud: dl9o0umy3</span>
+      </div>
+    </a>
+    <a href="https://console.cloudinary.com/console/media_library" target="_blank" rel="noopener" class="card" data-search="cloudinary media library biblioteca assets imagenes">
+      <div class="card-header">
+        <div class="card-icon">🗃️</div>
+        <h3 class="card-name">Cloudinary · Media Library</h3>
+        <span class="card-status dot-live"></span>
+      </div>
+      <p class="card-desc">Browser de todas las imágenes subidas · Buscar / filtrar / eliminar</p>
+    </a>
+  </div>
+</section>
+
+<!-- ===== SMS ===== -->
+<section data-cat="sms">
+  <div class="section-title">
+    <h2><span class="section-emoji">📞</span>SMS &amp; OTP por teléfono</h2>
+    <span class="section-count">2 servicios</span>
+  </div>
+  <div class="grid">
+    <a href="https://console.twilio.com" target="_blank" rel="noopener" class="card" data-search="twilio sms telefono otp verificacion">
+      <div class="card-header">
+        <div class="card-icon">📱</div>
+        <h3 class="card-name">Twilio · Console</h3>
+        <span class="card-status dot-live"></span>
+      </div>
+      <p class="card-desc">Dashboard general · Saldo · Logs de SMS enviados</p>
+      <div class="card-meta">
+        <span class="badge gold">~$0.05 USD por SMS MX</span>
+      </div>
+    </a>
+    <a href="https://console.twilio.com/us1/develop/verify/services" target="_blank" rel="noopener" class="card" data-search="twilio verify otp sms servicios verificacion telefono">
+      <div class="card-header">
+        <div class="card-icon">✓</div>
+        <h3 class="card-name">Twilio · Verify Services</h3>
+        <span class="card-status dot-live"></span>
+      </div>
+      <p class="card-desc">Servicio que envía los OTPs de teléfono al registrarse</p>
+    </a>
+  </div>
+</section>
+
+<!-- ===== Mis URLs públicas ===== -->
+<section data-cat="urls">
+  <div class="section-title">
+    <h2><span class="section-emoji">🏛️</span>Mis URLs públicas (legales · Play Store)</h2>
+    <span class="section-count">5 servicios</span>
+  </div>
+  <div class="grid">
+    <a href="https://opalbar-app-production.up.railway.app/api/v1/legal/privacy" target="_blank" rel="noopener" class="card" data-search="privacidad politica privacy policy legal play store">
+      <div class="card-header">
+        <div class="card-icon">📜</div>
+        <h3 class="card-name">Política de Privacidad</h3>
+        <span class="card-status dot-live"></span>
+      </div>
+      <p class="card-desc">Para Play Console · Required field</p>
+      <div class="card-meta">
+        <span class="badge cyan">Pública</span>
+      </div>
+    </a>
+    <a href="https://opalbar-app-production.up.railway.app/api/v1/legal/terms" target="_blank" rel="noopener" class="card" data-search="terminos servicio terms legal">
+      <div class="card-header">
+        <div class="card-icon">📄</div>
+        <h3 class="card-name">Términos de Servicio</h3>
+        <span class="card-status dot-live"></span>
+      </div>
+      <p class="card-desc">Términos legales del uso de la app</p>
+    </a>
+    <a href="https://opalbar-app-production.up.railway.app/api/v1/legal/account-deletion" target="_blank" rel="noopener" class="card" data-search="eliminacion cuenta delete account play store requirement">
+      <div class="card-header">
+        <div class="card-icon">🗑️</div>
+        <h3 class="card-name">Eliminación de cuenta</h3>
+        <span class="card-status dot-live"></span>
+      </div>
+      <p class="card-desc">Required by Play Store · Instrucciones para borrar cuenta</p>
+    </a>
+    <a href="https://opalbar-app-production.up.railway.app/api/v1/legal/child-safety" target="_blank" rel="noopener" class="card" data-search="csae child safety menores estandares seguridad infantil">
+      <div class="card-header">
+        <div class="card-icon">🛡️</div>
+        <h3 class="card-name">Estándares CSAE (Seguridad infantil)</h3>
+        <span class="card-status dot-live"></span>
+      </div>
+      <p class="card-desc">Required for Social/Dating apps · Política tolerancia cero CSAM</p>
+    </a>
+    <a href="https://opalbar-app-production.up.railway.app/api/docs" target="_blank" rel="noopener" class="card" data-search="swagger api docs documentacion endpoints">
+      <div class="card-header">
+        <div class="card-icon">📖</div>
+        <h3 class="card-name">API Docs (Swagger)</h3>
+        <span class="card-status dot-live"></span>
+      </div>
+      <p class="card-desc">Documentación interactiva de todos los endpoints de la API</p>
+      <div class="card-meta">
+        <span class="badge cyan">Producción</span>
+      </div>
+    </a>
+  </div>
+</section>
+
+<!-- ===== Status pages ===== -->
+<section data-cat="status">
+  <div class="section-title">
+    <h2><span class="section-emoji">📊</span>Status pages · Cuando algo se cae</h2>
+    <span class="section-count">8 servicios</span>
+  </div>
+  <div class="grid">
+    <a href="https://status.expo.dev" target="_blank" rel="noopener" class="card" data-search="expo status outage builds eas servicio">
+      <div class="card-header">
+        <div class="card-icon">🟢</div>
+        <h3 class="card-name">Expo Status</h3>
+      </div>
+      <p class="card-desc">Estado de EAS Build / Update / Submit</p>
+    </a>
+    <a href="https://railway.com/status" target="_blank" rel="noopener" class="card" data-search="railway status outage api server">
+      <div class="card-header">
+        <div class="card-icon">🟢</div>
+        <h3 class="card-name">Railway Status</h3>
+      </div>
+      <p class="card-desc">Estado de Railway (servidor + DB)</p>
+    </a>
+    <a href="https://www.vercel-status.com" target="_blank" rel="noopener" class="card" data-search="vercel status outage admin web">
+      <div class="card-header">
+        <div class="card-icon">🟢</div>
+        <h3 class="card-name">Vercel Status</h3>
+      </div>
+      <p class="card-desc">Estado del hosting del admin web</p>
+    </a>
+    <a href="https://resend-status.com" target="_blank" rel="noopener" class="card" data-search="resend status outage email">
+      <div class="card-header">
+        <div class="card-icon">🟢</div>
+        <h3 class="card-name">Resend Status</h3>
+      </div>
+      <p class="card-desc">Estado del envío de correos</p>
+    </a>
+    <a href="https://www.githubstatus.com" target="_blank" rel="noopener" class="card" data-search="github status outage code">
+      <div class="card-header">
+        <div class="card-icon">🟢</div>
+        <h3 class="card-name">GitHub Status</h3>
+      </div>
+      <p class="card-desc">Estado de GitHub (push/pull)</p>
+    </a>
+    <a href="https://status.cloudinary.com" target="_blank" rel="noopener" class="card" data-search="cloudinary status outage imagenes cdn">
+      <div class="card-header">
+        <div class="card-icon">🟢</div>
+        <h3 class="card-name">Cloudinary Status</h3>
+      </div>
+      <p class="card-desc">Estado del CDN de imágenes</p>
+    </a>
+    <a href="https://status.twilio.com" target="_blank" rel="noopener" class="card" data-search="twilio status outage sms">
+      <div class="card-header">
+        <div class="card-icon">🟢</div>
+        <h3 class="card-name">Twilio Status</h3>
+      </div>
+      <p class="card-desc">Estado del envío de SMS</p>
+    </a>
+    <a href="https://status.cloud.google.com" target="_blank" rel="noopener" class="card" data-search="google cloud status outage firebase fcm play">
+      <div class="card-header">
+        <div class="card-icon">🟢</div>
+        <h3 class="card-name">Google Cloud Status</h3>
+      </div>
+      <p class="card-desc">Estado de Firebase + FCM + Play Console</p>
+    </a>
+  </div>
+</section>
+
+<!-- ===== Recomendados (no contratados) ===== -->
+<section data-cat="recomendado">
+  <div class="section-title">
+    <h2><span class="section-emoji">⭐</span>Recomendados a futuro (no contratados)</h2>
+    <span class="section-count">4 servicios</span>
+  </div>
+  <div class="grid">
+    <a href="https://sentry.io/signup" target="_blank" rel="noopener" class="card" data-search="sentry errores monitoring crash reports">
+      <div class="card-header">
+        <div class="card-icon">🐛</div>
+        <h3 class="card-name">Sentry · Crash reports</h3>
+        <span class="card-status dot-pending"></span>
+      </div>
+      <p class="card-desc">Te avisa cuando un user tiene un crash · Ya integrado en el código (no-op si no se setea)</p>
+      <div class="card-meta">
+        <span class="badge green">Free 5K errores/mes</span>
+      </div>
+    </a>
+    <a href="https://uptimerobot.com/signUp" target="_blank" rel="noopener" class="card" data-search="uptimerobot monitor uptime caida api">
+      <div class="card-header">
+        <div class="card-icon">📡</div>
+        <h3 class="card-name">UptimeRobot</h3>
+        <span class="card-status dot-pending"></span>
+      </div>
+      <p class="card-desc">Te avisa por email/SMS si la API se cae · Cada 5 min</p>
+      <div class="card-meta">
+        <span class="badge green">Free</span>
+      </div>
+    </a>
+    <a href="https://dash.cloudflare.com/sign-up" target="_blank" rel="noopener" class="card" data-search="cloudflare email routing reenvio dominio info contacto">
+      <div class="card-header">
+        <div class="card-icon">🟠</div>
+        <h3 class="card-name">Cloudflare Email Routing</h3>
+        <span class="card-status dot-pending"></span>
+      </div>
+      <p class="card-desc">Recibe info@opalbar.com.mx → reenvía a tu Gmail · Sin pagar Titan</p>
+      <div class="card-meta">
+        <span class="badge green">Free</span>
+      </div>
+    </a>
+    <a href="https://posthog.com/signup" target="_blank" rel="noopener" class="card" data-search="posthog analytics eventos producto metricas usuario">
+      <div class="card-header">
+        <div class="card-icon">📊</div>
+        <h3 class="card-name">PostHog · Product analytics</h3>
+        <span class="card-status dot-pending"></span>
+      </div>
+      <p class="card-desc">Qué pantallas usan más · Funnel de registro · Retention cohorts</p>
+      <div class="card-meta">
+        <span class="badge green">Free 1M events/mes</span>
+      </div>
+    </a>
+  </div>
+</section>
+
+<!-- ===== Costos ===== -->
+<div class="cost-box">
+  <h3>💰 Costos mensuales fijos</h3>
+  <div class="cost-row"><strong>Railway (servidor + DB)</strong> <span>~$5 USD</span></div>
+  <div class="cost-row"><strong>Resend, Vercel, Cloudinary, Firebase, GitHub</strong> <span>$0 (todos free tier)</span></div>
+  <div class="cost-row"><strong>Twilio SMS</strong> <span>pay-per-use (~$0.05/SMS MX)</span></div>
+  <div class="cost-row"><strong>Total fijo</strong> <span><strong style="color: var(--neon-gold)">~$5-10 USD/mes</strong></span></div>
+  <div class="cost-row" style="margin-top:8px"><strong>Únicos pagados</strong> <span>Play Console $25 USD · Dominio $210 MXN año 1</span></div>
+</div>
+
+</main>
+
+<footer>
+  Última actualización: 2026-05-01 · Generado para
+  <a href="mailto:carlosalonsog966@gmail.com">carlosalonsog966@gmail.com</a><br/>
+  Guarda este archivo en favoritos · Funciona offline
+</footer>
+
+<script>
+  // Búsqueda viva
+  const search = document.getElementById('search');
+  const cards = document.querySelectorAll('.card');
+  const sections = document.querySelectorAll('section');
+  search.addEventListener('input', () => {
+    const q = search.value.trim().toLowerCase();
+    cards.forEach((c) => {
+      const haystack = (c.dataset.search || '') + ' ' + c.textContent.toLowerCase();
+      const match = !q || haystack.includes(q);
+      c.classList.toggle('hidden', !match);
+    });
+    // Ocultar secciones que quedan vacías
+    sections.forEach((s) => {
+      const visible = s.querySelectorAll('.card:not(.hidden)').length;
+      s.classList.toggle('hidden', visible === 0);
+    });
+  });
+</script>
+
+</body>
+</html>

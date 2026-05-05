@@ -45,6 +45,12 @@ jobs:
       - name: TypeScript check API
         run: npx tsc --project apps/api/tsconfig.json --noEmit
 
+      - name: TypeScript check Admin
+        run: npx tsc --project apps/admin/tsconfig.json --noEmit
+
+      - name: TypeScript check Mobile
+        run: npx tsc --project apps/mobile/tsconfig.json --noEmit
+
   # ── Unit Tests ────────────────────────────
   test:
     name: 🧪 Unit Tests
@@ -62,7 +68,7 @@ jobs:
         run: npm ci
 
       - name: Run unit tests with coverage
-        run: npx nx test api --coverage --passWithNoTests
+        run: npx nx test api --coverage
         env:
           NODE_ENV: test
 
