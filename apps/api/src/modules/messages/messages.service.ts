@@ -184,23 +184,29 @@ export class MessagesService {
       take: 100,
     });
 
-    // Normalize: add "otherUser" shortcut + unreadCount
-    const results = await Promise.all(
-      threads.map(async (thread) => {
-        const other = thread.userAId === meId ? thread.userB : thread.userA;
-        const unreadCount = await this.prisma.message.count({
-          where: { threadId: thread.id, isRead: false, senderId: { not: meId } },
-        });
-        return {
-          id: thread.id,
-          lastMessageAt: thread.lastMessageAt,
-          otherUser: other,
-          lastMessage: thread.messages[0] ?? null,
-          unreadCount,
-        };
-      }),
-    );
-    return results;
+    // Audit fix: previously this fired one prisma.message.count per thread
+    // (101 queries on a full inbox). Single groupBy now returns all unread
+    // counts in 1 query.
+    const threadIds = threads.map((t) => t.id);
+    const counts = threadIds.length
+      ? await this.prisma.message.groupBy({
+          by: ['threadId'],
+          where: { threadId: { in: threadIds }, isRead: false, senderId: { not: meId } },
+          _count: { _all: true },
+        })
+      : [];
+    const unreadByThread = new Map<string, number>(counts.map((c) => [c.threadId, c._count._all]));
+
+    return threads.map((thread) => {
+      const other = thread.userAId === meId ? thread.userB : thread.userA;
+      return {
+        id: thread.id,
+        lastMessageAt: thread.lastMessageAt,
+        otherUser: other,
+        lastMessage: thread.messages[0] ?? null,
+        unreadCount: unreadByThread.get(thread.id) ?? 0,
+      };
+    });
   }
 
   async getThread(meId: string, threadId: string) {

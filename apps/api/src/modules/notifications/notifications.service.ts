@@ -17,6 +17,17 @@ export class NotificationsService {
     private readonly redis: RedisService,
   ) {}
 
+  // Audit fix: bell badge polls this constantly. The unread count gets
+  // cached in Redis (10s TTL) and invalidated on markAsRead/markAllAsRead/
+  // createNotification — turns hot-path DB count into a Redis HIT.
+  private static unreadCacheKey(userId: string): string {
+    return `notif:unread:${userId}`;
+  }
+
+  private async invalidateUnreadCache(userId: string): Promise<void> {
+    await this.redis.del(NotificationsService.unreadCacheKey(userId)).catch(() => undefined);
+  }
+
   async getNotifications(userId: string, pagination: PaginationDto) {
     const { page = 1, limit = 20 } = pagination;
     const skip = getPaginationOffset(page, limit);
@@ -30,7 +41,15 @@ export class NotificationsService {
       this.prisma.notification.count({ where: { userId } }),
     ]);
 
-    const unreadCount = await this.prisma.notification.count({ where: { userId, read: false } });
+    const cacheKey = NotificationsService.unreadCacheKey(userId);
+    const cached = await this.redis.get(cacheKey).catch(() => null);
+    let unreadCount: number;
+    if (cached !== null) {
+      unreadCount = parseInt(cached, 10) || 0;
+    } else {
+      unreadCount = await this.prisma.notification.count({ where: { userId, read: false } });
+      await this.redis.set(cacheKey, String(unreadCount), 10).catch(() => undefined);
+    }
     return { ...paginate(data, total, page, limit), unreadCount };
   }
 
@@ -39,6 +58,7 @@ export class NotificationsService {
       where: { id: notificationId, userId },
       data: { read: true, readAt: new Date() },
     });
+    await this.invalidateUnreadCache(userId);
     this.realtime.toUser(userId, 'notification', 'read', { id: notificationId });
     return r;
   }
@@ -48,6 +68,7 @@ export class NotificationsService {
       where: { userId, read: false },
       data: { read: true, readAt: new Date() },
     });
+    await this.invalidateUnreadCache(userId);
     this.realtime.toUser(userId, 'notification', 'read');
     return r;
   }
@@ -66,6 +87,7 @@ export class NotificationsService {
     // structurally identical to InputJsonValue (Prisma forbids `undefined`),
     // so we cast at the boundary.
     const notification = await this.prisma.notification.create({ data: data as any });
+    await this.invalidateUnreadCache(data.userId);
 
     // Send push notification (placeholder — integrate FCM/APNs)
     await this.sendPush(data.userId, data.title, data.body, data.data, data.imageUrl);
@@ -272,26 +294,41 @@ export class NotificationsService {
     // "pushEnabled" en sus ajustes, igual recibia broadcasts. Ahora filtramos
     // por settings segun el tipo del broadcast.
     const settingField = NotificationsService.notificationSettingFieldFor(payload.type);
-    const rows = await this.prisma.user.findMany({
-      where: {
-        status: 'ACTIVE',
-        pushTokens: { some: {} },
-        // Si el user no tiene NotificationSettings (defaults), todos estan en
-        // true por schema → recibe el broadcast. Si los tiene, respetamos
-        // pushEnabled global + el flag especifico del tipo.
-        OR: [
-          { notificationSettings: null },
-          {
-            notificationSettings: {
-              pushEnabled: true,
-              ...(settingField ? { [settingField]: true } : {}),
-            },
+    const where = {
+      status: 'ACTIVE' as const,
+      pushTokens: { some: {} },
+      OR: [
+        { notificationSettings: null },
+        {
+          notificationSettings: {
+            pushEnabled: true,
+            ...(settingField ? { [settingField]: true } : {}),
           },
-        ],
-      },
-      select: { id: true },
-    });
-    return this.createForUsers(rows.map((r) => r.id), payload);
+        },
+      ],
+    };
+
+    // Audit fix: cursor-paginated batches to avoid OOM/connection-pool
+    // exhaustion when user count grows. Previously findMany pulled every
+    // eligible user + Promise.all opened N concurrent push + N inserts.
+    const BATCH = 500;
+    let cursor: string | undefined;
+    let totalSent = 0;
+    while (true) {
+      const batch = await this.prisma.user.findMany({
+        where,
+        select: { id: true },
+        orderBy: { id: 'asc' },
+        take: BATCH,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      });
+      if (batch.length === 0) break;
+      const { sent } = await this.createForUsers(batch.map((r) => r.id), payload);
+      totalSent += sent;
+      if (batch.length < BATCH) break;
+      cursor = batch[batch.length - 1].id;
+    }
+    return { sent: totalSent };
   }
 
   // Mapea NotificationType al boolean correspondiente en NotificationSettings.

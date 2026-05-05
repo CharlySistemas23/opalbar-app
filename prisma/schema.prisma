@@ -686,6 +686,8 @@ model Post {
   @@index([userId])
   @@index([status])
   @@index([createdAt])
+  @@index([status, createdAt(sort: Desc)])
+  @@index([userId, status, createdAt(sort: Desc)])
 }
 
 // ─────────────────────────────────────────────
@@ -944,6 +946,7 @@ model Notification {
 
   @@index([userId, read])
   @@index([createdAt])
+  @@index([userId, createdAt(sort: Desc)])
 }
 
 model NotificationSettings {
@@ -1043,6 +1046,8 @@ model Reservation {
   @@index([date])
   @@index([status])
   @@index([confirmCode])
+  @@index([userId, status])
+  @@index([venueId, date, status])
 }
 
 // ─────────────────────────────────────────────
@@ -1314,6 +1319,7 @@ model MessageThread {
   @@index([userBId])
   @@index([lastMessageAt])
   @@index([status])
+  @@index([status, lastMessageAt(sort: Desc)])
 }
 
 model Message {
@@ -1337,6 +1343,7 @@ model Message {
   reactions MessageReaction[]
 
   @@index([threadId, createdAt])
+  @@index([threadId, isRead])
   @@index([senderId])
   @@index([replyToId])
 }
