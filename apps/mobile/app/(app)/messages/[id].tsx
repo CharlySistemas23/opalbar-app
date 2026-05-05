@@ -15,8 +15,8 @@ import {
   Modal,
   ScrollView,
   Alert,
-  Clipboard,
 } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -665,7 +665,11 @@ export default function MessageThread() {
   }, [fb]);
 
   const menuCopy = useCallback(() => {
-    if (actionMsg?.content) Clipboard.setString(actionMsg.content);
+    if (actionMsg?.content) {
+      // expo-clipboard's setStringAsync is fire-and-forget here — the menu
+      // closes immediately and we don't block on the OS clipboard write.
+      Clipboard.setStringAsync(actionMsg.content).catch(() => undefined);
+    }
     setActionMsg(null);
   }, [actionMsg]);
 
