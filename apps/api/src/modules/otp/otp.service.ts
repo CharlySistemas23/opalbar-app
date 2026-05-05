@@ -5,9 +5,10 @@
 // ─────────────────────────────────────────────
 import {
   BadRequestException,
+  HttpException,
+  HttpStatus,
   Injectable,
   Logger,
-  TooManyRequestsException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { OtpType } from '@prisma/client';
@@ -86,8 +87,9 @@ export class OtpService {
 
     const maxAttempts = this.config.get<number>('otp.maxAttempts', 5);
     if (attempts > maxAttempts) {
-      throw new TooManyRequestsException(
-        `Too many OTP requests. Please wait before requesting a new code.`,
+      throw new HttpException(
+        'Too many OTP requests. Please wait before requesting a new code.',
+        HttpStatus.TOO_MANY_REQUESTS,
       );
     }
 
@@ -144,7 +146,10 @@ export class OtpService {
 
     if (isEmail) {
       const otpKey = RedisService.otpKey(dto.identifier, dto.type);
-      const attemptsKey = RedisService.otpAttemptsKey(dto.identifier, dto.type);
+      // Verify-fails counter is INTENTIONALLY separate from sendOtp's attemptsKey
+      // (which is a send rate-limit). Persists across OTP cycles for 1h to block
+      // brute-force-by-resend attacks. Cleared only on successful verify.
+      const verifyFailsKey = RedisService.otpVerifyFailsKey(dto.identifier, dto.type);
       const maxAttempts = this.config.get<number>('otp.maxAttempts', 5);
 
       // Try Redis first (fast path)
@@ -152,18 +157,21 @@ export class OtpService {
       if (cached) {
         if (new Date(cached.expiresAt) < new Date()) {
           await this.redis.del(otpKey);
-          await this.redis.del(attemptsKey);
+          // NB: do NOT clear verifyFailsKey here — that would let attackers
+          // reset the counter by waiting for OTP TTL.
           throw new BadRequestException('OTP has expired. Please request a new code.');
         }
         if (cached.code !== dto.code) {
-          const attempts = await this.redis.incr(attemptsKey);
+          const attempts = await this.redis.incr(verifyFailsKey);
           if (attempts === 1) {
-            // First failure — bind counter TTL to OTP TTL
-            await this.redis.expire(attemptsKey, this.config.get<number>('otp.expiresMinutes', 10) * 60);
+            await this.redis.expire(verifyFailsKey, 3600); // 1h cooldown
           }
           if (attempts >= maxAttempts) {
             await this.redis.del(otpKey);
-            throw new TooManyRequestsException('Too many failed attempts. Please request a new code.');
+            throw new HttpException(
+              'Too many failed attempts. Please wait before trying again.',
+              HttpStatus.TOO_MANY_REQUESTS,
+            );
           }
           throw new BadRequestException('Invalid OTP code');
         }
@@ -184,7 +192,10 @@ export class OtpService {
         }
 
         if (otp.attempts >= this.config.get<number>('otp.maxAttempts', 5)) {
-          throw new TooManyRequestsException('Too many failed attempts. Please request a new code.');
+          throw new HttpException(
+            'Too many failed attempts. Please request a new code.',
+            HttpStatus.TOO_MANY_REQUESTS,
+          );
         }
 
         if (otp.code !== dto.code) {
@@ -205,9 +216,9 @@ export class OtpService {
       await this.checkSmsOtpViaVerify(dto.identifier, dto.code);
     }
 
-    // Clear rate limit
-    const attemptsKey = RedisService.otpAttemptsKey(dto.identifier, dto.type);
-    await this.redis.del(attemptsKey);
+    // Clear send rate-limit AND verify-fails counter on successful verify
+    await this.redis.del(RedisService.otpAttemptsKey(dto.identifier, dto.type));
+    await this.redis.del(RedisService.otpVerifyFailsKey(dto.identifier, dto.type));
 
     // If email verification — mark user as verified
     if (dto.type === OtpType.EMAIL_VERIFICATION) {

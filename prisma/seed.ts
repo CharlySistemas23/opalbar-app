@@ -160,8 +160,13 @@ async function main() {
   // ── Admin User ─────────────────────────────
 
   console.log('  → Admin user…');
-  const adminEmail = process.env['ADMIN_EMAIL'] || 'carlosalonsog966@gmail.com';
-  const adminPassword = process.env['ADMIN_PASSWORD'] || 'Admin@123456';
+  const adminEmail = process.env['ADMIN_EMAIL'];
+  const adminPassword = process.env['ADMIN_PASSWORD'];
+  if (!adminEmail || !adminPassword) {
+    throw new Error(
+      'ADMIN_EMAIL and ADMIN_PASSWORD must be set in environment before seeding.',
+    );
+  }
   const passwordHash = await bcrypt.hash(adminPassword, 12);
 
   const admin = await prisma.user.upsert({

@@ -138,9 +138,14 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     return `otp:${type}:${identifier}`;
   }
 
-  /** OTP attempt counter key */
+  /** OTP attempt counter key (used for send rate limit) */
   static otpAttemptsKey(identifier: string, type: string): string {
     return `otp_attempts:${type}:${identifier}`;
+  }
+
+  /** OTP verify-failures counter (separate from send rate to prevent collisions) */
+  static otpVerifyFailsKey(identifier: string, type: string): string {
+    return `otp_verify_fails:${type}:${identifier}`;
   }
 
   /** Rate limit key */
