@@ -1109,6 +1109,10 @@ export class AdminService {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
 
+    // Note: in-flight access tokens stay valid until natural expiry (1h).
+    // The Session model doesn't persist `jti`, so per-token blocklist isn't
+    // possible without a schema migration. JwtStrategy already rejects DELETED
+    // users (jwt.strategy.ts) — that's the actual access-time guard.
     await this.prisma.$transaction([
       // 1) Free the email/phone unique slots + clear PII on user record
       this.prisma.user.update({
@@ -1141,6 +1145,15 @@ export class AdminService {
       }),
       // 4) Clear interests + consent (GDPR right-to-be-forgotten)
       this.prisma.userInterest.deleteMany({ where: { userId } }),
+      // 5) Audit fix: stop push deliveries — user shouldn't receive notifications.
+      this.prisma.pushToken.deleteMany({ where: { userId } }),
+      // 6) Audit fix: cut social graph — follows persisting let stale relations
+      //    keep this user as "follower" of others, leaking their content.
+      this.prisma.follow.deleteMany({ where: { OR: [{ followerId: userId }, { followingId: userId }] } }),
+      // 7) Drop friendships in either direction.
+      this.prisma.friendship.deleteMany({
+        where: { OR: [{ requesterId: userId }, { addresseeId: userId }] },
+      }),
     ]);
   }
 

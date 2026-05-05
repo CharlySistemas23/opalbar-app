@@ -330,7 +330,7 @@ export class MentionsService {
             where: { id: { in: postIds }, deletedAt: null },
             select: {
               id: true, content: true, imageUrl: true, createdAt: true, userId: true,
-              user: { select: { id: true, profile: { select: { firstName: true, lastName: true, avatarUrl: true } } } },
+              user: { select: { id: true, isPrivate: true, profile: { select: { firstName: true, lastName: true, avatarUrl: true } } } },
               _count: { select: { reactions: true, comments: true } },
             },
           })
@@ -340,13 +340,33 @@ export class MentionsService {
             where: { id: { in: storyIds }, expiresAt: { gt: new Date() } },
             select: {
               id: true, mediaUrl: true, caption: true, createdAt: true, expiresAt: true, userId: true,
-              user: { select: { id: true, profile: { select: { firstName: true, lastName: true, avatarUrl: true } } } },
+              user: { select: { id: true, isPrivate: true, profile: { select: { firstName: true, lastName: true, avatarUrl: true } } } },
             },
           })
         : Promise.resolve([] as any[]),
     ]);
-    const postMap = new Map(posts.map((p) => [p.id, p]));
-    const storyMap = new Map(stories.map((s) => [s.id, s]));
+
+    // Audit fix: drop items from private accounts the viewer doesn't follow.
+    // The mention itself can stay APPROVED, but the underlying post/story is
+    // privacy-gated like the rest of the feed.
+    const privateAuthorIds = new Set<string>();
+    for (const p of posts) if ((p as any).user?.isPrivate) privateAuthorIds.add((p as any).user.id);
+    for (const s of stories) if ((s as any).user?.isPrivate) privateAuthorIds.add((s as any).user.id);
+    let allowedPrivateIds = new Set<string>();
+    if (viewerId && privateAuthorIds.size > 0) {
+      const follows = await this.prisma.follow.findMany({
+        where: { followerId: viewerId, followingId: { in: [...privateAuthorIds] } },
+        select: { followingId: true },
+      });
+      allowedPrivateIds = new Set(follows.map((f) => f.followingId));
+      if (viewerId === subjectUserId) allowedPrivateIds.add(subjectUserId);
+    } else if (viewerId === subjectUserId) {
+      allowedPrivateIds = new Set([subjectUserId]);
+    }
+    const visiblePost = (p: any) => !p.user?.isPrivate || allowedPrivateIds.has(p.user.id);
+    const visibleStory = (s: any) => !s.user?.isPrivate || allowedPrivateIds.has(s.user.id);
+    const postMap = new Map(posts.filter(visiblePost).map((p) => [p.id, p]));
+    const storyMap = new Map(stories.filter(visibleStory).map((s) => [s.id, s]));
 
     return rows
       .map((r) => {

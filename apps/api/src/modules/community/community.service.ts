@@ -299,7 +299,31 @@ export class CommunityService {
 
   // ── COMMENTS ──────────────────────────────
 
+  /**
+   * Audit fix: comments/reactors of posts authored by private accounts were
+   * leaking to non-followers via these public endpoints. This helper enforces
+   * the same privacy gate `getPost` uses, returning a generic 404 to avoid
+   * leaking the post's existence.
+   */
+  private async assertCanViewPostContent(postId: string, viewerId?: string): Promise<void> {
+    const post = await this.prisma.post.findUnique({
+      where: { id: postId },
+      select: { deletedAt: true, user: { select: { id: true, isPrivate: true } } },
+    });
+    if (!post || post.deletedAt) throw new NotFoundException('Post not found');
+    const author = post.user;
+    if (!author?.isPrivate) return;
+    if (viewerId === author.id) return;
+    if (!viewerId) throw new NotFoundException('Post not found');
+    const follow = await this.prisma.follow.findUnique({
+      where: { followerId_followingId: { followerId: viewerId, followingId: author.id } },
+      select: { id: true },
+    });
+    if (!follow) throw new NotFoundException('Post not found');
+  }
+
   async getComments(postId: string, currentUserId?: string) {
+    await this.assertCanViewPostContent(postId, currentUserId);
     const flatComments = await this.prisma.comment.findMany({
       where: { postId, deletedAt: null, status: PostStatus.PUBLISHED },
       include: {
@@ -748,12 +772,8 @@ export class CommunityService {
     return { reacted: true, emoji: clean };
   }
 
-  async getPostReactors(postId: string) {
-    const post = await this.prisma.post.findUnique({
-      where: { id: postId },
-      select: { id: true, deletedAt: true },
-    });
-    if (!post || post.deletedAt) throw new NotFoundException('Post not found');
+  async getPostReactors(postId: string, currentUserId?: string) {
+    await this.assertCanViewPostContent(postId, currentUserId);
 
     const rows = await this.prisma.postEmojiReaction.findMany({
       where: { postId },
