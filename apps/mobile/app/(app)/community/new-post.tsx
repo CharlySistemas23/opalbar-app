@@ -1,40 +1,53 @@
+// ─────────────────────────────────────────────
+//  New Post — Editorial Premium
+//
+//  Composer for wall + community posts.
+//   · Header: close (X) + Kicker "NUEVO" + primary "Publicar" button
+//   · Surface toggle: SegmentedControl ("Mi muro" / "Comunidad")
+//   · Author row: avatar + name + scope hint
+//   · Body: editorial multi-line input (no card)
+//   · Image preview with edit chips (Tagger + remove)
+//   · Bottom action bar: Camera + Galería buttons + aspect ratio chips
+//   · Toast (no Alert) for non-critical info
+// ─────────────────────────────────────────────
 import {
-  View,
-  Text,
-  StyleSheet,
-  TextInput,
-  ActivityIndicator,
-  Alert,
+  Image,
   KeyboardAvoidingView,
   Platform,
-  Image,
   Pressable,
   ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from 'react-native';
-import { useState, useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+
 import { communityApi } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { useAuthStore } from '@/stores/auth.store';
 import { useAppStore } from '@/stores/app.store';
-import { Colors } from '@/constants/tokens';
-import { uploadImage, UploadError } from '@/utils/uploadImage';
+import { Colors, EditorialSpacing, Radius, Spacing, TypePresets } from '@/constants/tokens';
+import { HitSlop, Roles } from '@/constants/a11y';
+import {
+  Button,
+  Caption,
+  Hairline,
+  Kicker,
+  Pressy,
+  SegmentedControl,
+  type SegmentOption,
+} from '@/components/ui';
 import { toast } from '@/components/Toast';
+import { uploadImage, UploadError } from '@/utils/uploadImage';
 import { useFeedback } from '@/hooks/useFeedback';
 import { useMentionAutocomplete } from '@/hooks/useMentionAutocomplete';
 import { MentionSuggestions } from '@/components/MentionSuggestions';
 import { PhotoTagger, type PhotoTag } from '@/components/PhotoTagger';
-
-// ─────────────────────────────────────────────
-//  New Post — Wall or Community
-//  · Clean header with Publish button (top-right)
-//  · Surface toggle (wall/community) segmented
-//  · Inline image pickers in bottom bar
-//  · Aligned with new-story.tsx layout
-// ─────────────────────────────────────────────
 
 const MAX_LEN = 1000;
 
@@ -45,15 +58,20 @@ const RATIOS: { key: AspectRatioKey; label: string; aspect: [number, number]; ra
   { key: '9:16', label: '9:16', aspect: [9, 16], ratio: 9 / 16 },
 ];
 
+type Surface = 'wall' | 'community';
+
 export default function NewPost() {
   const router = useRouter();
   const fb = useFeedback();
-  const { surface: surfaceParam, autoPick: autoPickParam } = useLocalSearchParams<{ surface?: string; autoPick?: string }>();
+  const { surface: surfaceParam, autoPick: autoPickParam } = useLocalSearchParams<{
+    surface?: string;
+    autoPick?: string;
+  }>();
   const { user, refreshUser } = useAuthStore();
   const { language } = useAppStore();
   const t = language === 'es';
 
-  const [surfaceChoice, setSurfaceChoice] = useState<'wall' | 'community'>(
+  const [surfaceChoice, setSurfaceChoice] = useState<Surface>(
     surfaceParam === 'wall' ? 'wall' : 'community',
   );
   const isWallPost = surfaceChoice === 'wall';
@@ -61,7 +79,6 @@ export default function NewPost() {
 
   const mention = useMentionAutocomplete();
   const content = mention.text;
-  const setContent = mention.setText;
   const [localImage, setLocalImage] = useState<string | null>(null);
   const [photoTags, setPhotoTags] = useState<PhotoTag[]>([]);
   const [taggerOpen, setTaggerOpen] = useState(false);
@@ -69,22 +86,27 @@ export default function NewPost() {
   const [pickingImage, setPickingImage] = useState(false);
   const [selectedRatio, setSelectedRatio] = useState<AspectRatioKey>('1:1');
 
+  const surfaceOptions: SegmentOption<Surface>[] = [
+    { value: 'wall', label: t ? 'Mi muro' : 'My wall' },
+    { value: 'community', label: t ? 'Comunidad' : 'Community' },
+  ];
+
   // When launched with ?autoPick=gallery|camera, open the picker once on mount
-  // so the user lands directly in the photo flow (Instagram-style "Foto" action).
   const autoPickFired = useRef(false);
   useEffect(() => {
     if (autoPickFired.current || !autoPickParam) return;
     autoPickFired.current = true;
     if (autoPickParam === 'gallery') pickFromGallery();
     else if (autoPickParam === 'camera') takePhoto();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoPickParam]);
 
   async function pickFromGallery() {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert(
-        t ? 'Permiso requerido' : 'Permission required',
+      toast(
         t ? 'Necesitamos acceso a tu galería.' : 'We need photo library access.',
+        'warning',
       );
       return;
     }
@@ -107,9 +129,9 @@ export default function NewPost() {
   async function takePhoto() {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert(
-        t ? 'Permiso requerido' : 'Permission required',
+      toast(
         t ? 'Necesitamos acceso a la cámara.' : 'We need camera access.',
+        'warning',
       );
       return;
     }
@@ -147,16 +169,18 @@ export default function NewPost() {
           uploadedUrl = await uploadImage(localImage, { kind: 'post' });
         } catch (err) {
           const msg = err instanceof UploadError ? err.message : 'upload failed';
-          toast(t ? `No se pudo subir la imagen: ${msg}` : `Could not upload image: ${msg}`, 'danger');
+          toast(
+            t ? `No se pudo subir la imagen: ${msg}` : `Could not upload image: ${msg}`,
+            'danger',
+          );
           setLoading(false);
           return;
         }
       }
       const coordsByUserId = new Map(
-        photoTags.map((t) => [t.userId, { x: t.x, y: t.y }] as const),
+        photoTags.map((tag) => [tag.userId, { x: tag.x, y: tag.y }] as const),
       );
       const mentions = mention.buildMentions(coordsByUserId);
-      // Merge in photo-only tags (tagged on the picture but never @-typed).
       for (const pt of photoTags) {
         if (!mentions.find((m) => m.userId === pt.userId)) {
           mentions.push({ userId: pt.userId, x: pt.x, y: pt.y });
@@ -172,26 +196,17 @@ export default function NewPost() {
       const status = res.data?.data?.status;
       fb.success();
       if (status === 'PENDING_REVIEW') {
-        Alert.alert(
-          t ? 'En revisión' : 'Pending review',
+        toast(
           t
-            ? isWallPost
-              ? 'Tu publicación está en revisión y ya se ve en tu muro.'
-              : 'Tu publicación está en revisión. Recibirás puntos cuando sea aprobada.'
-            : isWallPost
-              ? 'Your wall post is pending review and already visible on your wall.'
-              : 'Your post is pending review. You will get points when approved.',
-          [{ text: 'OK', onPress: () => router.back() }],
+            ? 'Publicación en revisión. Recibirás puntos cuando sea aprobada.'
+            : 'Pending review. You will get points when approved.',
+          'info',
         );
-      } else {
-        router.back();
       }
+      router.back();
     } catch (err: any) {
       fb.error();
-      Alert.alert(
-        t ? 'Error' : 'Error',
-        apiError(err, t ? 'No se pudo publicar.' : 'Could not publish.'),
-      );
+      toast(apiError(err, t ? 'No se pudo publicar.' : 'Could not publish.'), 'danger');
     } finally {
       setLoading(false);
     }
@@ -205,99 +220,60 @@ export default function NewPost() {
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        {/* ── Header ──────────────────────────── */}
+        {/* ── Header ──────────────────────── */}
         <View style={styles.header}>
-          <Pressable
+          <Pressy
             onPress={() => router.back()}
-            style={({ pressed }) => [styles.topBtn, pressed && styles.pressed]}
-            hitSlop={10}
+            haptic="select"
+            hitSlop={HitSlop.expand}
+            accessibilityRole={Roles.button}
+            accessibilityLabel={t ? 'Cerrar' : 'Close'}
+            style={styles.iconBtn}
           >
-            <Feather name="x" size={24} color={Colors.textPrimary} />
-          </Pressable>
-          <Text style={styles.title}>
-            {isWallPost
-              ? t
-                ? 'Nuevo en mi muro'
-                : 'New wall post'
-              : t
-                ? 'Nueva publicación'
-                : 'New post'}
-          </Text>
-          <Pressable
-            onPress={handleSubmit}
-            disabled={!canPublish}
-            style={({ pressed }) => [
-              styles.publishBtn,
-              !canPublish && { opacity: 0.4 },
-              pressed && styles.pressed,
-            ]}
-          >
-            {loading ? (
-              <ActivityIndicator color={Colors.textInverse} size="small" />
-            ) : (
-              <Text style={styles.publishLabel}>{t ? 'Publicar' : 'Share'}</Text>
-            )}
-          </Pressable>
+            <Feather name="x" size={22} color={Colors.textPrimary} />
+          </Pressy>
+          <View style={{ flex: 1 }}>
+            <Kicker tone="muted" align="center">
+              {isWallPost
+                ? t
+                  ? 'NUEVO · MURO'
+                  : 'NEW · WALL'
+                : t
+                  ? 'NUEVO · COMUNIDAD'
+                  : 'NEW · COMMUNITY'}
+            </Kicker>
+          </View>
+          <View style={styles.publishSlot}>
+            <Button
+              label={t ? 'Publicar' : 'Share'}
+              onPress={handleSubmit}
+              variant="primary"
+              size="sm"
+              loading={loading}
+              disabled={!canPublish}
+              fullWidth
+            />
+          </View>
         </View>
+        <Hairline variant="subtle" />
 
         <ScrollView
           style={{ flex: 1 }}
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
         >
-          {/* ── Surface toggle ─────────────────── */}
-          {canChangeSurface && (
-            <View style={styles.segRow}>
-              <Pressable
-                style={({ pressed }) => [
-                  styles.segBtn,
-                  surfaceChoice === 'wall' && styles.segBtnActive,
-                  pressed && styles.pressed,
-                ]}
-                onPress={() => setSurfaceChoice('wall')}
-              >
-                <Feather
-                  name="home"
-                  size={14}
-                  color={surfaceChoice === 'wall' ? Colors.textInverse : Colors.textSecondary}
-                />
-                <Text
-                  style={[
-                    styles.segBtnLabel,
-                    surfaceChoice === 'wall' && styles.segBtnLabelActive,
-                  ]}
-                >
-                  {t ? 'Mi muro' : 'My wall'}
-                </Text>
-              </Pressable>
-              <Pressable
-                style={({ pressed }) => [
-                  styles.segBtn,
-                  surfaceChoice === 'community' && styles.segBtnActive,
-                  pressed && styles.pressed,
-                ]}
-                onPress={() => setSurfaceChoice('community')}
-              >
-                <Feather
-                  name="users"
-                  size={14}
-                  color={
-                    surfaceChoice === 'community' ? Colors.textInverse : Colors.textSecondary
-                  }
-                />
-                <Text
-                  style={[
-                    styles.segBtnLabel,
-                    surfaceChoice === 'community' && styles.segBtnLabelActive,
-                  ]}
-                >
-                  {t ? 'Comunidad' : 'Community'}
-                </Text>
-              </Pressable>
+          {/* ── Surface toggle ────────────── */}
+          {canChangeSurface ? (
+            <View style={{ marginBottom: Spacing[6] }}>
+              <SegmentedControl
+                value={surfaceChoice}
+                onChange={setSurfaceChoice}
+                options={surfaceOptions}
+              />
             </View>
-          )}
+          ) : null}
 
-          {/* ── Author row ─────────────────────── */}
+          {/* ── Author row ────────────────── */}
           <View style={styles.authorRow}>
             {user?.profile?.avatarUrl ? (
               <Image source={{ uri: user.profile.avatarUrl }} style={styles.avatar} />
@@ -307,20 +283,22 @@ export default function NewPost() {
               </View>
             )}
             <View style={{ flex: 1 }}>
-              <Text style={styles.authorName}>{fullName}</Text>
-              <Text style={styles.authorSub}>
+              <Text style={styles.authorName} numberOfLines={1}>
+                {fullName}
+              </Text>
+              <Caption tone="muted" style={{ marginTop: 2 }}>
                 {isWallPost
                   ? t
-                    ? 'Publicar en mi muro'
-                    : 'Posting to my wall'
+                    ? 'Publicas en tu muro'
+                    : 'Posting on your wall'
                   : t
-                    ? 'Publicar para todos'
-                    : 'Posting to everyone'}
-              </Text>
+                    ? 'Publicas para la comunidad'
+                    : 'Posting to the community'}
+              </Caption>
             </View>
           </View>
 
-          {/* ── Textarea ───────────────────────── */}
+          {/* ── Textarea ──────────────────── */}
           <TextInput
             style={styles.textarea}
             placeholder={
@@ -339,9 +317,11 @@ export default function NewPost() {
             multiline
             maxLength={MAX_LEN}
             autoFocus={!localImage}
+            accessibilityLabel={t ? 'Texto de la publicación' : 'Post text'}
           />
-          {(mention.activeQuery !== null) && (
-            <View style={{ marginTop: 8 }}>
+
+          {mention.activeQuery !== null ? (
+            <View style={{ marginTop: Spacing[3] }}>
               <MentionSuggestions
                 suggestions={mention.suggestions}
                 loading={mention.loading}
@@ -355,9 +335,9 @@ export default function NewPost() {
                 }
               />
             </View>
-          )}
+          ) : null}
 
-          {/* ── Image preview ──────────────────── */}
+          {/* ── Image preview ─────────────── */}
           {localImage ? (
             <View style={styles.previewWrap}>
               <Image
@@ -368,19 +348,25 @@ export default function NewPost() {
                 ]}
                 resizeMode="cover"
               />
-              <Pressable
-                style={({ pressed }) => [styles.removeBtn, pressed && styles.pressed]}
+              <Pressy
                 onPress={() => {
                   setLocalImage(null);
                   setPhotoTags([]);
                 }}
-                hitSlop={10}
+                haptic="tap"
+                hitSlop={HitSlop.expand}
+                accessibilityRole={Roles.button}
+                accessibilityLabel={t ? 'Quitar imagen' : 'Remove image'}
+                style={styles.removeBtn}
               >
                 <Feather name="x" size={16} color="#fff" />
-              </Pressable>
-              <Pressable
-                style={({ pressed }) => [styles.tagBtn, pressed && styles.pressed]}
+              </Pressy>
+              <Pressy
                 onPress={() => setTaggerOpen(true)}
+                haptic="select"
+                accessibilityRole={Roles.button}
+                accessibilityLabel={t ? 'Etiquetar personas' : 'Tag people'}
+                style={styles.tagBtn}
               >
                 <Feather name="user-plus" size={14} color="#fff" />
                 <Text style={styles.tagBtnText}>
@@ -389,73 +375,62 @@ export default function NewPost() {
                       ? `${photoTags.length} etiquetad${photoTags.length === 1 ? 'o' : 'os'}`
                       : `${photoTags.length} tagged`
                     : t
-                      ? 'Etiquetar personas'
-                      : 'Tag people'}
+                      ? 'Etiquetar'
+                      : 'Tag'}
                 </Text>
-              </Pressable>
+              </Pressy>
             </View>
           ) : null}
 
-          <Text style={styles.charCount}>
+          <Caption tone="muted" align="right" style={{ marginTop: Spacing[4] }}>
             {content.length} / {MAX_LEN}
-          </Text>
+          </Caption>
         </ScrollView>
 
-        {/* ── Bottom action bar ────────────────── */}
+        {/* ── Bottom action bar ──────────── */}
+        <Hairline variant="subtle" />
         <View style={styles.actionBar}>
-          <View style={styles.actionBtnsRow}>
-            <Pressable
+          <View style={styles.actionRow}>
+            <Pressy
               onPress={takePhoto}
               disabled={pickingImage}
-              style={({ pressed }) => [
-                styles.actionBtn,
-                pickingImage && { opacity: 0.5 },
-                pressed && styles.pressed,
-              ]}
+              haptic="select"
+              accessibilityRole={Roles.button}
+              accessibilityLabel={t ? 'Cámara' : 'Camera'}
+              style={[styles.actionBtn, pickingImage && { opacity: 0.5 }]}
             >
-              {pickingImage ? (
-                <ActivityIndicator color={Colors.accentPrimary} size="small" />
-              ) : (
-                <Feather name="camera" size={20} color={Colors.accentPrimary} />
-              )}
-              <Text style={styles.actionBtnLabel}>{t ? 'Cámara' : 'Camera'}</Text>
-            </Pressable>
-
-            <Pressable
+              <Feather name="camera" size={18} color={Colors.textPrimary} />
+              <Text style={styles.actionLabel}>{t ? 'Cámara' : 'Camera'}</Text>
+            </Pressy>
+            <Pressy
               onPress={pickFromGallery}
               disabled={pickingImage}
-              style={({ pressed }) => [
-                styles.actionBtn,
-                pickingImage && { opacity: 0.5 },
-                pressed && styles.pressed,
-              ]}
+              haptic="select"
+              accessibilityRole={Roles.button}
+              accessibilityLabel={t ? 'Galería' : 'Gallery'}
+              style={[styles.actionBtn, pickingImage && { opacity: 0.5 }]}
             >
-              {pickingImage ? (
-                <ActivityIndicator color={Colors.accentPrimary} size="small" />
-              ) : (
-                <Feather name="image" size={20} color={Colors.accentPrimary} />
-              )}
-              <Text style={styles.actionBtnLabel}>{t ? 'Galería' : 'Gallery'}</Text>
-            </Pressable>
+              <Feather name="image" size={18} color={Colors.textPrimary} />
+              <Text style={styles.actionLabel}>{t ? 'Galería' : 'Gallery'}</Text>
+            </Pressy>
           </View>
 
-          {/* Aspect ratio selector — only when no image picked */}
-          {!localImage && (
+          {!localImage ? (
             <View style={styles.ratioRow}>
               {RATIOS.map((r) => {
                 const active = selectedRatio === r.key;
                 return (
                   <Pressable
                     key={r.key}
-                    style={({ pressed }) => [
-                      styles.ratioBtn,
-                      active && styles.ratioBtnActive,
-                      pressed && styles.pressed,
-                    ]}
                     onPress={() => setSelectedRatio(r.key)}
+                    accessibilityRole={Roles.button}
+                    accessibilityLabel={`${t ? 'Proporción' : 'Ratio'} ${r.label}`}
+                    accessibilityState={{ selected: active }}
+                    hitSlop={HitSlop.expand}
+                    style={[styles.ratioBtn, active && styles.ratioBtnActive]}
                   >
                     <Text
-                      style={[styles.ratioBtnLabel, active && styles.ratioBtnLabelActive]}
+                      style={[styles.ratioLabel, active && styles.ratioLabelActive]}
                     >
                       {r.label}
                     </Text>
@@ -463,9 +438,10 @@ export default function NewPost() {
                 );
               })}
             </View>
-          )}
+          ) : null}
         </View>
       </KeyboardAvoidingView>
+
       <PhotoTagger
         visible={taggerOpen}
         imageUri={localImage}
@@ -477,97 +453,72 @@ export default function NewPost() {
   );
 }
 
-// ─────────────────────────────────────────────
-//  Styles (aligned with new-story.tsx)
-// ─────────────────────────────────────────────
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
-  pressed: { opacity: 0.7 },
 
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: Colors.border,
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[2],
+    paddingBottom: Spacing[3],
+    gap: Spacing[3],
   },
-  topBtn: {
+  iconBtn: {
     width: 40,
     height: 40,
     alignItems: 'center',
     justifyContent: 'center',
+    borderRadius: Radius.full,
   },
-  title: { color: Colors.textPrimary, fontSize: 16, fontWeight: '700' },
-  publishBtn: {
-    paddingHorizontal: 14,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: Colors.accentPrimary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minWidth: 80,
+  publishSlot: {
+    minWidth: 100,
   },
-  publishLabel: { color: Colors.textInverse, fontSize: 13, fontWeight: '700' },
 
-  scrollContent: { padding: 16, paddingBottom: 32 },
-
-  // Segmented control (surface toggle)
-  segRow: {
-    flexDirection: 'row',
-    gap: 6,
-    padding: 4,
-    backgroundColor: Colors.bgElevated,
-    borderRadius: 10,
-    marginBottom: 16,
+  scrollContent: {
+    padding: EditorialSpacing.pageGutter,
+    paddingBottom: Spacing[10],
   },
-  segBtn: {
-    flex: 1,
-    height: 36,
-    borderRadius: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-  },
-  segBtnActive: { backgroundColor: Colors.textPrimary },
-  segBtnLabel: { color: Colors.textSecondary, fontSize: 13, fontWeight: '600' },
-  segBtnLabelActive: { color: Colors.textInverse, fontWeight: '700' },
 
-  // Author row
+  // Author
   authorRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    marginBottom: 14,
+    gap: Spacing[3],
+    marginBottom: Spacing[5],
   },
   avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: Colors.accentPrimary,
+    width: 44,
+    height: 44,
+    borderRadius: Radius.full,
+    backgroundColor: Colors.bgElevated,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
-  avatarText: { color: Colors.textInverse, fontWeight: '700', fontSize: 14 },
-  authorName: { color: Colors.textPrimary, fontSize: 14, fontWeight: '700' },
-  authorSub: { color: Colors.textMuted, fontSize: 12, marginTop: 2 },
-
-  // Textarea
-  textarea: {
-    minHeight: 140,
+  avatarText: {
+    ...TypePresets.label,
     color: Colors.textPrimary,
-    fontSize: 16,
-    lineHeight: 23,
+    fontSize: 12,
+  },
+  authorName: {
+    ...TypePresets.subhead,
+    color: Colors.textPrimary,
+  },
+
+  textarea: {
+    minHeight: 160,
+    color: Colors.textPrimary,
+    ...TypePresets.bodyLg,
     textAlignVertical: 'top',
     padding: 0,
   },
 
-  // Image preview
   previewWrap: {
-    marginTop: 14,
-    borderRadius: 12,
+    marginTop: Spacing[5],
+    borderRadius: Radius.card,
     overflow: 'hidden',
     backgroundColor: Colors.bgElevated,
     position: 'relative',
@@ -575,82 +526,88 @@ const styles = StyleSheet.create({
   preview: { width: '100%' },
   removeBtn: {
     position: 'absolute',
-    top: 8,
-    right: 8,
+    top: Spacing[3],
+    right: Spacing[3],
     width: 30,
     height: 30,
     borderRadius: 15,
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    backgroundColor: 'rgba(0,0,0,0.6)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   tagBtn: {
     position: 'absolute',
-    bottom: 10,
-    left: 10,
+    bottom: Spacing[3],
+    left: Spacing[3],
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 14,
-    backgroundColor: 'rgba(0,0,0,0.62)',
+    gap: Spacing[2],
+    paddingHorizontal: Spacing[3],
+    paddingVertical: Spacing[2],
+    borderRadius: Radius.full,
+    backgroundColor: 'rgba(0,0,0,0.6)',
   },
-  tagBtnText: { color: '#fff', fontSize: 12, fontWeight: '700' },
-
-  charCount: {
-    alignSelf: 'flex-end',
-    marginTop: 12,
+  tagBtnText: {
+    ...TypePresets.label,
+    color: '#fff',
     fontSize: 11,
-    color: Colors.textMuted,
   },
 
   // Bottom action bar
   actionBar: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: Colors.border,
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingVertical: Spacing[3],
+    gap: Spacing[3],
     backgroundColor: Colors.bgPrimary,
-    paddingHorizontal: 14,
-    paddingTop: 10,
-    paddingBottom: 10,
-    gap: 10,
   },
-  actionBtnsRow: {
+  actionRow: {
     flexDirection: 'row',
-    gap: 10,
+    gap: Spacing[3],
   },
   actionBtn: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
-    height: 44,
-    backgroundColor: Colors.bgElevated,
-    borderRadius: 10,
+    gap: Spacing[2],
+    minHeight: 44,
+    paddingHorizontal: Spacing[4],
+    backgroundColor: Colors.bgCard,
+    borderRadius: Radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+    borderTopColor: Colors.highlightTop,
   },
-  actionBtnLabel: { color: Colors.textPrimary, fontSize: 13, fontWeight: '700' },
-
+  actionLabel: {
+    ...TypePresets.subhead,
+    color: Colors.textPrimary,
+  },
   ratioRow: {
     flexDirection: 'row',
-    gap: 6,
+    gap: Spacing[2],
     justifyContent: 'center',
   },
   ratioBtn: {
-    minWidth: 58,
-    height: 30,
-    paddingHorizontal: 12,
-    borderRadius: 15,
+    minWidth: 56,
+    minHeight: 30,
+    paddingHorizontal: Spacing[3],
+    borderRadius: Radius.full,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: Colors.border,
-    backgroundColor: Colors.bgElevated,
+    backgroundColor: Colors.bgCard,
   },
   ratioBtnActive: {
     backgroundColor: Colors.textPrimary,
     borderColor: Colors.textPrimary,
   },
-  ratioBtnLabel: { color: Colors.textSecondary, fontSize: 12, fontWeight: '700' },
-  ratioBtnLabelActive: { color: Colors.textInverse },
+  ratioLabel: {
+    ...TypePresets.label,
+    color: Colors.textSecondary,
+    fontSize: 11,
+  },
+  ratioLabelActive: {
+    color: Colors.textInverse,
+  },
 });

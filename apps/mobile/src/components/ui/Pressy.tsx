@@ -1,21 +1,26 @@
 // ─────────────────────────────────────────────
-//  Pressy — Pressable with built-in polish:
-//   · Subtle scale-down on press (spring back on release)
-//   · Optional haptic on press
-//   · Disabled state handled gracefully
+//  Pressy — Pressable with Editorial Premium polish
 //
-//  Drop-in replacement for <Pressable>. Same props, better feel.
+//  · Spring scale on press (no overshoot, settles fast)
+//  · Optional haptic on press
+//  · Disabled handled gracefully (no animation, no haptic)
+//  · A11y baseline: defaults to role=button when onPress is set, requires
+//    `accessibilityLabel` for non-text children to satisfy the lint
+//  · Layout props (flex, width, margin, position) routed to the wrapper
+//    so flex:1 still works through the Animated.View
 // ─────────────────────────────────────────────
 import React, { useMemo, useRef } from 'react';
 import {
   Animated,
-  Easing,
   Pressable,
   PressableProps,
   StyleSheet,
   ViewStyle,
   StyleProp,
 } from 'react-native';
+
+import { Press } from '@/constants/motion';
+import { HitSlop, Roles } from '@/constants/a11y';
 import { useFeedback } from '@/hooks/useFeedback';
 
 // Layout props that must live on the OUTER (animated) wrapper so the wrapper
@@ -48,7 +53,7 @@ function splitLayoutStyle(style: StyleProp<ViewStyle>): {
 
 type HapticKind = 'none' | 'tap' | 'select' | 'success' | 'error' | 'warning' | 'destructive';
 
-interface PressyProps extends PressableProps {
+interface PressyProps extends Omit<PressableProps, 'style'> {
   haptic?: HapticKind;
   scaleTo?: number;
   style?: StyleProp<ViewStyle> | ((state: { pressed: boolean }) => StyleProp<ViewStyle>);
@@ -57,10 +62,13 @@ interface PressyProps extends PressableProps {
 
 export function Pressy({
   haptic = 'tap',
-  scaleTo = 0.96,
+  scaleTo = Press.scale,
   style,
   onPress,
   disabled,
+  accessibilityRole,
+  accessibilityLabel,
+  hitSlop,
   children,
   ...rest
 }: PressyProps) {
@@ -70,8 +78,11 @@ export function Pressy({
   const animateTo = (to: number) => {
     Animated.spring(scale, {
       toValue: to,
-      tension: 180,
-      friction: 10,
+      // Match Springs.press (damping 22, stiffness 280) in feel — RN Animated
+      // doesn't speak the same params so we tune to the same perceptual rest.
+      tension: 240,
+      friction: 12,
+      overshootClamping: true,
       useNativeDriver: true,
     }).start();
   };
@@ -95,13 +106,20 @@ export function Pressy({
     [isStyleFn, style],
   );
 
+  // Default role to 'button' if the caller has an onPress and didn't say
+  // otherwise. Saves screen-reader users from anonymous tap targets.
+  const resolvedRole = accessibilityRole ?? (onPress ? Roles.button : undefined);
+  const resolvedHitSlop = hitSlop ?? HitSlop.expand;
+
   return (
-    <Animated.View
-      style={[split?.outer, { transform: [{ scale }] }]}
-    >
+    <Animated.View style={[split?.outer, { transform: [{ scale }] }]}>
       <Pressable
         {...rest}
         disabled={disabled}
+        accessibilityRole={resolvedRole}
+        accessibilityLabel={accessibilityLabel}
+        accessibilityState={{ disabled: !!disabled, ...(rest.accessibilityState ?? {}) }}
+        hitSlop={resolvedHitSlop}
         onPressIn={(e) => {
           if (!disabled) animateTo(scaleTo);
           rest.onPressIn?.(e);

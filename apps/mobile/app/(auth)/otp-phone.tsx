@@ -1,19 +1,52 @@
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
-import { useState, useRef, useEffect } from 'react';
+// ─────────────────────────────────────────────
+//  OTP Phone — Editorial Premium
+//
+//  Twin of otp-email but for SMS verification. Same 6-box editorial
+//  layout. Masks phone number for privacy. Supports oneTimeCode auto-fill
+//  on iOS via `textContentType` and Android via `autoComplete=sms-otp`.
+// ─────────────────────────────────────────────
+import { useEffect, useRef, useState } from 'react';
+import {
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  TextInput,
+  View,
+} from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+
 import { otpApi } from '@/api/client';
 import { useAuthStore } from '@/stores/auth.store';
 import { useAppStore } from '@/stores/app.store';
 import { apiError } from '@/api/errors';
-import { Colors, Radius } from '@/constants/tokens';
+import {
+  Colors,
+  EditorialSpacing,
+  Radius,
+  Spacing,
+  TypePresets,
+} from '@/constants/tokens';
+import { HitSlop } from '@/constants/a11y';
+import {
+  Body,
+  Button,
+  Caption,
+  Display,
+  FadeIn,
+  Kicker,
+  Lead,
+  Pressy,
+} from '@/components/ui';
 
 const OTP_LEN = 6;
 
 export default function OtpPhone() {
   const router = useRouter();
-  const { phone, email, password, purpose } = useLocalSearchParams<{
+  const { phone, password, purpose } = useLocalSearchParams<{
     phone: string;
     email?: string;
     password?: string;
@@ -100,13 +133,17 @@ export default function OtpPhone() {
     try {
       await otpApi.send({ phone, type: otpType });
       setResendIn(60);
-    } catch {}
-    finally { setResending(false); }
+    } catch {
+      /* swallow — UX: stay quiet if resend fails, user can retry */
+    } finally {
+      setResending(false);
+    }
   }
 
   const mm = String(Math.floor(resendIn / 60)).padStart(2, '0');
   const ss = String(resendIn % 60).padStart(2, '0');
-  const maskedPhone = phone ? phone.slice(0, 4) + '****' + phone.slice(-3) : '';
+  const maskedPhone = phone ? phone.slice(0, 4) + '••••' + phone.slice(-3) : '';
+  const allFilled = digits.every((d) => d);
 
   return (
     <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
@@ -115,71 +152,117 @@ export default function OtpPhone() {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} hitSlop={10}>
-            <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.content}>
-          <Text style={styles.title}>
-            {t ? 'Verifica tu teléfono' : 'Verify your phone'}
-          </Text>
-          <Text style={styles.subtitle}>
-            {t ? `Enviamos un SMS con un código de 6 dígitos a\n${maskedPhone}` : `We sent a 6-digit SMS code to\n${maskedPhone}`}
-          </Text>
-
-          <View style={styles.boxes}>
-            {digits.map((d, i) => (
-              <TextInput
-                key={i}
-                ref={(r) => { refs.current[i] = r; }}
-                style={[styles.box, d && styles.boxFilled]}
-                value={d}
-                onChangeText={(v) => handleChange(i, v)}
-                onKeyPress={({ nativeEvent }) => handleKeyPress(i, nativeEvent.key)}
-                keyboardType="number-pad"
-                maxLength={OTP_LEN}
-                textAlign="center"
-                selectionColor={Colors.accentPrimary}
-                autoComplete="sms-otp"
-                textContentType="oneTimeCode"
-              />
-            ))}
-          </View>
-
-          {error ? <Text style={styles.error}>{error}</Text> : null}
-
-          <TouchableOpacity
-            style={[styles.primaryBtn, loading && styles.btnDisabled]}
-            onPress={() => handleVerify()}
-            disabled={loading || digits.some((d) => !d)}
-            activeOpacity={0.85}
+          <Pressable
+            onPress={() => router.back()}
+            hitSlop={HitSlop.expand}
+            accessibilityRole="button"
+            accessibilityLabel={t ? 'Volver' : 'Back'}
+            style={styles.backBtn}
           >
-            {loading
-              ? <ActivityIndicator color={Colors.textInverse} />
-              : <Text style={styles.primaryBtnLabel}>{t ? 'Verificar código' : 'Verify code'}</Text>}
-          </TouchableOpacity>
-
-          <View style={styles.resendRow}>
-            <Text style={styles.resendText}>
-              {t ? '¿No recibiste el código? ' : "Didn't get the code? "}
-            </Text>
-            <TouchableOpacity onPress={resend} disabled={resendIn > 0} hitSlop={6}>
-              <Text style={[styles.resendLink, resendIn > 0 && { opacity: 0.4 }]}>
-                {t ? 'Reenviar' : 'Resend'}
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          {resendIn > 0 && (
-            <View style={styles.timerRow}>
-              <Feather name="clock" size={14} color={Colors.textMuted} />
-              <Text style={styles.timerText}>
-                {t ? `Reenviar en ${mm}:${ss}` : `Resend in ${mm}:${ss}`}
-              </Text>
-            </View>
-          )}
+            <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
+          </Pressable>
         </View>
+
+        <ScrollView
+          contentContainerStyle={styles.scroll}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <FadeIn>
+            <Kicker tone="champagne">{t ? 'SMS DE 6 DÍGITOS' : '6-DIGIT SMS'}</Kicker>
+          </FadeIn>
+          <FadeIn delay={80} style={{ marginTop: Spacing[3] }}>
+            <Display size="md">
+              {t ? 'Verifica tu\nteléfono.' : 'Verify your\nphone.'}
+            </Display>
+          </FadeIn>
+          <FadeIn delay={180} style={{ marginTop: Spacing[4], maxWidth: 360 }}>
+            <Lead tone="secondary">
+              {t ? 'Enviamos un código a' : 'We sent a code to'}{' '}
+              <Lead tone="primary">{maskedPhone}</Lead>
+            </Lead>
+          </FadeIn>
+
+          <FadeIn delay={280} style={styles.boxesWrap}>
+            <View
+              style={styles.boxes}
+              accessibilityLabel={t ? 'Código de 6 dígitos' : '6 digit code'}
+            >
+              {digits.map((d, i) => (
+                <TextInput
+                  key={i}
+                  ref={(r) => {
+                    refs.current[i] = r;
+                  }}
+                  style={[styles.box, !!d && styles.boxFilled]}
+                  value={d}
+                  onChangeText={(v) => handleChange(i, v)}
+                  onKeyPress={({ nativeEvent }) => handleKeyPress(i, nativeEvent.key)}
+                  keyboardType="number-pad"
+                  maxLength={OTP_LEN}
+                  textAlign="center"
+                  selectionColor={Colors.accentPrimary}
+                  autoComplete={i === 0 ? 'sms-otp' : undefined}
+                  textContentType={i === 0 ? 'oneTimeCode' : undefined}
+                  accessibilityLabel={
+                    t ? `Dígito ${i + 1} de ${OTP_LEN}` : `Digit ${i + 1} of ${OTP_LEN}`
+                  }
+                />
+              ))}
+            </View>
+          </FadeIn>
+
+          {error ? (
+            <FadeIn>
+              <Caption tone="danger" align="center" style={styles.errorText}>
+                {error}
+              </Caption>
+            </FadeIn>
+          ) : null}
+
+          <FadeIn delay={360} style={styles.cta}>
+            <Button
+              label={t ? 'Verificar código' : 'Verify code'}
+              onPress={() => handleVerify()}
+              loading={loading}
+              disabled={!allFilled}
+              variant="primary"
+              size="lg"
+              fullWidth
+            />
+          </FadeIn>
+
+          <View style={styles.resendBlock}>
+            {resendIn > 0 ? (
+              <Kicker tone="muted" align="center">
+                {t ? `REENVIAR EN ${mm}:${ss}` : `RESEND IN ${mm}:${ss}`}
+              </Kicker>
+            ) : (
+              <View style={styles.resendRow}>
+                <Body size="sm" tone="secondary">
+                  {t ? '¿No recibiste el código? ' : "Didn't get the code? "}
+                </Body>
+                <Pressy
+                  onPress={resend}
+                  disabled={resending}
+                  accessibilityRole="button"
+                  accessibilityLabel={t ? 'Reenviar código' : 'Resend code'}
+                  haptic="select"
+                >
+                  <Body size="sm" tone="accent" weight="semiBold">
+                    {resending
+                      ? t
+                        ? 'Reenviando…'
+                        : 'Resending…'
+                      : t
+                        ? 'Reenviar'
+                        : 'Resend'}
+                  </Body>
+                </Pressy>
+              </View>
+            )}
+          </View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -187,53 +270,53 @@ export default function OtpPhone() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
-  header: { paddingHorizontal: 20, paddingVertical: 8 },
+  header: { paddingHorizontal: EditorialSpacing.pageGutter, paddingTop: Spacing[2] },
   backBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: Colors.bgCard,
-    borderWidth: 1, borderColor: Colors.border,
-    alignItems: 'center', justifyContent: 'center',
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: -Spacing[2],
   },
-  content: {
-    flex: 1,
-    paddingHorizontal: 24,
-    paddingTop: 16,
-    gap: 20,
+  scroll: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[8],
+    paddingBottom: Spacing[10],
   },
-  title: { color: Colors.textPrimary, fontSize: 26, fontWeight: '800' },
-  subtitle: { color: Colors.textSecondary, fontSize: 14, lineHeight: 20 },
-  boxes: { flexDirection: 'row', gap: 10, marginTop: 8 },
+  boxesWrap: {
+    marginTop: Spacing[10],
+  },
+  boxes: {
+    flexDirection: 'row',
+    gap: Spacing[2],
+  },
   box: {
+    ...TypePresets.numericSm,
     flex: 1,
-    height: 60,
-    borderRadius: Radius.button,
-    borderWidth: 1.5,
+    height: 64,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
     borderColor: Colors.border,
     backgroundColor: Colors.bgCard,
     color: Colors.textPrimary,
-    fontSize: 24,
-    fontWeight: '700',
   },
-  boxFilled: { borderColor: Colors.accentPrimary },
-  error: { fontSize: 13, color: Colors.accentDanger, textAlign: 'center' },
-  primaryBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    height: 52,
-    backgroundColor: Colors.accentPrimary,
-    borderRadius: Radius.button,
-    marginTop: 4,
+  boxFilled: {
+    borderColor: Colors.accentPrimary,
+    backgroundColor: Colors.bgElevated,
   },
-  primaryBtnLabel: { color: Colors.textInverse, fontSize: 16, fontWeight: '700' },
-  btnDisabled: { opacity: 0.6 },
+  errorText: {
+    marginTop: Spacing[4],
+  },
+  cta: {
+    marginTop: Spacing[8],
+  },
+  resendBlock: {
+    marginTop: Spacing[6],
+    alignItems: 'center',
+  },
   resendRow: {
-    flexDirection: 'row', justifyContent: 'center', alignItems: 'center',
-    marginTop: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  resendText: { color: Colors.textSecondary, fontSize: 13 },
-  resendLink: { color: Colors.accentPrimary, fontSize: 13, fontWeight: '700' },
-  timerRow: {
-    flexDirection: 'row', justifyContent: 'center', alignItems: 'center',
-    gap: 6,
-  },
-  timerText: { color: Colors.textMuted, fontSize: 12 },
 });

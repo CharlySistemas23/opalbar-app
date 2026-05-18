@@ -1,33 +1,56 @@
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, FlatList, ActivityIndicator, Image, Keyboard } from 'react-native';
+// ─────────────────────────────────────────────
+//  Search — Editorial Premium
+//
+//  Magazine search bay:
+//   · Header: back + inline search input (hairline outlined)
+//   · Tabs (underline) — Personas / Bares / Eventos
+//   · Results: Card list with avatar + heading + caption + chevron
+//   · Empty / Error / Loading via EmptyState/ErrorState/SkeletonList
+// ─────────────────────────────────────────────
+import {
+  FlatList,
+  Image,
+  Keyboard,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+
 import { usersApi, eventsApi, venueApi } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { useAppStore } from '@/stores/app.store';
-import { Colors, Radius } from '@/constants/tokens';
+import { Colors, EditorialSpacing, Radius, Spacing, TypePresets } from '@/constants/tokens';
+import { HitSlop, Roles } from '@/constants/a11y';
+import {
+  Body,
+  Caption,
+  Hairline,
+  Pressy,
+  SkeletonList,
+  Tabs,
+  type SegmentOption,
+} from '@/components/ui';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 
 type Tab = 'people' | 'bars' | 'events';
-const TABS: { key: Tab; label: { es: string; en: string } }[] = [
-  { key: 'people', label: { es: 'Personas', en: 'People' } },
-  { key: 'bars',   label: { es: 'Bares',    en: 'Bars' } },
-  { key: 'events', label: { es: 'Eventos',  en: 'Events' } },
-];
-
-const AVATAR_COLORS = ['#F4A340', '#60A5FA', '#A855F7', '#38C793', '#E45858', '#EC4899'];
-
-function colorFor(id: string) {
-  const idx = Math.abs([...id].reduce((a, c) => a + c.charCodeAt(0), 0)) % AVATAR_COLORS.length;
-  return AVATAR_COLORS[idx];
-}
 
 export default function Search() {
   const router = useRouter();
   const { language } = useAppStore();
   const t = language === 'es';
+
+  const tabOptions: SegmentOption<Tab>[] = [
+    { value: 'people', label: t ? 'Personas' : 'People' },
+    { value: 'bars', label: t ? 'Bares' : 'Bars' },
+    { value: 'events', label: t ? 'Eventos' : 'Events' },
+  ];
 
   const [tab, setTab] = useState<Tab>('people');
   const [q, setQ] = useState('');
@@ -57,7 +80,9 @@ export default function Search() {
     } catch (err) {
       setResults([]);
       setError(apiError(err));
-    } finally { setLoading(false); }
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -67,54 +92,55 @@ export default function Search() {
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
-      {/* Header */}
+      {/* ── Header ────────────────────────── */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn} hitSlop={10}>
-          <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
-        </TouchableOpacity>
+        <Pressy
+          onPress={() => router.back()}
+          haptic="select"
+          hitSlop={HitSlop.expand}
+          accessibilityRole={Roles.button}
+          accessibilityLabel="Volver"
+          style={styles.backBtn}
+        >
+          <Feather name="arrow-left" size={22} color={Colors.textPrimary} />
+        </Pressy>
         <View style={styles.searchBox}>
           <Feather name="search" size={16} color={Colors.textMuted} />
           <TextInput
             autoFocus
             value={q}
             onChangeText={setQ}
-            placeholder={t ? 'Buscar…' : 'Search…'}
-            placeholderTextColor={Colors.textMuted}
+            placeholder={t ? 'Buscar personas, bares, eventos' : 'Search people, bars, events'}
+            placeholderTextColor={Colors.textDisabled}
             style={styles.searchInput}
             autoCapitalize="none"
             returnKeyType="search"
             onSubmitEditing={Keyboard.dismiss}
+            accessibilityLabel={t ? 'Buscador' : 'Search'}
           />
-          {q.length > 0 && (
-            <TouchableOpacity onPress={() => setQ('')} hitSlop={8}>
+          {q.length > 0 ? (
+            <Pressable
+              onPress={() => setQ('')}
+              hitSlop={HitSlop.expand}
+              accessibilityRole={Roles.button}
+              accessibilityLabel={t ? 'Limpiar' : 'Clear'}
+            >
               <Feather name="x-circle" size={16} color={Colors.textMuted} />
-            </TouchableOpacity>
-          )}
+            </Pressable>
+          ) : null}
         </View>
       </View>
 
-      {/* Tabs */}
-      <View style={styles.tabs}>
-        {TABS.map((T) => {
-          const selected = T.key === tab;
-          return (
-            <TouchableOpacity
-              key={T.key}
-              style={[styles.tab, selected && styles.tabActive]}
-              onPress={() => setTab(T.key)}
-              activeOpacity={0.85}
-            >
-              <Text style={[styles.tabLabel, selected && styles.tabLabelActive]}>
-                {T.label[language]}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
+      {/* ── Tabs (underline) ──────────────── */}
+      <View style={styles.tabsWrap}>
+        <Tabs value={tab} onChange={setTab} options={tabOptions} />
       </View>
 
-      {/* Results */}
+      {/* ── Results ──────────────────────── */}
       {loading ? (
-        <View style={styles.center}><ActivityIndicator color={Colors.accentPrimary} /></View>
+        <View style={{ paddingHorizontal: EditorialSpacing.pageGutter, paddingTop: Spacing[5] }}>
+          <SkeletonList count={5} itemHeight={72} />
+        </View>
       ) : q.trim().length === 0 ? (
         <EmptyState
           icon="search"
@@ -136,12 +162,33 @@ export default function Search() {
       ) : (
         <FlatList
           data={results}
-          keyExtractor={(x) => x.id}
-          contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 8, paddingBottom: 24 }}
+          keyExtractor={(x: any) => x.id}
+          contentContainerStyle={styles.list}
+          ItemSeparatorComponent={() => (
+            <Hairline variant="subtle" marginHorizontal={Spacing[5]} />
+          )}
           renderItem={({ item }) => {
-            if (tab === 'people') return <PersonRow u={item} onPress={() => router.push(`/(app)/users/${item.id}` as never)} />;
-            if (tab === 'bars')   return <VenueRow v={item} onPress={() => router.push(`/(app)/venue/${item.id}` as never)} />;
-            return <EventRow ev={item} t={t} onPress={() => router.push(`/(app)/events/${item.id}` as never)} />;
+            if (tab === 'people')
+              return (
+                <PersonRow
+                  u={item}
+                  onPress={() => router.push(`/(app)/users/${item.id}` as never)}
+                />
+              );
+            if (tab === 'bars')
+              return (
+                <VenueRow
+                  v={item}
+                  onPress={() => router.push(`/(app)/venue/${item.id}` as never)}
+                />
+              );
+            return (
+              <EventRow
+                ev={item}
+                language={language}
+                onPress={() => router.push(`/(app)/events/${item.id}` as never)}
+              />
+            );
           }}
         />
       )}
@@ -149,62 +196,116 @@ export default function Search() {
   );
 }
 
+// ── Person row ──────────────────────────────
 function PersonRow({ u, onPress }: { u: any; onPress: () => void }) {
   const first = u?.profile?.firstName ?? '';
   const last = u?.profile?.lastName ?? '';
   const name = `${first} ${last}`.trim() || (u.email?.split('@')[0] ?? 'Usuario');
-  const initials = ((first[0] || '') + (last[0] || '')).toUpperCase() || (u.email?.[0] ?? 'U').toUpperCase();
+  const initials =
+    ((first[0] || '') + (last[0] || '')).toUpperCase() || (u.email?.[0] ?? 'U').toUpperCase();
   const followers = u?._count?.followers ?? 0;
   const posts = u?._count?.posts ?? 0;
-  const events = u?._count?.events ?? 0;
   return (
-    <TouchableOpacity style={styles.row} onPress={onPress} activeOpacity={0.85}>
-      {u?.profile?.avatarUrl
-        ? <Image source={{ uri: u.profile.avatarUrl }} style={styles.avatar} />
-        : <View style={[styles.avatar, { backgroundColor: colorFor(u.id) }]}>
-            <Text style={styles.avatarText}>{initials}</Text>
-          </View>}
-      <View style={{ flex: 1 }}>
-        <Text style={styles.rowTitle}>{name}</Text>
-        {u?.profile?.bio ? <Text style={styles.rowSub} numberOfLines={1}>{u.profile.bio}</Text> : null}
-        <Text style={styles.rowMeta}>
-          {followers} seguidores • {posts} posts • {events} eventos
-        </Text>
+    <Pressy
+      onPress={onPress}
+      haptic="select"
+      accessibilityRole={Roles.button}
+      accessibilityLabel={name}
+      style={styles.row}
+    >
+      {u?.profile?.avatarUrl ? (
+        <Image source={{ uri: u.profile.avatarUrl }} style={styles.avatar} />
+      ) : (
+        <View style={styles.avatar}>
+          <Text style={styles.avatarText}>{initials}</Text>
+        </View>
+      )}
+      <View style={styles.rowText}>
+        <Body weight="semiBold" numberOfLines={1}>
+          {name}
+        </Body>
+        {u?.profile?.bio ? (
+          <Caption tone="muted" numberOfLines={1} style={{ marginTop: 2 }}>
+            {u.profile.bio}
+          </Caption>
+        ) : null}
+        <Caption tone="muted" style={{ marginTop: 2 }}>
+          {`${followers} · ${posts}`}
+        </Caption>
       </View>
-      <Feather name="chevron-right" size={16} color={Colors.textMuted} />
-    </TouchableOpacity>
+      <Feather name="chevron-right" size={18} color={Colors.textMuted} />
+    </Pressy>
   );
 }
 
+// ── Venue row ───────────────────────────────
 function VenueRow({ v, onPress }: { v: any; onPress: () => void }) {
   return (
-    <TouchableOpacity style={styles.row} onPress={onPress} activeOpacity={0.85}>
-      <View style={[styles.avatar, { backgroundColor: Colors.bgElevated }]}>
-        <Feather name="map-pin" size={20} color={Colors.accentPrimary} />
+    <Pressy
+      onPress={onPress}
+      haptic="select"
+      accessibilityRole={Roles.button}
+      accessibilityLabel={v.name}
+      style={styles.row}
+    >
+      <View style={styles.iconBox}>
+        <Feather name="map-pin" size={20} color={Colors.accentChampagne} />
       </View>
-      <View style={{ flex: 1 }}>
-        <Text style={styles.rowTitle}>{v.name}</Text>
-        <Text style={styles.rowSub}>{v.city}</Text>
+      <View style={styles.rowText}>
+        <Body weight="semiBold" numberOfLines={1}>
+          {v.name}
+        </Body>
+        {v.city ? (
+          <Caption tone="muted" numberOfLines={1} style={{ marginTop: 2 }}>
+            {v.city}
+          </Caption>
+        ) : null}
       </View>
-      <Feather name="chevron-right" size={16} color={Colors.textMuted} />
-    </TouchableOpacity>
+      <Feather name="chevron-right" size={18} color={Colors.textMuted} />
+    </Pressy>
   );
 }
 
-function EventRow({ ev, t, onPress }: { ev: any; t: boolean; onPress: () => void }) {
+// ── Event row ───────────────────────────────
+function EventRow({
+  ev,
+  language,
+  onPress,
+}: {
+  ev: any;
+  language: string;
+  onPress: () => void;
+}) {
+  const dateLabel = ev.startDate
+    ? new Date(ev.startDate).toLocaleDateString(language, {
+        day: 'numeric',
+        month: 'short',
+      })
+    : '';
+  const subtitle = [dateLabel, ev.venue?.name].filter(Boolean).join(' · ');
   return (
-    <TouchableOpacity style={styles.row} onPress={onPress} activeOpacity={0.85}>
-      <View style={[styles.avatar, { backgroundColor: Colors.bgElevated }]}>
-        <Feather name="calendar" size={20} color={Colors.accentPrimary} />
+    <Pressy
+      onPress={onPress}
+      haptic="select"
+      accessibilityRole={Roles.button}
+      accessibilityLabel={ev.title}
+      style={styles.row}
+    >
+      <View style={styles.iconBox}>
+        <Feather name="calendar" size={20} color={Colors.accentChampagne} />
       </View>
-      <View style={{ flex: 1 }}>
-        <Text style={styles.rowTitle} numberOfLines={1}>{ev.title}</Text>
-        <Text style={styles.rowSub} numberOfLines={1}>
-          {ev.startDate ? new Date(ev.startDate).toLocaleDateString() : ''} • {ev.venue?.name || ''}
-        </Text>
+      <View style={styles.rowText}>
+        <Body weight="semiBold" numberOfLines={1}>
+          {ev.title}
+        </Body>
+        {subtitle ? (
+          <Caption tone="muted" numberOfLines={1} style={{ marginTop: 2 }}>
+            {subtitle}
+          </Caption>
+        ) : null}
       </View>
-      <Feather name="chevron-right" size={16} color={Colors.textMuted} />
-    </TouchableOpacity>
+      <Feather name="chevron-right" size={18} color={Colors.textMuted} />
+    </Pressy>
   );
 }
 
@@ -214,65 +315,82 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 10,
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[2],
+    paddingBottom: Spacing[3],
+    gap: Spacing[3],
   },
-  iconBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: Colors.bgCard,
-    alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1, borderColor: Colors.border,
+  backBtn: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: Radius.full,
   },
   searchBox: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 14,
-    height: 40,
+    gap: Spacing[2],
+    paddingHorizontal: Spacing[4],
+    minHeight: 44,
     backgroundColor: Colors.bgCard,
-    borderRadius: 20,
-    borderWidth: 1,
+    borderRadius: Radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: Colors.border,
+    borderTopColor: Colors.highlightTop,
   },
-  searchInput: { flex: 1, color: Colors.textPrimary, fontSize: 15, padding: 0 },
-
-  tabs: {
-    flexDirection: 'row',
-    paddingHorizontal: 20,
-    paddingBottom: 6,
-    gap: 6,
-  },
-  tab: {
+  searchInput: {
     flex: 1,
-    paddingVertical: 10,
-    borderRadius: 20,
-    backgroundColor: Colors.bgCard,
-    borderWidth: 1, borderColor: Colors.border,
-    alignItems: 'center',
+    color: Colors.textPrimary,
+    ...TypePresets.body,
+    padding: 0,
   },
-  tabActive: { backgroundColor: Colors.accentPrimary, borderColor: Colors.accentPrimary },
-  tabLabel: { color: Colors.textSecondary, fontSize: 13, fontWeight: '600' },
-  tabLabelActive: { color: Colors.textInverse, fontWeight: '800' },
 
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10 },
-  placeholder: { color: Colors.textMuted, fontSize: 14, textAlign: 'center', paddingHorizontal: 24 },
+  tabsWrap: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    marginBottom: Spacing[2],
+  },
 
+  list: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[4],
+    paddingBottom: Spacing[10],
+  },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 6,
+    gap: Spacing[3],
+    paddingVertical: Spacing[3],
+    minHeight: 64,
+  },
+  rowText: {
+    flex: 1,
   },
   avatar: {
-    width: 44, height: 44, borderRadius: 22,
-    alignItems: 'center', justifyContent: 'center',
+    width: 44,
+    height: 44,
+    borderRadius: Radius.full,
+    backgroundColor: Colors.bgElevated,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
   },
-  avatarText: { color: Colors.textInverse, fontSize: 15, fontWeight: '800' },
-  rowTitle: { color: Colors.textPrimary, fontSize: 14, fontWeight: '700' },
-  rowSub: { color: Colors.textSecondary, fontSize: 12, marginTop: 2 },
-  rowMeta: { color: Colors.textMuted, fontSize: 11, marginTop: 2 },
+  avatarText: {
+    ...TypePresets.label,
+    color: Colors.textPrimary,
+    fontSize: 12,
+  },
+  iconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.bgElevated,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });

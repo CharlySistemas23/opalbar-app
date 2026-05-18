@@ -1,20 +1,43 @@
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, Platform } from 'react-native';
+// ─────────────────────────────────────────────
+//  Reservation Detail — Editorial Premium
+//
+//  Kicker (status) + Display (venue), an editorial QR card (kicker +
+//  short code + caption), then a hairline-divided details block.
+//  Secondary actions live below as ghost buttons; danger gets a danger
+//  button.
+// ─────────────────────────────────────────────
 import { useEffect, useState } from 'react';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { Alert, Platform, ScrollView, StyleSheet, View } from 'react-native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import QRCode from 'react-native-qrcode-svg';
+
+import {
+  Badge,
+  Body,
+  Button,
+  Caption,
+  Display,
+  FadeIn,
+  Hairline,
+  Kicker,
+  Pressy,
+  Skeleton,
+  Subhead,
+} from '@/components/ui';
+import { Colors, EditorialSpacing, Radius, Spacing } from '@/constants/tokens';
+import { HitSlop, Roles } from '@/constants/a11y';
 import { reservationsApi } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { ConfirmSheet } from '@/components/ConfirmSheet';
 import { useAppStore } from '@/stores/app.store';
-import { Colors, Radius } from '@/constants/tokens';
 
-const STATUS_META: Record<string, { bg: string; color: string; labelEs: string; labelEn: string }> = {
-  PENDING:    { bg: 'rgba(244,163,64,0.15)',   color: '#F4A340', labelEs: 'Pendiente',  labelEn: 'Pending'    },
-  CONFIRMED:  { bg: 'rgba(56,199,147,0.15)',   color: '#38C793', labelEs: 'Confirmada', labelEn: 'Confirmed'  },
-  COMPLETED:  { bg: 'rgba(96,165,250,0.15)',   color: '#60A5FA', labelEs: 'Completada', labelEn: 'Completed'  },
-  CANCELLED:  { bg: 'rgba(228,88,88,0.15)',    color: '#E45858', labelEs: 'Cancelada',  labelEn: 'Cancelled'  },
+const STATUS_BADGE: Record<string, { variant: 'success' | 'warning' | 'danger' | 'info' | 'default'; es: string; en: string }> = {
+  PENDING:   { variant: 'warning', es: 'Pendiente',  en: 'Pending'   },
+  CONFIRMED: { variant: 'success', es: 'Confirmada', en: 'Confirmed' },
+  COMPLETED: { variant: 'info',    es: 'Completada', en: 'Completed' },
+  CANCELLED: { variant: 'danger',  es: 'Cancelada',  en: 'Cancelled' },
 };
 
 export default function ReservationDetail() {
@@ -22,146 +45,186 @@ export default function ReservationDetail() {
   const router = useRouter();
   const { language } = useAppStore();
   const t = language === 'es';
+
   const [reservation, setReservation] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [cancelling, setCancelling] = useState(false);
   const [showCancel, setShowCancel] = useState(false);
 
   useEffect(() => {
-    reservationsApi.get(id)
+    reservationsApi
+      .get(id)
       .then((r) => setReservation(r.data?.data))
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [id]);
 
-  function handleCancel() {
-    setShowCancel(true);
-  }
-
   async function confirmCancel() {
     setCancelling(true);
     try {
       await reservationsApi.cancel(id);
-      setReservation((r: any) => r ? { ...r, status: 'CANCELLED', cancelledAt: new Date().toISOString() } : r);
+      setReservation((r: any) =>
+        r ? { ...r, status: 'CANCELLED', cancelledAt: new Date().toISOString() } : r,
+      );
       setShowCancel(false);
     } catch (err: any) {
       Alert.alert(t ? 'Error' : 'Error', apiError(err));
-    } finally { setCancelling(false); }
+    } finally {
+      setCancelling(false);
+    }
   }
 
   if (loading) {
-    return <View style={styles.center}><ActivityIndicator color={Colors.accentPrimary} /></View>;
-  }
-  if (!reservation) {
     return (
-      <View style={styles.center}>
-        <Feather name="calendar" size={48} color={Colors.textMuted} />
-        <Text style={styles.notFound}>{t ? 'Reservación no encontrada' : 'Reservation not found'}</Text>
-      </View>
+      <SafeAreaView style={styles.root} edges={['top']}>
+        <View style={styles.headerRow}>
+          <BackBtn onPress={() => router.back()} label={t ? 'Volver' : 'Back'} />
+        </View>
+        <View style={styles.body}>
+          <Skeleton width="40%" height={12} />
+          <View style={{ height: Spacing[3] }} />
+          <Skeleton width="80%" height={36} />
+          <View style={{ height: Spacing[6] }} />
+          <Skeleton width="100%" height={260} radius={Radius.lg} />
+        </View>
+      </SafeAreaView>
     );
   }
 
-  const meta = STATUS_META[reservation.status] ?? STATUS_META.PENDING;
+  if (!reservation) {
+    return (
+      <SafeAreaView style={[styles.root, styles.center]} edges={['top']}>
+        <Feather name="calendar" size={36} color={Colors.textMuted} />
+        <Body tone="secondary" style={{ marginTop: Spacing[3] }}>
+          {t ? 'Reservación no encontrada' : 'Reservation not found'}
+        </Body>
+      </SafeAreaView>
+    );
+  }
+
+  const status = STATUS_BADGE[reservation.status] ?? STATUS_BADGE.PENDING;
   const showQr = reservation.status === 'CONFIRMED' || reservation.status === 'PENDING';
   const dateStr = reservation.date
-    ? new Date(reservation.date).toLocaleDateString(language, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+    ? new Date(reservation.date).toLocaleDateString(language, {
+        weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+      })
     : '—';
   const canCancel = reservation.status === 'PENDING' || reservation.status === 'CONFIRMED';
   const shortCode = (reservation.confirmCode || '').slice(-8).toUpperCase();
+  const venueName = reservation.venue?.name ?? '—';
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn} hitSlop={10}>
-          <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
-        </TouchableOpacity>
-        <Text style={styles.title}>{t ? 'Reservación' : 'Reservation'}</Text>
-        <View style={{ width: 40 }} />
+      <View style={styles.headerRow}>
+        <BackBtn onPress={() => router.back()} label={t ? 'Volver' : 'Back'} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={[styles.statusPill, { backgroundColor: meta.bg }]}>
-          <View style={[styles.statusDot, { backgroundColor: meta.color }]} />
-          <Text style={[styles.statusText, { color: meta.color }]}>
-            {t ? meta.labelEs : meta.labelEn}
-          </Text>
-        </View>
+      <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
+        <FadeIn>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing[3] }}>
+            <Kicker tone="champagne">{t ? 'RESERVA' : 'RESERVATION'}</Kicker>
+            <Badge label={status[language]} variant={status.variant} size="sm" />
+          </View>
+        </FadeIn>
 
-        {showQr && (
-          <View style={styles.qrCard}>
-            <Text style={styles.qrHeadline}>
-              {t ? 'Muestra este código al llegar' : 'Show this code at arrival'}
-            </Text>
+        <FadeIn delay={80} style={{ marginTop: Spacing[3] }}>
+          <Display size="md">{venueName}</Display>
+        </FadeIn>
+
+        {reservation.seatedAt ? (
+          <FadeIn delay={120} style={styles.seatedRow}>
+            <Feather name="check-circle" size={14} color={Colors.accentSuccess} />
+            <Caption tone="success">
+              {t ? 'Registrado en el lugar' : 'Checked-in at venue'}
+            </Caption>
+          </FadeIn>
+        ) : null}
+
+        {showQr ? (
+          <FadeIn delay={180} style={styles.qrCard}>
+            <Kicker tone="champagne">
+              {t ? 'PRESENTA AL LLEGAR' : 'SHOW ON ARRIVAL'}
+            </Kicker>
             <View style={styles.qrBox}>
               <QRCode
                 value={reservation.confirmCode}
-                size={220}
+                size={200}
                 backgroundColor="#FFFFFF"
                 color="#0D0D0F"
               />
             </View>
-            <Text style={styles.qrCode}>{shortCode}</Text>
-            <Text style={styles.qrHint}>
+            <Subhead align="center" style={styles.qrCode}>
+              {shortCode}
+            </Subhead>
+            <Caption tone="muted" align="center" style={{ marginTop: Spacing[2] }}>
               {t
                 ? 'El staff escaneará este QR para confirmar tu entrada.'
                 : 'Staff will scan this QR to confirm your arrival.'}
-            </Text>
-            <TouchableOpacity
-              style={styles.qrExpandBtn}
-              onPress={() => router.push(`/(app)/reservations/${reservation.id}/qr` as never)}
-              activeOpacity={0.85}
+            </Caption>
+            <Pressy
+              onPress={() =>
+                router.push(`/(app)/reservations/${reservation.id}/qr` as never)
+              }
+              accessibilityLabel={t ? 'Ver a pantalla completa' : 'View full screen'}
+              hitSlop={HitSlop.expand}
+              haptic="select"
+              style={styles.qrExpand}
             >
               <Feather name="maximize-2" size={14} color={Colors.accentPrimary} />
-              <Text style={styles.qrExpandLbl}>{t ? 'Ver a pantalla completa' : 'View full screen'}</Text>
-            </TouchableOpacity>
-          </View>
-        )}
+              <Caption tone="accent" style={{ marginLeft: Spacing[2], fontWeight: '600' }}>
+                {t ? 'Ver a pantalla completa' : 'View full screen'}
+              </Caption>
+            </Pressy>
+          </FadeIn>
+        ) : null}
 
-        {reservation.seatedAt && (
-          <View style={styles.seatedBadge}>
-            <Feather name="check-circle" size={18} color={Colors.accentSuccess} />
-            <Text style={styles.seatedText}>
-              {t ? 'Registrado en el lugar' : 'Checked-in at venue'}
-            </Text>
-          </View>
-        )}
-
-        <View style={styles.detailsCard}>
-          <Row label={t ? 'Venue' : 'Venue'} value={reservation.venue?.name ?? '—'} icon="home" />
-          <Row label={t ? 'Fecha' : 'Date'} value={dateStr} icon="calendar" />
-          <Row label={t ? 'Hora' : 'Time'} value={reservation.timeSlot ?? '—'} icon="clock" />
-          <Row label={t ? 'Personas' : 'Guests'} value={String(reservation.partySize ?? 1)} icon="users" />
+        {/* Details ───────────────────────── */}
+        <FadeIn delay={260} style={{ marginTop: Spacing[8] }}>
+          <Hairline variant="normal" />
+          <DetailRow kicker={t ? 'VENUE' : 'VENUE'} value={venueName} />
+          <Hairline variant="subtle" />
+          <DetailRow kicker={t ? 'FECHA' : 'DATE'} value={dateStr} />
+          <Hairline variant="subtle" />
+          <DetailRow kicker={t ? 'HORA' : 'TIME'} value={reservation.timeSlot ?? '—'} />
+          <Hairline variant="subtle" />
+          <DetailRow
+            kicker={t ? 'PERSONAS' : 'GUESTS'}
+            value={String(reservation.partySize ?? 1)}
+          />
           {reservation.specialRequests ? (
-            <Row label={t ? 'Notas' : 'Notes'} value={reservation.specialRequests} icon="file-text" />
+            <>
+              <Hairline variant="subtle" />
+              <DetailRow
+                kicker={t ? 'NOTAS' : 'NOTES'}
+                value={reservation.specialRequests}
+              />
+            </>
           ) : null}
-        </View>
+          <Hairline variant="normal" />
+        </FadeIn>
 
-        {canCancel && (
-          <TouchableOpacity
-            style={styles.modifyBtn}
-            onPress={() => router.push(`/(app)/reservations/${reservation.id}/modify` as never)}
-            activeOpacity={0.85}
-          >
-            <Feather name="edit-3" size={16} color={Colors.accentPrimary} />
-            <Text style={styles.modifyLabel}>{t ? 'Modificar reserva' : 'Modify reservation'}</Text>
-          </TouchableOpacity>
-        )}
-
-        {canCancel && (
-          <TouchableOpacity
-            style={styles.cancelBtn}
-            onPress={handleCancel}
-            disabled={cancelling}
-            activeOpacity={0.85}
-          >
-            {cancelling
-              ? <ActivityIndicator color={Colors.accentDanger} size="small" />
-              : <>
-                  <Feather name="x-circle" size={16} color={Colors.accentDanger} />
-                  <Text style={styles.cancelLabel}>{t ? 'Cancelar reservación' : 'Cancel reservation'}</Text>
-                </>}
-          </TouchableOpacity>
-        )}
+        {/* Actions ───────────────────────── */}
+        {canCancel ? (
+          <FadeIn delay={340} style={{ marginTop: Spacing[6], gap: Spacing[3] }}>
+            <Button
+              label={t ? 'Modificar reserva' : 'Modify reservation'}
+              onPress={() =>
+                router.push(`/(app)/reservations/${reservation.id}/modify` as never)
+              }
+              variant="secondary"
+              size="lg"
+              leftIcon={<Feather name="edit-3" size={16} color={Colors.textPrimary} />}
+            />
+            <Button
+              label={t ? 'Cancelar reservación' : 'Cancel reservation'}
+              onPress={() => setShowCancel(true)}
+              loading={cancelling}
+              variant="danger"
+              size="lg"
+              leftIcon={<Feather name="x-circle" size={16} color={Colors.accentDanger} />}
+            />
+          </FadeIn>
+        ) : null}
       </ScrollView>
 
       <ConfirmSheet
@@ -170,9 +233,11 @@ export default function ReservationDetail() {
         icon="x-circle"
         variant="danger"
         title={t ? 'Cancelar reservación' : 'Cancel reservation'}
-        message={t
-          ? 'La mesa se liberará para otros clientes. Esta acción no se puede deshacer.'
-          : "The table will be released. This can't be undone."}
+        message={
+          t
+            ? 'La mesa se liberará para otros clientes. Esta acción no se puede deshacer.'
+            : "The table will be released. This can't be undone."
+        }
         confirmLabel={t ? 'Sí, cancelar' : 'Yes, cancel'}
         loading={cancelling}
         onConfirm={confirmCancel}
@@ -181,125 +246,95 @@ export default function ReservationDetail() {
   );
 }
 
-function Row({ label, value, icon }: { label: string; value: string; icon: any }) {
+function DetailRow({ kicker, value }: { kicker: string; value: string }) {
   return (
-    <View style={styles.row}>
-      <View style={styles.rowIcon}>
-        <Feather name={icon} size={16} color={Colors.textSecondary} />
-      </View>
-      <View style={{ flex: 1 }}>
-        <Text style={styles.rowLabel}>{label}</Text>
-        <Text style={styles.rowValue}>{value}</Text>
-      </View>
+    <View style={styles.detailRow}>
+      <Kicker tone="muted" style={{ width: 110 }}>
+        {kicker}
+      </Kicker>
+      <Body size="md" tone="primary" style={{ flex: 1 }}>
+        {value}
+      </Body>
     </View>
   );
 }
 
+function BackBtn({ onPress, label }: { onPress: () => void; label: string }) {
+  return (
+    <Pressy
+      onPress={onPress}
+      accessibilityRole={Roles.button}
+      accessibilityLabel={label}
+      hitSlop={HitSlop.expand}
+      style={styles.backBtn}
+    >
+      <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
+    </Pressy>
+  );
+}
+
+void Platform;
+
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.bgPrimary, gap: 12 },
-  notFound: { color: Colors.textSecondary, fontSize: 14 },
+  center: { alignItems: 'center', justifyContent: 'center' },
 
-  header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 20, paddingTop: 8, paddingBottom: 8,
-    borderBottomWidth: 1, borderBottomColor: Colors.border,
+  headerRow: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[2],
   },
-  iconBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: Colors.bgCard,
-    alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1, borderColor: Colors.border,
+  backBtn: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: -Spacing[2],
   },
-  title: { color: Colors.textPrimary, fontSize: 17, fontWeight: '700' },
 
-  content: { padding: 20, gap: 16, paddingBottom: 40 },
-
-  statusPill: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    paddingHorizontal: 14, paddingVertical: 8,
-    borderRadius: 20,
-    alignSelf: 'flex-start',
+  body: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[6],
+    paddingBottom: Spacing[10],
   },
-  statusDot: { width: 8, height: 8, borderRadius: 4 },
-  statusText: { fontSize: 13, fontWeight: '700' },
+
+  seatedRow: {
+    marginTop: Spacing[4],
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing[2],
+  },
 
   qrCard: {
+    marginTop: Spacing[6],
+    paddingHorizontal: Spacing[5],
+    paddingVertical: Spacing[6],
     backgroundColor: Colors.bgCard,
-    borderRadius: 20,
-    padding: 20,
-    alignItems: 'center',
-    gap: 14,
+    borderRadius: Radius.lg,
     borderWidth: 1,
     borderColor: Colors.border,
+    alignItems: 'center',
   },
-  qrHeadline: { color: Colors.textPrimary, fontSize: 15, fontWeight: '700' },
   qrBox: {
-    padding: 16,
+    marginTop: Spacing[4],
+    padding: Spacing[4],
+    borderRadius: Radius.md,
     backgroundColor: '#FFFFFF',
-    borderRadius: 16,
   },
   qrCode: {
-    color: Colors.textPrimary,
-    fontSize: 20,
-    fontWeight: '800',
+    marginTop: Spacing[4],
     letterSpacing: 4,
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
-  qrHint: { color: Colors.textMuted, fontSize: 12, textAlign: 'center', lineHeight: 18 },
-  qrExpandBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    paddingHorizontal: 14, paddingVertical: 8,
-    marginTop: 8,
-    backgroundColor: 'rgba(244,163,64,0.15)',
-    borderRadius: 10,
-  },
-  qrExpandLbl: { color: Colors.accentPrimary, fontSize: 12, fontWeight: '700' },
-
-  seatedBadge: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    backgroundColor: 'rgba(56,199,147,0.1)',
-    borderWidth: 1, borderColor: 'rgba(56,199,147,0.3)',
-    paddingHorizontal: 14, paddingVertical: 10,
-    borderRadius: 12,
-  },
-  seatedText: { color: Colors.accentSuccess, fontSize: 13, fontWeight: '600' },
-
-  detailsCard: {
-    backgroundColor: Colors.bgCard,
-    borderRadius: 16,
-    padding: 4,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  row: {
-    flexDirection: 'row', gap: 12,
-    paddingHorizontal: 14, paddingVertical: 12,
+  qrExpand: {
+    marginTop: Spacing[4],
+    flexDirection: 'row',
     alignItems: 'center',
+    paddingVertical: Spacing[2],
   },
-  rowIcon: {
-    width: 32, height: 32, borderRadius: 10,
-    backgroundColor: Colors.bgElevated,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  rowLabel: { color: Colors.textMuted, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5 },
-  rowValue: { color: Colors.textPrimary, fontSize: 14, fontWeight: '600', marginTop: 2 },
 
-  cancelBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-    paddingVertical: 14,
-    backgroundColor: 'rgba(228,88,88,0.08)',
-    borderRadius: 14,
-    borderWidth: 1, borderColor: 'rgba(228,88,88,0.25)',
-    marginTop: 8,
+  detailRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingVertical: Spacing[4],
+    gap: Spacing[3],
   },
-  cancelLabel: { color: Colors.accentDanger, fontSize: 14, fontWeight: '700' },
-  modifyBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-    height: 48, borderRadius: 14,
-    backgroundColor: 'rgba(244,163,64,0.1)',
-    borderWidth: 1, borderColor: 'rgba(244,163,64,0.3)',
-    marginBottom: 10,
-  },
-  modifyLabel: { color: Colors.accentPrimary, fontSize: 14, fontWeight: '700' },
 });

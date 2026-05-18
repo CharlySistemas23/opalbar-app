@@ -1,10 +1,32 @@
+// ─────────────────────────────────────────────
+//  About — Editorial Premium
+//
+//  Magazine layout:
+//   · Wordmark "OPALBAR" + version meta as kicker
+//   · Identity block (info ListItems): developed by, contact, website
+//   · Actions list: check for updates (with spinner), terms, privacy
+//   · Copyright caption at the foot
+// ─────────────────────────────────────────────
 import { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Linking, Alert, ActivityIndicator } from 'react-native';
+import { ActivityIndicator, Alert, Linking, ScrollView, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+
 import { useAppStore } from '@/stores/app.store';
-import { Colors, Typography, Spacing, Radius } from '@/constants/tokens';
+import { Colors, EditorialSpacing, Spacing } from '@/constants/tokens';
+import { HitSlop, Roles } from '@/constants/a11y';
+import {
+  Body,
+  Caption,
+  Display,
+  FadeIn,
+  Hairline,
+  Heading,
+  Kicker,
+  ListItem,
+  Pressy,
+} from '@/components/ui';
 import { checkForUpdateManual } from '@/components/UpdateOverlay';
 import { toast } from '@/components/Toast';
 
@@ -32,7 +54,7 @@ export default function About() {
     // 'downloading' → UpdateOverlay takes over and auto-reloads.
   }
 
-  const openLegal = async (url: string) => {
+  async function openLegal(url: string) {
     try {
       const can = await Linking.canOpenURL(url);
       if (!can) throw new Error('cannot open');
@@ -43,68 +65,106 @@ export default function About() {
         t ? 'Intenta más tarde.' : 'Please try again later.',
       );
     }
-  };
+  }
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} hitSlop={10}>
+        <Pressy
+          onPress={() => router.back()}
+          haptic="select"
+          accessibilityRole={Roles.button}
+          accessibilityLabel={t ? 'Atrás' : 'Back'}
+          hitSlop={HitSlop.expand}
+          style={styles.backBtn}
+        >
           <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
-        </TouchableOpacity>
-        <Text style={styles.title}>{t ? 'Acerca de' : 'About'}</Text>
-        <View style={{ width: 24 }} />
+        </Pressy>
       </View>
 
-      <ScrollView contentContainerStyle={styles.content}>
-        <View style={styles.logoWrap}>
-          <View style={styles.logoBox}>
-            <Text style={styles.logoLetter}>O</Text>
-          </View>
-          <Text style={styles.appName}>OPALBAR</Text>
-          <Text style={styles.version}>{t ? 'Versión' : 'Version'} 1.0.0 · Build 2026-04</Text>
-        </View>
+      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        {/* ── Wordmark ── */}
+        <FadeIn style={styles.identity}>
+          <Kicker tone="muted" align="center">
+            {t ? 'ACERCA DE' : 'ABOUT'}
+          </Kicker>
+          <Display size="lg" align="center" style={{ marginTop: Spacing[3] }}>
+            OPALBAR
+          </Display>
+          <Caption tone="muted" align="center" style={{ marginTop: Spacing[3] }}>
+            {t ? 'VERSIÓN' : 'VERSION'} 1.0.0 · BUILD 2026-04
+          </Caption>
+        </FadeIn>
 
-        <View style={styles.card}>
-          <View style={styles.row}>
-            <Text style={styles.rowLabel}>{t ? 'Desarrollado por' : 'Developed by'}</Text>
-            <Text style={styles.rowValue}>OpalBar Team</Text>
+        {/* ── Identity rows ── */}
+        <FadeIn delay={80} style={styles.section}>
+          <Kicker tone="muted" style={{ marginBottom: Spacing[3] }}>
+            {t ? 'IDENTIDAD' : 'IDENTITY'}
+          </Kicker>
+          <View style={styles.listShell}>
+            <ListItem title={t ? 'Desarrollado por' : 'Developed by'} meta="OpalBar Team" />
+            <ListItem.Separator />
+            <ListItem title={t ? 'Contacto' : 'Contact'} meta="hello@opalbar.app" />
+            <ListItem.Separator />
+            <ListItem title={t ? 'Sitio web' : 'Website'} meta="opalbar.app" />
           </View>
-          <View style={[styles.row, styles.rowBorder]}>
-            <Text style={styles.rowLabel}>{t ? 'Contacto' : 'Contact'}</Text>
-            <Text style={styles.rowValue}>hello@opalbar.app</Text>
+        </FadeIn>
+
+        {/* ── Updates ── */}
+        <FadeIn delay={140} style={styles.section}>
+          <Kicker tone="muted" style={{ marginBottom: Spacing[3] }}>
+            {t ? 'APLICACIÓN' : 'APPLICATION'}
+          </Kicker>
+          <View style={styles.listShell}>
+            <ListItem
+              title={t ? 'Buscar actualizaciones' : 'Check for updates'}
+              subtitle={t ? 'Comprueba si hay una versión nueva.' : 'Check for a newer version.'}
+              leftIcon={
+                <Feather name="download-cloud" size={18} color={Colors.accentPrimary} />
+              }
+              rightSlot={
+                checking ? (
+                  <ActivityIndicator size="small" color={Colors.accentPrimary} />
+                ) : undefined
+              }
+              showChevron={!checking}
+              onPress={onCheckUpdates}
+              disabled={checking}
+            />
           </View>
-          <View style={[styles.row, styles.rowBorder]}>
-            <Text style={styles.rowLabel}>{t ? 'Sitio web' : 'Website'}</Text>
-            <Text style={[styles.rowValue, { color: Colors.accentPrimary }]}>opalbar.app</Text>
+        </FadeIn>
+
+        {/* ── Legal ── */}
+        <FadeIn delay={200} style={styles.section}>
+          <Kicker tone="muted" style={{ marginBottom: Spacing[3] }}>
+            {t ? 'LEGAL' : 'LEGAL'}
+          </Kicker>
+          <View style={styles.listShell}>
+            <ListItem
+              title={t ? 'Términos de servicio' : 'Terms of service'}
+              leftIcon={<Feather name="file-text" size={18} color={Colors.textSecondary} />}
+              onPress={() => openLegal(LEGAL_URLS.terms)}
+              showChevron
+            />
+            <ListItem.Separator />
+            <ListItem
+              title={t ? 'Política de privacidad' : 'Privacy policy'}
+              leftIcon={<Feather name="shield" size={18} color={Colors.textSecondary} />}
+              onPress={() => openLegal(LEGAL_URLS.privacy)}
+              showChevron
+            />
           </View>
-        </View>
+        </FadeIn>
 
-        <View style={styles.card}>
-          <TouchableOpacity style={styles.linkRow} onPress={onCheckUpdates} activeOpacity={0.85} disabled={checking}>
-            <View style={styles.updateRow}>
-              <Feather name="download-cloud" size={18} color={Colors.accentPrimary} />
-              <Text style={styles.linkLabel}>{t ? 'Buscar actualizaciones' : 'Check for updates'}</Text>
-            </View>
-            {checking ? (
-              <ActivityIndicator size="small" color={Colors.accentPrimary} />
-            ) : (
-              <Text style={styles.arrow}>›</Text>
-            )}
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.card}>
-          <TouchableOpacity style={styles.linkRow} onPress={() => openLegal(LEGAL_URLS.terms)} activeOpacity={0.85}>
-            <Text style={styles.linkLabel}>{t ? 'Términos de servicio' : 'Terms of service'}</Text>
-            <Text style={styles.arrow}>›</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.linkRow, styles.rowBorder]} onPress={() => openLegal(LEGAL_URLS.privacy)} activeOpacity={0.85}>
-            <Text style={styles.linkLabel}>{t ? 'Política de privacidad' : 'Privacy policy'}</Text>
-            <Text style={styles.arrow}>›</Text>
-          </TouchableOpacity>
-        </View>
-
-        <Text style={styles.copy}>© 2025 OpalBar. {t ? 'Todos los derechos reservados.' : 'All rights reserved.'}</Text>
+        <FadeIn delay={260} style={styles.colophon}>
+          <Hairline variant="subtle" />
+          <Heading size="sm" align="center" style={{ marginTop: Spacing[6] }}>
+            {t ? 'Hecho con cuidado.' : 'Made with care.'}
+          </Heading>
+          <Caption tone="muted" align="center" style={{ marginTop: Spacing[3] }}>
+            © 2025 OpalBar. {t ? 'Todos los derechos reservados.' : 'All rights reserved.'}
+          </Caption>
+        </FadeIn>
       </ScrollView>
     </SafeAreaView>
   );
@@ -112,28 +172,41 @@ export default function About() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: Spacing[5], paddingVertical: Spacing[4] },
-  backIcon: { fontSize: 22, color: Colors.textPrimary },
-  title: { fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.bold, color: Colors.textPrimary },
-  content: { paddingHorizontal: Spacing[5], gap: Spacing[4], paddingBottom: Spacing[8], alignItems: 'center' },
-  logoWrap: { alignItems: 'center', paddingVertical: Spacing[6], gap: Spacing[2] },
-  logo: { fontSize: 64 },
-  logoBox: {
-    width: 80, height: 80, borderRadius: 22,
-    backgroundColor: Colors.accentPrimary,
-    alignItems: 'center', justifyContent: 'center',
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[2],
+    paddingBottom: Spacing[4],
   },
-  logoLetter: { color: Colors.textInverse, fontSize: 44, fontWeight: '800' },
-  appName: { fontSize: Typography.fontSize['2xl'], fontWeight: Typography.fontWeight.bold, color: Colors.textPrimary, letterSpacing: 3 },
-  version: { fontSize: Typography.fontSize.sm, color: Colors.textSecondary },
-  card: { width: '100%', backgroundColor: Colors.bgCard, borderRadius: Radius.xl, borderWidth: 1, borderColor: Colors.border, overflow: 'hidden' },
-  row: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: Spacing[4], paddingVertical: Spacing[4] },
-  rowBorder: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: Colors.border },
-  rowLabel: { fontSize: Typography.fontSize.base, color: Colors.textSecondary },
-  rowValue: { fontSize: Typography.fontSize.base, color: Colors.textPrimary },
-  linkRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: Spacing[4], paddingVertical: Spacing[4] },
-  linkLabel: { fontSize: Typography.fontSize.base, color: Colors.textPrimary },
-  arrow: { fontSize: 20, color: Colors.textDisabled },
-  copy: { fontSize: Typography.fontSize.xs, color: Colors.textDisabled, textAlign: 'center' },
-  updateRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing[3] },
+  backBtn: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scroll: {
+    paddingBottom: Spacing[12],
+  },
+  identity: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingVertical: Spacing[8],
+    alignItems: 'center',
+  },
+  section: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    marginTop: Spacing[6],
+  },
+  listShell: {
+    backgroundColor: Colors.bgCard,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+    borderTopColor: Colors.highlightTop,
+    overflow: 'hidden',
+  },
+  colophon: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    marginTop: Spacing[12],
+  },
 });

@@ -1,14 +1,33 @@
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
+// ─────────────────────────────────────────────
+//  Reservation QR — Editorial Premium
+//
+//  Fullscreen presentation page. Kicker (short code) + Display (venue
+//  name) + QR centered in a hairline card + caption with date/time.
+// ─────────────────────────────────────────────
 import { useEffect, useState } from 'react';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { Feather } from '@expo/vector-icons';
 import QRCode from 'react-native-qrcode-svg';
+
+import {
+  Body,
+  Caption,
+  Display,
+  FadeIn,
+  Hairline,
+  Kicker,
+  Pressy,
+  Skeleton,
+  Subhead,
+} from '@/components/ui';
+import { Colors, EditorialSpacing, Radius, Spacing } from '@/constants/tokens';
+import { HitSlop, Roles } from '@/constants/a11y';
 import { reservationsApi } from '@/api/client';
 import { useAppStore } from '@/stores/app.store';
 import { apiError } from '@/api/errors';
-import { Colors } from '@/constants/tokens';
 
 export default function ReservationQR() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -38,118 +57,152 @@ export default function ReservationQR() {
       .finally(() => setLoading(false));
   }, [id]);
 
-  const dateStr = meta?.date ? new Date(meta.date).toLocaleString(language, {
-    weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
-  }) : '';
+  const dateStr = meta?.date
+    ? new Date(meta.date).toLocaleString(language, {
+        weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
+      })
+    : '';
+  const shortCode = (code || '').slice(-8).toUpperCase();
 
   return (
     <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
       <StatusBar style="light" />
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.closeBtn} hitSlop={10}>
+      <View style={styles.headerRow}>
+        <Pressy
+          onPress={() => router.back()}
+          accessibilityRole={Roles.button}
+          accessibilityLabel={t ? 'Cerrar' : 'Close'}
+          hitSlop={HitSlop.expand}
+          style={styles.closeBtn}
+        >
           <Feather name="x" size={22} color={Colors.textPrimary} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>{t ? 'Código de reserva' : 'Reservation code'}</Text>
-        <View style={styles.closeBtn} />
+        </Pressy>
       </View>
 
-      <View style={styles.body}>
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        showsVerticalScrollIndicator={false}
+      >
         {loading ? (
-          <ActivityIndicator color={Colors.accentPrimary} />
-        ) : error ? (
-          <View style={{ alignItems: 'center', gap: 10 }}>
-            <Feather name="alert-circle" size={32} color={Colors.accentDanger} />
-            <Text style={styles.errorText}>{error}</Text>
+          <View style={{ gap: Spacing[5] }}>
+            <Skeleton width="40%" height={12} />
+            <Skeleton width="70%" height={36} />
+            <Skeleton width="100%" height={280} radius={Radius.lg} />
           </View>
-        ) : code ? (
-          <>
-            <Text style={styles.lead}>
-              {t
-                ? 'Muestra este código en la entrada para hacer check-in.'
-                : 'Show this code at the door to check in.'}
-            </Text>
+        ) : error ? (
+          <View style={styles.errorBlock}>
+            <Feather name="alert-circle" size={32} color={Colors.accentDanger} />
+            <Body tone="secondary" align="center" style={{ marginTop: Spacing[3] }}>
+              {error}
+            </Body>
+          </View>
+        ) : !code ? (
+          <Body tone="secondary" align="center">
+            {t ? 'Esta reserva no tiene código.' : 'This reservation has no code.'}
+          </Body>
+        ) : (
+          <View style={styles.card}>
+            <FadeIn>
+              <Kicker align="center" tone="champagne">
+                {t ? `CÓDIGO · ${shortCode}` : `CODE · ${shortCode}`}
+              </Kicker>
+            </FadeIn>
 
-            <View style={styles.qrCard}>
-              <QRCode value={code} size={240} backgroundColor="#FFFFFF" color="#0B0B0F" />
-            </View>
+            <FadeIn delay={80} style={{ marginTop: Spacing[3] }}>
+              <Display size="md" align="center">
+                {meta?.venue ?? (t ? 'Tu reserva' : 'Your booking')}
+              </Display>
+            </FadeIn>
 
-            <View style={styles.codeBox}>
-              <Text style={styles.codeLbl}>{t ? 'CÓDIGO' : 'CODE'}</Text>
-              <Text style={styles.codeVal}>{code}</Text>
-            </View>
-
-            {meta?.venue ? (
-              <View style={styles.metaCard}>
-                <MetaRow icon="map-pin" label={meta.venue} />
-                {dateStr ? <MetaRow icon="calendar" label={dateStr} /> : null}
-                {meta.partySize ? (
-                  <MetaRow icon="users" label={`${meta.partySize} ${t ? 'personas' : 'guests'}`} />
-                ) : null}
+            <FadeIn delay={160} style={styles.qrWrap}>
+              <View style={styles.qrCanvas}>
+                <QRCode value={code} size={240} backgroundColor="#FFFFFF" color="#0B0B0F" />
               </View>
+            </FadeIn>
+
+            {dateStr || meta?.partySize ? (
+              <>
+                <Hairline variant="subtle" style={{ marginTop: Spacing[6] }} />
+                <FadeIn delay={240} style={styles.metaBlock}>
+                  {dateStr ? (
+                    <Caption tone="secondary" align="center">
+                      {dateStr}
+                    </Caption>
+                  ) : null}
+                  {meta?.partySize ? (
+                    <Caption tone="muted" align="center" style={{ marginTop: Spacing[1] }}>
+                      {`${meta.partySize} ${t ? 'personas' : 'guests'}`}
+                    </Caption>
+                  ) : null}
+                </FadeIn>
+                <Hairline variant="subtle" style={{ marginTop: Spacing[4] }} />
+              </>
             ) : null}
 
-            <Text style={styles.hint}>
-              {t
-                ? 'Mantén tu pantalla encendida. Si pierdes el código, puedes volver a esta reserva cuando quieras.'
-                : 'Keep your screen on. If you lose the code, you can return to this reservation anytime.'}
-            </Text>
-          </>
-        ) : (
-          <Text style={styles.errorText}>{t ? 'Esta reserva no tiene código.' : 'This reservation has no code.'}</Text>
+            <FadeIn delay={320} style={{ marginTop: Spacing[6] }}>
+              <Subhead tone="muted" align="center">
+                {t ? 'Muestra este código al llegar' : 'Show this code at arrival'}
+              </Subhead>
+              <Caption tone="muted" align="center" style={{ marginTop: Spacing[2] }}>
+                {t
+                  ? 'Mantén la pantalla encendida. Puedes volver a esta reserva cuando quieras.'
+                  : 'Keep your screen on. You can return to this reservation anytime.'}
+              </Caption>
+            </FadeIn>
+          </View>
         )}
-      </View>
+      </ScrollView>
     </SafeAreaView>
-  );
-}
-
-function MetaRow({ icon, label }: { icon: React.ComponentProps<typeof Feather>['name']; label: string }) {
-  return (
-    <View style={styles.metaRow}>
-      <Feather name={icon} size={14} color={Colors.textMuted} />
-      <Text style={styles.metaLbl}>{label}</Text>
-    </View>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
-  header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 20, paddingVertical: 8,
+  headerRow: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[2],
+    alignItems: 'flex-end',
   },
   closeBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: Colors.bgCard, borderWidth: 1, borderColor: Colors.border,
-    alignItems: 'center', justifyContent: 'center',
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: -Spacing[2],
   },
-  headerTitle: { color: Colors.textPrimary, fontSize: 16, fontWeight: '800' },
 
-  body: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 18 },
-  lead: { color: Colors.textSecondary, fontSize: 14, textAlign: 'center', lineHeight: 20 },
+  scroll: {
+    flexGrow: 1,
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[4],
+    paddingBottom: Spacing[8],
+    justifyContent: 'center',
+  },
 
-  qrCard: {
-    padding: 20, borderRadius: 20,
+  card: {
+    paddingVertical: Spacing[6],
+    paddingHorizontal: Spacing[5],
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.bgCard,
+    alignItems: 'center',
+  },
+  qrWrap: {
+    marginTop: Spacing[6],
+  },
+  qrCanvas: {
+    padding: Spacing[5],
+    borderRadius: Radius.md,
     backgroundColor: '#FFFFFF',
   },
 
-  codeBox: {
-    alignItems: 'center', gap: 4,
-    paddingHorizontal: 20, paddingVertical: 10,
-    borderRadius: 12, backgroundColor: Colors.bgCard,
-    borderWidth: 1, borderColor: Colors.border,
+  metaBlock: {
+    paddingVertical: Spacing[4],
   },
-  codeLbl: { color: Colors.textMuted, fontSize: 10, fontWeight: '800', letterSpacing: 2 },
-  codeVal: { color: Colors.textPrimary, fontSize: 22, fontWeight: '800', letterSpacing: 3 },
 
-  metaCard: {
-    width: '100%', gap: 10,
-    padding: 14, borderRadius: 14,
-    backgroundColor: Colors.bgCard,
-    borderWidth: 1, borderColor: Colors.border,
+  errorBlock: {
+    paddingVertical: Spacing[10],
+    alignItems: 'center',
   },
-  metaRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  metaLbl: { color: Colors.textPrimary, fontSize: 13, fontWeight: '600', flex: 1 },
-
-  hint: { color: Colors.textMuted, fontSize: 12, textAlign: 'center', lineHeight: 17, marginTop: 4 },
-  errorText: { color: Colors.textSecondary, fontSize: 13, textAlign: 'center' },
 });

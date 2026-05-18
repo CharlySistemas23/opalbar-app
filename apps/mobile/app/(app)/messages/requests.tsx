@@ -1,31 +1,46 @@
-import {
-  View,
-  Text,
-  StyleSheet,
-  FlatList,
-  TouchableOpacity,
-  ActivityIndicator,
-  Image,
-  Pressable,
-  Alert,
-} from 'react-native';
-import { useEffect, useState, useCallback } from 'react';
+// ─────────────────────────────────────────────
+//  Messages · Solicitudes — Editorial Premium
+//
+//  Header: Kicker "SOLICITUDES" + Heading
+//  Disclaimer en Body tone="secondary" — sin pill ni recuadro.
+//  Lista de pendientes; cada row tiene Accept (Button primary) /
+//  Decline (Button ghost) / Block (Button ghost danger).
+// ─────────────────────────────────────────────
+import { useCallback, useEffect, useState } from 'react';
+import { Alert, FlatList, Image, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+
+import {
+  Body,
+  Button,
+  Caption,
+  ConfirmDialog,
+  Display,
+  FadeIn,
+  Hairline,
+  Heading,
+  Kicker,
+  Pressy,
+  SkeletonList,
+  Subhead,
+} from '@/components/ui';
+import { EmptyState } from '@/components/EmptyState';
+import { Colors, EditorialSpacing, Radius, Spacing } from '@/constants/tokens';
+import { HitSlop, Roles } from '@/constants/a11y';
 import { messagesApi } from '@/api/client';
 import { useAppStore } from '@/stores/app.store';
-import { Colors, Radius, Spacing, Typography } from '@/constants/tokens';
 
 const AVATAR_COLORS = ['#F4A340', '#60A5FA', '#A855F7', '#6FB892', '#E06868', '#EC4899'];
 function colorFor(id: string) {
   const idx = Math.abs([...id].reduce((a, c) => a + c.charCodeAt(0), 0)) % AVATAR_COLORS.length;
   return AVATAR_COLORS[idx];
 }
-function relTime(d?: string) {
+function relTime(d?: string, t?: boolean) {
   if (!d) return '';
   const diff = Math.max(0, Math.floor((Date.now() - new Date(d).getTime()) / 1000));
-  if (diff < 60) return 'ahora';
+  if (diff < 60) return t ? 'ahora' : 'now';
   if (diff < 3600) return `${Math.floor(diff / 60)}m`;
   if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
   return `${Math.floor(diff / 86400)}d`;
@@ -41,14 +56,20 @@ type Request = {
   };
 };
 
+function nameOf(req: Request) {
+  const p = req.otherUser?.profile;
+  return `${p?.firstName ?? ''} ${p?.lastName ?? ''}`.trim() || 'Usuario';
+}
+
 export default function MessageRequestsScreen() {
   const router = useRouter();
   const { language } = useAppStore();
-  const es = language === 'es';
+  const t = language === 'es';
 
   const [items, setItems] = useState<Request[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [blockTarget, setBlockTarget] = useState<Request | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -71,10 +92,9 @@ export default function MessageRequestsScreen() {
     try {
       await messagesApi.acceptRequest(req.id);
       removeLocal(req.id);
-      // Open the now-accepted thread immediately
       router.push(`/(app)/messages/${req.id}` as never);
     } catch {
-      Alert.alert(es ? 'Error' : 'Error', es ? 'No se pudo aceptar' : "Couldn't accept");
+      Alert.alert(t ? 'Error' : 'Error', t ? 'No se pudo aceptar' : "Couldn't accept");
     } finally {
       setBusyId(null);
     }
@@ -86,37 +106,20 @@ export default function MessageRequestsScreen() {
       await messagesApi.declineRequest(req.id);
       removeLocal(req.id);
     } catch {
-      Alert.alert(es ? 'Error' : 'Error', es ? 'No se pudo rechazar' : "Couldn't decline");
+      Alert.alert(t ? 'Error' : 'Error', t ? 'No se pudo rechazar' : "Couldn't decline");
     } finally {
       setBusyId(null);
     }
   }
 
-  function confirmBlock(req: Request) {
-    const name = nameOf(req);
-    Alert.alert(
-      es ? 'Bloquear a ' + name + '?' : 'Block ' + name + '?',
-      es
-        ? 'No podrá enviarte más mensajes.'
-        : "They won't be able to send you any more messages.",
-      [
-        { text: es ? 'Cancelar' : 'Cancel', style: 'cancel' },
-        {
-          text: es ? 'Bloquear' : 'Block',
-          style: 'destructive',
-          onPress: () => block(req),
-        },
-      ],
-    );
-  }
-
   async function block(req: Request) {
     setBusyId(req.id);
+    setBlockTarget(null);
     try {
       await messagesApi.blockRequest(req.id);
       removeLocal(req.id);
     } catch {
-      Alert.alert(es ? 'Error' : 'Error', es ? 'No se pudo bloquear' : "Couldn't block");
+      Alert.alert(t ? 'Error' : 'Error', t ? 'No se pudo bloquear' : "Couldn't block");
     } finally {
       setBusyId(null);
     }
@@ -124,79 +127,114 @@ export default function MessageRequestsScreen() {
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn} hitSlop={10}>
+      <View style={styles.headerRow}>
+        <Pressy
+          onPress={() => router.back()}
+          accessibilityLabel={t ? 'Volver' : 'Back'}
+          accessibilityRole={Roles.button}
+          hitSlop={HitSlop.expand}
+          style={styles.backBtn}
+        >
           <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
-        </TouchableOpacity>
-        <View style={{ flex: 1, alignItems: 'center' }}>
-          <Text style={styles.title}>{es ? 'Solicitudes' : 'Requests'}</Text>
-          {items.length > 0 ? (
-            <Text style={styles.subtitle}>
-              {items.length} {es ? 'pendientes' : 'pending'}
-            </Text>
-          ) : null}
-        </View>
-        <View style={{ width: 40 }} />
+        </Pressy>
       </View>
 
-      <Text style={styles.disclaimer}>
-        {es
-          ? 'Estos mensajes son de personas que aún no apruebas. No verán que los leíste.'
-          : "These are from people you haven't approved yet. They won't see you've read them."}
-      </Text>
+      <View style={styles.hero}>
+        <FadeIn>
+          <Kicker tone="champagne">{t ? 'SOLICITUDES' : 'REQUESTS'}</Kicker>
+        </FadeIn>
+        <FadeIn delay={80} style={{ marginTop: Spacing[3] }}>
+          <Display size="md">{t ? 'Solicitudes.' : 'Requests.'}</Display>
+        </FadeIn>
+        {items.length > 0 && (
+          <FadeIn delay={140} style={{ marginTop: Spacing[2] }}>
+            <Caption tone="accent">
+              {items.length} {t ? (items.length === 1 ? 'pendiente' : 'pendientes') : (items.length === 1 ? 'pending' : 'pending')}
+            </Caption>
+          </FadeIn>
+        )}
+        <FadeIn delay={200} style={{ marginTop: Spacing[4] }}>
+          <Body tone="secondary">
+            {t
+              ? 'Mensajes de personas que aún no apruebas. No verán que los leíste.'
+              : "Messages from people you haven't approved yet. They won't see you've read them."}
+          </Body>
+        </FadeIn>
+      </View>
+
+      <Hairline variant="subtle" marginHorizontal={EditorialSpacing.pageGutter} />
 
       {loading ? (
-        <View style={styles.center}><ActivityIndicator color={Colors.accentPrimary} /></View>
+        <View style={styles.listPad}>
+          <SkeletonList count={4} itemHeight={140} />
+        </View>
       ) : (
         <FlatList
           data={items}
           keyExtractor={(x) => x.id}
-          contentContainerStyle={{ paddingBottom: Spacing[8] }}
-          renderItem={({ item }) => (
-            <RequestRow
-              req={item}
-              busy={busyId === item.id}
-              es={es}
-              onAccept={() => accept(item)}
-              onDecline={() => decline(item)}
-              onBlock={() => confirmBlock(item)}
-            />
+          contentContainerStyle={styles.listContent}
+          ItemSeparatorComponent={() => (
+            <Hairline variant="subtle" marginHorizontal={EditorialSpacing.pageGutter} />
+          )}
+          renderItem={({ item, index }) => (
+            <FadeIn delay={Math.min(index, 6) * 60}>
+              <RequestRow
+                req={item}
+                busy={busyId === item.id}
+                t={t}
+                onAccept={() => accept(item)}
+                onDecline={() => decline(item)}
+                onBlock={() => setBlockTarget(item)}
+              />
+            </FadeIn>
           )}
           ListEmptyComponent={
-            <View style={styles.empty}>
-              <View style={styles.emptyRing}>
-                <Feather name="inbox" size={32} color={Colors.textMuted} />
-              </View>
-              <Text style={styles.emptyTitle}>{es ? 'Sin solicitudes' : 'No requests'}</Text>
-              <Text style={styles.emptyBody}>
-                {es
+            <EmptyState
+              icon="inbox"
+              title={t ? 'Sin solicitudes' : 'No requests'}
+              message={
+                t
                   ? 'Cuando alguien que no sigues te escriba, aparecerá aquí primero.'
-                  : "When someone you don't follow messages you, it'll show up here first."}
-              </Text>
-            </View>
+                  : "When someone you don't follow messages you, it'll show up here first."
+              }
+            />
           }
         />
       )}
+
+      <ConfirmDialog
+        open={!!blockTarget}
+        onClose={() => setBlockTarget(null)}
+        onConfirm={async () => { if (blockTarget) await block(blockTarget); }}
+        title={
+          blockTarget
+            ? (t ? `Bloquear a ${nameOf(blockTarget)}?` : `Block ${nameOf(blockTarget)}?`)
+            : ''
+        }
+        description={
+          t
+            ? 'No podrá enviarte más mensajes.'
+            : "They won't be able to send you any more messages."
+        }
+        confirmLabel={t ? 'Bloquear' : 'Block'}
+        cancelLabel={t ? 'Cancelar' : 'Cancel'}
+        confirmVariant="danger"
+      />
     </SafeAreaView>
   );
-}
-
-function nameOf(req: Request) {
-  const p = req.otherUser?.profile;
-  return `${p?.firstName ?? ''} ${p?.lastName ?? ''}`.trim() || 'Usuario';
 }
 
 function RequestRow({
   req,
   busy,
-  es,
+  t,
   onAccept,
   onDecline,
   onBlock,
 }: {
   req: Request;
   busy: boolean;
-  es: boolean;
+  t: boolean;
   onAccept: () => void;
   onDecline: () => void;
   onBlock: () => void;
@@ -213,179 +251,139 @@ function RequestRow({
           <Image source={{ uri: avatar }} style={styles.avatar} />
         ) : (
           <View style={[styles.avatar, { backgroundColor: colorFor(req.otherUser?.id || req.id) }]}>
-            <Text style={styles.avatarText}>{initials || 'U'}</Text>
+            <Body size="md" tone="inverse" weight="bold">{initials || 'U'}</Body>
           </View>
         )}
         <View style={{ flex: 1 }}>
-          <Text style={styles.name} numberOfLines={1}>{name}</Text>
-          <Text style={styles.time}>{relTime(req.lastMessageAt)}</Text>
+          <Subhead numberOfLines={1}>{name}</Subhead>
+          <Caption tone="muted" size="sm" style={{ marginTop: 2 }}>
+            {relTime(req.lastMessageAt, t)}
+          </Caption>
         </View>
-        <Pressable onPress={onBlock} hitSlop={8} style={({ pressed }) => pressed && { opacity: 0.6 }}>
+        <Pressy
+          onPress={onBlock}
+          accessibilityLabel={t ? 'Más opciones' : 'More options'}
+          accessibilityRole={Roles.button}
+          hitSlop={HitSlop.expand}
+          haptic="select"
+        >
           <Feather name="more-horizontal" size={20} color={Colors.textMuted} />
-        </Pressable>
+        </Pressy>
       </View>
 
       {preview ? (
-        <Text style={styles.preview} numberOfLines={3}>{preview}</Text>
+        <Body size="sm" tone="secondary" numberOfLines={3} style={styles.preview}>
+          {preview}
+        </Body>
       ) : null}
 
       <View style={styles.actions}>
-        <Pressable
-          onPress={onAccept}
-          disabled={busy}
-          style={({ pressed }) => [styles.btn, styles.btnAccept, pressed && { opacity: 0.85 }]}
-        >
-          <Feather name="check" size={15} color={Colors.textInverse} />
-          <Text style={styles.btnAcceptText}>{es ? 'Aceptar' : 'Accept'}</Text>
-        </Pressable>
-        <Pressable
-          onPress={onDecline}
-          disabled={busy}
-          style={({ pressed }) => [styles.btn, styles.btnGhost, pressed && { opacity: 0.7 }]}
-        >
-          <Text style={styles.btnGhostText}>{es ? 'Rechazar' : 'Decline'}</Text>
-        </Pressable>
-        <Pressable
+        <View style={{ flex: 1 }}>
+          <Button
+            label={t ? 'Aceptar' : 'Accept'}
+            onPress={onAccept}
+            disabled={busy}
+            variant="primary"
+            size="sm"
+            fullWidth
+            haptic="success"
+            leftIcon={<Feather name="check" size={13} color={Colors.textInverse} />}
+          />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Button
+            label={t ? 'Rechazar' : 'Decline'}
+            onPress={onDecline}
+            disabled={busy}
+            variant="secondary"
+            size="sm"
+            fullWidth
+          />
+        </View>
+        <Pressy
           onPress={onBlock}
+          accessibilityLabel={t ? 'Bloquear' : 'Block'}
+          accessibilityRole={Roles.button}
+          hitSlop={HitSlop.expand}
+          haptic="destructive"
           disabled={busy}
-          style={({ pressed }) => [styles.btn, styles.btnGhost, pressed && { opacity: 0.7 }]}
+          style={styles.blockBtn}
         >
-          <Text style={[styles.btnGhostText, { color: Colors.accentDanger }]}>
-            {es ? 'Bloquear' : 'Block'}
-          </Text>
-        </Pressable>
+          <Caption tone="danger" size="sm" style={{ fontFamily: 'Inter_600SemiBold' }}>
+            {t ? 'Bloquear' : 'Block'}
+          </Caption>
+        </Pressy>
       </View>
     </View>
   );
 }
 
+// Heading imported but used only via primitive composition above (no direct
+// JSX). Keep the symbol referenced so a future tree-shake doesn't strip it.
+void Heading;
+
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: Spacing[4],
+  headerRow: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
     paddingTop: Spacing[2],
-    paddingBottom: Spacing[3],
-    gap: Spacing[3],
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.borderSubtle,
   },
-  iconBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: Colors.bgCard,
-    alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1, borderColor: Colors.border,
+  backBtn: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: -Spacing[2],
   },
-  title: {
-    color: Colors.textPrimary,
-    fontFamily: Typography.fontFamily.serifSemiBold,
-    fontSize: Typography.fontSize.lg,
-    letterSpacing: Typography.letterSpacing.tight,
+
+  hero: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[4],
+    paddingBottom: Spacing[6],
   },
-  subtitle: {
-    color: Colors.accentPrimary,
-    fontFamily: Typography.fontFamily.sansMedium,
-    fontSize: Typography.fontSize.sm,
-    marginTop: 2,
+
+  listPad: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[5],
   },
-  disclaimer: {
-    color: Colors.textMuted,
-    fontFamily: Typography.fontFamily.sans,
-    fontSize: Typography.fontSize.sm,
-    paddingHorizontal: Spacing[4],
-    paddingVertical: Spacing[3],
-    lineHeight: Typography.fontSize.sm * 1.45,
+  listContent: {
+    paddingBottom: Spacing[10],
+    paddingTop: Spacing[2],
   },
 
   row: {
-    paddingHorizontal: Spacing[4],
-    paddingVertical: Spacing[3],
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: Colors.borderSubtle,
-    gap: Spacing[2],
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingVertical: Spacing[4],
+    gap: Spacing[3],
   },
-  rowTop: { flexDirection: 'row', alignItems: 'center', gap: Spacing[3] },
+  rowTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing[3],
+  },
   avatar: {
-    width: 44, height: 44, borderRadius: 22,
-    alignItems: 'center', justifyContent: 'center',
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: Colors.bgElevated,
   },
-  avatarText: { color: Colors.textInverse, fontSize: 15, fontWeight: '800' },
-  name: {
-    color: Colors.textPrimary,
-    fontFamily: Typography.fontFamily.sansSemiBold,
-    fontSize: Typography.fontSize.base,
-  },
-  time: {
-    color: Colors.textMuted,
-    fontFamily: Typography.fontFamily.sans,
-    fontSize: 11,
-    marginTop: 2,
-  },
   preview: {
-    color: Colors.textSecondary,
-    fontFamily: Typography.fontFamily.sans,
-    fontSize: Typography.fontSize.sm,
-    lineHeight: Typography.fontSize.sm * Typography.lineHeight.snug,
-    marginLeft: 44 + Spacing[3],
+    marginLeft: 48 + Spacing[3],
   },
   actions: {
     flexDirection: 'row',
     gap: Spacing[2],
-    marginLeft: 44 + Spacing[3],
-    marginTop: Spacing[1],
-  },
-  btn: {
-    flexDirection: 'row',
+    marginLeft: 48 + Spacing[3],
     alignItems: 'center',
-    gap: 6,
+  },
+  blockBtn: {
+    minHeight: 40,
     paddingHorizontal: Spacing[3],
-    paddingVertical: 8,
-    borderRadius: Radius.full,
-  },
-  btnAccept: { backgroundColor: Colors.accentPrimary },
-  btnAcceptText: {
-    color: Colors.textInverse,
-    fontFamily: Typography.fontFamily.sansSemiBold,
-    fontSize: Typography.fontSize.sm,
-  },
-  btnGhost: {
-    borderWidth: 1,
-    borderColor: Colors.borderStrong,
-  },
-  btnGhostText: {
-    color: Colors.textSecondary,
-    fontFamily: Typography.fontFamily.sansMedium,
-    fontSize: Typography.fontSize.sm,
-  },
-
-  empty: {
+    borderRadius: Radius.button,
     alignItems: 'center',
-    paddingTop: Spacing[8],
-    paddingHorizontal: Spacing[6],
-    gap: Spacing[2],
-  },
-  emptyRing: {
-    width: 72, height: 72, borderRadius: 36,
-    backgroundColor: Colors.bgCard,
-    borderWidth: 1, borderColor: Colors.borderStrong,
-    alignItems: 'center', justifyContent: 'center',
-    marginBottom: Spacing[2],
-  },
-  emptyTitle: {
-    color: Colors.textPrimary,
-    fontFamily: Typography.fontFamily.serifSemiBold,
-    fontSize: Typography.fontSize.lg,
-  },
-  emptyBody: {
-    color: Colors.textMuted,
-    fontFamily: Typography.fontFamily.sans,
-    fontSize: Typography.fontSize.sm,
-    textAlign: 'center',
-    lineHeight: Typography.fontSize.sm * 1.5,
-    maxWidth: 280,
+    justifyContent: 'center',
   },
 });

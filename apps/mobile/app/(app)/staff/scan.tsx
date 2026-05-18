@@ -1,13 +1,45 @@
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, TextInput, Modal } from 'react-native';
+// ─────────────────────────────────────────────
+//  Staff Scan — Editorial Premium
+//
+//  Camera logic preserved verbatim. UI overlay redone:
+//   · Hairline frame (no thick amber rectangle)
+//   · Kicker overline + Display headline above the frame
+//   · Result panel uses <Sheet> with editorial typography
+//   · Manual code modal swapped to <Modal> primitive
+//   · Alerts replaced by toast() for non-critical confirmations
+// ─────────────────────────────────────────────
+import {
+  ActivityIndicator,
+  Image,
+  StyleSheet,
+  View,
+} from 'react-native';
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+
 import { checkinApi } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { useAppStore } from '@/stores/app.store';
-import { Colors, Radius } from '@/constants/tokens';
+import { Colors, EditorialSpacing, Radius, Spacing } from '@/constants/tokens';
+import { HitSlop, Roles } from '@/constants/a11y';
+import {
+  Body,
+  Button,
+  Caption,
+  Display,
+  FadeIn,
+  Hairline,
+  Heading,
+  Input,
+  Kicker,
+  Modal as PremiumModal,
+  Pressy,
+  Sheet,
+} from '@/components/ui';
+import { toast } from '@/components/Toast';
 
 type ScanResult =
   | { kind: 'reservation'; data: any }
@@ -32,6 +64,7 @@ export default function StaffScan() {
     if (permission && !permission.granted && permission.canAskAgain) {
       requestPermission();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [permission]);
 
   async function resolveCode(code: string) {
@@ -50,7 +83,9 @@ export default function StaffScan() {
       setResult({ kind: 'not_found' });
     } catch (err: any) {
       setResult({ kind: 'error', message: apiError(err) });
-    } finally { setResolving(false); }
+    } finally {
+      setResolving(false);
+    }
   }
 
   function onBarCodeScanned({ data }: { data: string }) {
@@ -75,144 +110,306 @@ export default function StaffScan() {
         const r = await checkinApi.checkinReservation(result.data.confirmCode);
         const payload = r.data?.data;
         if (payload?.alreadySeated) {
-          Alert.alert(t ? 'Ya registrado' : 'Already seated', t ? 'Este cliente ya fue marcado como presente.' : 'This customer was already marked as seated.');
+          toast(
+            t ? 'Cliente ya registrado como presente.' : 'Customer already seated.',
+            'info',
+          );
         } else {
-          Alert.alert(t ? 'Entrada confirmada' : 'Check-in confirmed', t ? 'Cliente registrado como presente.' : 'Customer marked as seated.');
+          toast(
+            t ? 'Entrada confirmada.' : 'Check-in confirmed.',
+            'success',
+          );
         }
       } else {
         const r = await checkinApi.checkinRedemption(result.data.code);
         const payload = r.data?.data;
         if (payload?.alreadyUsed) {
-          Alert.alert(t ? 'Ya canjeado' : 'Already used', t ? 'Esta oferta ya se canjeó antes.' : 'This offer was already redeemed.');
+          toast(
+            t ? 'Esta oferta ya se canjeó antes.' : 'Already redeemed.',
+            'info',
+          );
         } else {
-          Alert.alert(t ? 'Canje validado' : 'Redemption validated', t ? 'Oferta marcada como usada.' : 'Offer marked as used.');
+          toast(
+            t ? 'Canje validado.' : 'Redemption validated.',
+            'success',
+          );
         }
       }
       reset();
     } catch (err: any) {
-      Alert.alert(t ? 'Error' : 'Error', apiError(err));
-    } finally { setConfirming(false); }
+      toast(apiError(err, t ? 'Error al confirmar.' : 'Confirmation failed.'), 'danger');
+    } finally {
+      setConfirming(false);
+    }
   }
 
+  // ── Permission gate ───────────────────────
   if (!permission) {
-    return <View style={styles.center}><ActivityIndicator color={Colors.accentPrimary} /></View>;
+    return (
+      <View style={styles.permRoot}>
+        <ActivityIndicator color={Colors.accentPrimary} />
+      </View>
+    );
   }
 
   if (!permission.granted) {
     return (
       <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn} hitSlop={10}>
-            <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
-          </TouchableOpacity>
-          <Text style={styles.title}>{t ? 'Escanear QR' : 'Scan QR'}</Text>
-          <View style={{ width: 40 }} />
+        <Header
+          onBack={() => router.back()}
+          onManual={() => setManualMode(true)}
+          t={t}
+        />
+        <View style={styles.permBody}>
+          <FadeIn>
+            <View style={styles.permIconWrap}>
+              <View style={styles.permIconFrame} />
+              <Feather name="camera-off" size={28} color={Colors.textMuted} />
+            </View>
+          </FadeIn>
+          <FadeIn delay={80}>
+            <Heading size="sm" align="center" style={{ marginTop: Spacing[3] }}>
+              {t ? 'Cámara desactivada' : 'Camera disabled'}
+            </Heading>
+          </FadeIn>
+          <FadeIn delay={140}>
+            <Body align="center" tone="secondary" style={styles.permMsg}>
+              {t
+                ? 'Necesitamos acceso a la cámara para escanear códigos QR.'
+                : 'We need camera access to scan QR codes.'}
+            </Body>
+          </FadeIn>
+          <FadeIn delay={210} style={styles.permActions}>
+            <Button
+              label={t ? 'Permitir cámara' : 'Allow camera'}
+              onPress={requestPermission}
+              variant="primary"
+              fullWidth
+            />
+            <Button
+              label={t ? 'Ingresar código manualmente' : 'Enter code manually'}
+              onPress={() => setManualMode(true)}
+              variant="ghost"
+              fullWidth
+              leftIcon={<Feather name="edit-3" size={14} color={Colors.accentPrimary} />}
+            />
+          </FadeIn>
         </View>
-        <View style={styles.center}>
-          <Feather name="camera-off" size={48} color={Colors.textMuted} />
-          <Text style={styles.permMsg}>
-            {t ? 'Necesitamos acceso a la cámara para escanear códigos QR.' : 'We need camera access to scan QR codes.'}
-          </Text>
-          <TouchableOpacity style={styles.primaryBtn} onPress={requestPermission}>
-            <Text style={styles.primaryBtnLbl}>{t ? 'Permitir cámara' : 'Allow camera'}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.secondaryBtn} onPress={() => setManualMode(true)}>
-            <Feather name="edit-3" size={16} color={Colors.accentPrimary} />
-            <Text style={styles.secondaryBtnLbl}>{t ? 'Ingresar código manualmente' : 'Enter code manually'}</Text>
-          </TouchableOpacity>
-        </View>
-        <ManualModal
+        <ManualEntry
           visible={manualMode}
           onClose={() => setManualMode(false)}
           code={manualCode}
           setCode={setManualCode}
-          onSubmit={() => { setManualMode(false); resolveCode(manualCode.trim()); setScanned(true); lockRef.current = true; }}
+          onSubmit={() => {
+            setManualMode(false);
+            resolveCode(manualCode.trim());
+            setScanned(true);
+            lockRef.current = true;
+          }}
           t={t}
         />
       </SafeAreaView>
     );
   }
 
+  // ── Active camera view ─────────────────────
   return (
-    <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn} hitSlop={10}>
-          <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
-        </TouchableOpacity>
-        <Text style={styles.title}>{t ? 'Escanear QR' : 'Scan QR'}</Text>
-        <TouchableOpacity onPress={() => setManualMode(true)} style={styles.iconBtn} hitSlop={10}>
-          <Feather name="edit-3" size={18} color={Colors.textPrimary} />
-        </TouchableOpacity>
-      </View>
-
-      <View style={styles.scanWrap}>
-        {!scanned && (
-          <CameraView
-            style={StyleSheet.absoluteFill}
-            facing="back"
-            barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
-            onBarcodeScanned={onBarCodeScanned}
-          />
-        )}
-        <View style={styles.overlay}>
-          <View style={styles.reticle} />
-          <Text style={styles.hint}>
-            {scanned
-              ? (resolving ? (t ? 'Buscando código…' : 'Looking up code…') : '')
-              : (t ? 'Apunta la cámara al código QR' : 'Point camera at the QR code')}
-          </Text>
-        </View>
-      </View>
-
-      {result && (
-        <ResultSheet
-          result={result}
-          t={t}
-          confirming={confirming}
-          onConfirm={confirm}
-          onCancel={reset}
+    <View style={styles.cameraRoot}>
+      {!scanned && (
+        <CameraView
+          style={StyleSheet.absoluteFill}
+          facing="back"
+          barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+          onBarcodeScanned={onBarCodeScanned}
         />
       )}
 
-      <ManualModal
+      <View style={styles.cameraVignetteTop} />
+      <View style={styles.cameraVignetteBottom} />
+
+      <SafeAreaView style={StyleSheet.absoluteFill} edges={['top', 'bottom']}>
+        <Header
+          onBack={() => router.back()}
+          onManual={() => setManualMode(true)}
+          t={t}
+          transparent
+        />
+
+        <View style={styles.cameraStage}>
+          <Kicker tone="champagne" align="center">
+            {t ? 'STAFF · ESCÁNER' : 'STAFF · SCANNER'}
+          </Kicker>
+          <Display align="center" style={{ marginTop: Spacing[3] }}>
+            {scanned
+              ? resolving
+                ? t
+                  ? 'Buscando…'
+                  : 'Looking up…'
+                : t
+                  ? 'Listo'
+                  : 'Ready'
+              : t
+                ? 'Apunta el QR'
+                : 'Aim the QR'}
+          </Display>
+
+          <View style={styles.reticleWrap}>
+            <View style={styles.reticle}>
+              <CornerTL />
+              <CornerTR />
+              <CornerBL />
+              <CornerBR />
+            </View>
+          </View>
+
+          {resolving ? (
+            <View style={styles.resolvingRow}>
+              <ActivityIndicator color={Colors.accentChampagne} />
+              <Caption tone="inverse" style={{ color: '#fff' }}>
+                {t ? 'Validando código…' : 'Validating code…'}
+              </Caption>
+            </View>
+          ) : (
+            <Caption align="center" style={styles.hint}>
+              {t
+                ? 'Encuadra el código en el rectángulo.'
+                : 'Frame the code inside the rectangle.'}
+            </Caption>
+          )}
+        </View>
+      </SafeAreaView>
+
+      <ResultSheet
+        visible={!!result}
+        result={result}
+        t={t}
+        confirming={confirming}
+        onConfirm={confirm}
+        onCancel={reset}
+      />
+
+      <ManualEntry
         visible={manualMode}
         onClose={() => setManualMode(false)}
         code={manualCode}
         setCode={setManualCode}
-        onSubmit={() => { setManualMode(false); resolveCode(manualCode.trim()); setScanned(true); lockRef.current = true; }}
+        onSubmit={() => {
+          setManualMode(false);
+          resolveCode(manualCode.trim());
+          setScanned(true);
+          lockRef.current = true;
+        }}
         t={t}
       />
-    </SafeAreaView>
+    </View>
   );
 }
 
-function ResultSheet({ result, t, confirming, onConfirm, onCancel }: any) {
+// ── Header ───────────────────────────────────
+function Header({
+  onBack,
+  onManual,
+  t,
+  transparent,
+}: {
+  onBack: () => void;
+  onManual: () => void;
+  t: boolean;
+  transparent?: boolean;
+}) {
+  return (
+    <View
+      style={[
+        styles.header,
+        transparent ? styles.headerTransparent : null,
+      ]}
+    >
+      <Pressy
+        onPress={onBack}
+        haptic="select"
+        hitSlop={HitSlop.expand}
+        accessibilityRole={Roles.button}
+        accessibilityLabel="Volver"
+        style={styles.headerBtn}
+      >
+        <Feather name="arrow-left" size={22} color={transparent ? '#fff' : Colors.textPrimary} />
+      </Pressy>
+      <View style={{ flex: 1 }}>
+        <Kicker tone={transparent ? 'inverse' : 'muted'} style={transparent ? { color: '#fff' } : undefined}>
+          {t ? 'STAFF' : 'STAFF'}
+        </Kicker>
+      </View>
+      <Pressy
+        onPress={onManual}
+        haptic="select"
+        hitSlop={HitSlop.expand}
+        accessibilityRole={Roles.button}
+        accessibilityLabel={t ? 'Código manual' : 'Manual code'}
+        style={styles.headerBtn}
+      >
+        <Feather name="edit-3" size={20} color={transparent ? '#fff' : Colors.textPrimary} />
+      </Pressy>
+    </View>
+  );
+}
+
+// ── Result sheet (Sheet primitive) ───────────
+function ResultSheet({
+  visible,
+  result,
+  t,
+  confirming,
+  onConfirm,
+  onCancel,
+}: {
+  visible: boolean;
+  result: ScanResult | null;
+  t: boolean;
+  confirming: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  if (!result) return null;
+
   if (result.kind === 'not_found') {
     return (
-      <View style={styles.sheet}>
-        <View style={[styles.sheetBadge, { backgroundColor: 'rgba(228,88,88,0.15)' }]}>
-          <Feather name="x-circle" size={24} color={Colors.accentDanger} />
+      <Sheet open={visible} onClose={onCancel} title={t ? 'Sin coincidencias' : 'No match'}>
+        <View style={styles.sheetBody}>
+          <Body tone="secondary" align="center">
+            {t
+              ? 'No coincide con ninguna reserva ni canje.'
+              : 'Does not match any reservation or redemption.'}
+          </Body>
+          <View style={{ marginTop: Spacing[5] }}>
+            <Button
+              label={t ? 'Escanear otro' : 'Scan another'}
+              onPress={onCancel}
+              variant="primary"
+              fullWidth
+            />
+          </View>
         </View>
-        <Text style={styles.sheetTitle}>{t ? 'Código no encontrado' : 'Code not found'}</Text>
-        <Text style={styles.sheetSub}>{t ? 'No coincide con ninguna reserva ni canje.' : 'Does not match any reservation or redemption.'}</Text>
-        <TouchableOpacity style={styles.primaryBtn} onPress={onCancel}>
-          <Text style={styles.primaryBtnLbl}>{t ? 'Escanear otro' : 'Scan another'}</Text>
-        </TouchableOpacity>
-      </View>
+      </Sheet>
     );
   }
+
   if (result.kind === 'error') {
     return (
-      <View style={styles.sheet}>
-        <View style={[styles.sheetBadge, { backgroundColor: 'rgba(228,88,88,0.15)' }]}>
-          <Feather name="alert-triangle" size={24} color={Colors.accentDanger} />
+      <Sheet open={visible} onClose={onCancel} title={t ? 'Error' : 'Error'}>
+        <View style={styles.sheetBody}>
+          <Body tone="secondary" align="center">
+            {result.message}
+          </Body>
+          <View style={{ marginTop: Spacing[5] }}>
+            <Button
+              label={t ? 'Reintentar' : 'Try again'}
+              onPress={onCancel}
+              variant="primary"
+              fullWidth
+            />
+          </View>
         </View>
-        <Text style={styles.sheetTitle}>{t ? 'Error' : 'Error'}</Text>
-        <Text style={styles.sheetSub}>{result.message}</Text>
-        <TouchableOpacity style={styles.primaryBtn} onPress={onCancel}>
-          <Text style={styles.primaryBtnLbl}>{t ? 'Reintentar' : 'Try again'}</Text>
-        </TouchableOpacity>
-      </View>
+      </Sheet>
     );
   }
 
@@ -223,202 +420,329 @@ function ResultSheet({ result, t, confirming, onConfirm, onCancel }: any) {
   const isUsed = isReservation ? !!d.seatedAt : !!d.isUsed;
 
   return (
-    <View style={styles.sheet}>
-      <View style={[styles.sheetBadge, { backgroundColor: isUsed ? 'rgba(244,163,64,0.15)' : 'rgba(56,199,147,0.15)' }]}>
-        <Feather name={isUsed ? 'alert-circle' : 'check-circle'} size={24} color={isUsed ? Colors.accentPrimary : Colors.accentSuccess} />
-      </View>
-      <Text style={styles.sheetKind}>
-        {isReservation
-          ? (t ? 'RESERVA DE MESA' : 'TABLE RESERVATION')
-          : (t ? 'CANJE DE OFERTA' : 'OFFER REDEMPTION')}
-      </Text>
-      <Text style={styles.sheetTitle}>{name}</Text>
-      <View style={styles.sheetMeta}>
-        {isReservation ? (
-          <>
-            <Row icon="calendar" label={new Date(d.date).toLocaleDateString()} />
-            <Row icon="clock" label={d.timeSlot} />
-            <Row icon="users" label={`${d.partySize} ${t ? 'personas' : 'people'}`} />
-            {d.specialRequests ? <Row icon="file-text" label={d.specialRequests} /> : null}
-          </>
-        ) : (
-          <>
-            <Row icon="tag" label={d.offer?.title || ''} />
-            <Row icon="home" label={d.offer?.venue?.name || ''} />
-            {d.expiresAt ? <Row icon="clock" label={`${t ? 'Expira: ' : 'Expires: '}${new Date(d.expiresAt).toLocaleString()}`} /> : null}
-          </>
-        )}
-      </View>
-      {isUsed && (
-        <View style={styles.warnRow}>
-          <Feather name="alert-triangle" size={14} color={Colors.accentPrimary} />
-          <Text style={styles.warnText}>
-            {isReservation
-              ? (t ? 'Ya fue marcado como presente' : 'Already checked in')
-              : (t ? 'Ya fue canjeado' : 'Already redeemed')}
-          </Text>
+    <Sheet open={visible} onClose={onCancel}>
+      <View style={styles.sheetBody}>
+        <Kicker tone="champagne" align="center">
+          {isReservation
+            ? t
+              ? 'RESERVA DE MESA'
+              : 'TABLE RESERVATION'
+            : t
+              ? 'CANJE DE OFERTA'
+              : 'OFFER REDEMPTION'}
+        </Kicker>
+        <Heading size="md" align="center" style={{ marginTop: Spacing[2] }}>
+          {name}
+        </Heading>
+
+        <Hairline variant="subtle" style={{ marginVertical: Spacing[5] }} />
+
+        <View style={{ gap: Spacing[3] }}>
+          {isReservation ? (
+            <>
+              {d.date ? <MetaRow icon="calendar" label={new Date(d.date).toLocaleDateString()} /> : null}
+              {d.timeSlot ? <MetaRow icon="clock" label={d.timeSlot} /> : null}
+              {d.partySize ? (
+                <MetaRow
+                  icon="users"
+                  label={`${d.partySize} ${t ? 'personas' : 'people'}`}
+                />
+              ) : null}
+              {d.specialRequests ? (
+                <MetaRow icon="file-text" label={d.specialRequests} />
+              ) : null}
+            </>
+          ) : (
+            <>
+              {d.offer?.title ? <MetaRow icon="tag" label={d.offer.title} /> : null}
+              {d.offer?.venue?.name ? (
+                <MetaRow icon="home" label={d.offer.venue.name} />
+              ) : null}
+              {d.expiresAt ? (
+                <MetaRow
+                  icon="clock"
+                  label={`${t ? 'Expira' : 'Expires'} · ${new Date(d.expiresAt).toLocaleString()}`}
+                />
+              ) : null}
+            </>
+          )}
         </View>
-      )}
-      <View style={styles.sheetActions}>
-        <TouchableOpacity style={styles.sheetCancel} onPress={onCancel} disabled={confirming}>
-          <Text style={styles.sheetCancelLbl}>{t ? 'Cancelar' : 'Cancel'}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.sheetConfirm} onPress={onConfirm} disabled={confirming || isUsed}>
-          {confirming
-            ? <ActivityIndicator color={Colors.textInverse} size="small" />
-            : <Text style={styles.sheetConfirmLbl}>
-                {isReservation ? (t ? 'Confirmar entrada' : 'Confirm check-in') : (t ? 'Marcar canjeado' : 'Mark redeemed')}
-              </Text>}
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
-}
 
-function Row({ icon, label }: { icon: any; label: string }) {
-  return (
-    <View style={styles.row}>
-      <Feather name={icon} size={14} color={Colors.textMuted} />
-      <Text style={styles.rowLbl}>{label}</Text>
-    </View>
-  );
-}
+        {isUsed ? (
+          <View style={styles.warnBlock}>
+            <Feather name="alert-triangle" size={14} color={Colors.accentWarning} />
+            <Caption tone="warning">
+              {isReservation
+                ? t
+                  ? 'Ya fue marcado como presente'
+                  : 'Already checked in'
+                : t
+                  ? 'Ya fue canjeado'
+                  : 'Already redeemed'}
+            </Caption>
+          </View>
+        ) : null}
 
-function ManualModal({ visible, onClose, code, setCode, onSubmit, t }: any) {
-  return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={styles.modalBackdrop}>
-        <View style={styles.modalCard}>
-          <Text style={styles.modalTitle}>{t ? 'Código manual' : 'Manual code'}</Text>
-          <TextInput
-            style={styles.manualInput}
-            value={code}
-            onChangeText={setCode}
-            placeholder={t ? 'Pega o escribe el código' : 'Paste or type the code'}
-            placeholderTextColor={Colors.textMuted}
-            autoCapitalize="characters"
-            autoCorrect={false}
-          />
-          <View style={styles.modalActions}>
-            <TouchableOpacity style={styles.sheetCancel} onPress={onClose}>
-              <Text style={styles.sheetCancelLbl}>{t ? 'Cancelar' : 'Cancel'}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.sheetConfirm, (!code.trim()) && { opacity: 0.5 }]} onPress={onSubmit} disabled={!code.trim()}>
-              <Text style={styles.sheetConfirmLbl}>{t ? 'Buscar' : 'Look up'}</Text>
-            </TouchableOpacity>
+        <View style={styles.sheetActions}>
+          <View style={{ flex: 1 }}>
+            <Button
+              label={t ? 'Cancelar' : 'Cancel'}
+              onPress={onCancel}
+              variant="secondary"
+              disabled={confirming}
+              fullWidth
+            />
+          </View>
+          <View style={{ flex: 1.4 }}>
+            <Button
+              label={
+                isReservation
+                  ? t
+                    ? 'Confirmar entrada'
+                    : 'Confirm check-in'
+                  : t
+                    ? 'Marcar canjeado'
+                    : 'Mark redeemed'
+              }
+              onPress={onConfirm}
+              variant="primary"
+              loading={confirming}
+              disabled={isUsed}
+              fullWidth
+            />
           </View>
         </View>
       </View>
-    </Modal>
+    </Sheet>
   );
 }
 
+function MetaRow({ icon, label }: { icon: React.ComponentProps<typeof Feather>['name']; label: string }) {
+  return (
+    <View style={styles.metaRow}>
+      <Feather name={icon} size={14} color={Colors.textMuted} />
+      <Body tone="primary" style={{ flex: 1 }}>
+        {label}
+      </Body>
+    </View>
+  );
+}
+
+// ── Manual code entry (Modal) ────────────────
+function ManualEntry({
+  visible,
+  onClose,
+  code,
+  setCode,
+  onSubmit,
+  t,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  code: string;
+  setCode: (s: string) => void;
+  onSubmit: () => void;
+  t: boolean;
+}) {
+  return (
+    <PremiumModal open={visible} onClose={onClose} title={t ? 'Código manual' : 'Manual code'}>
+      <View style={{ gap: Spacing[5] }}>
+        <Body tone="secondary">
+          {t
+            ? 'Si el QR no se lee, escribe el código tal cual aparece.'
+            : 'If the QR does not scan, type the code as it appears.'}
+        </Body>
+        <Input
+          label={t ? 'CÓDIGO' : 'CODE'}
+          placeholder={t ? 'Pega o escribe el código' : 'Paste or type the code'}
+          value={code}
+          onChangeText={setCode}
+          autoCapitalize="characters"
+          autoCorrect={false}
+          autoFocus
+        />
+        <View style={{ flexDirection: 'row', gap: Spacing[3] }}>
+          <View style={{ flex: 1 }}>
+            <Button
+              label={t ? 'Cancelar' : 'Cancel'}
+              onPress={onClose}
+              variant="secondary"
+              fullWidth
+            />
+          </View>
+          <View style={{ flex: 1.4 }}>
+            <Button
+              label={t ? 'Buscar' : 'Look up'}
+              onPress={onSubmit}
+              disabled={!code.trim()}
+              variant="primary"
+              fullWidth
+            />
+          </View>
+        </View>
+      </View>
+    </PremiumModal>
+  );
+}
+
+// ── Reticle corners ──────────────────────────
+function CornerTL() {
+  return <View style={[styles.corner, { top: 0, left: 0, borderTopWidth: 2, borderLeftWidth: 2 }]} />;
+}
+function CornerTR() {
+  return <View style={[styles.corner, { top: 0, right: 0, borderTopWidth: 2, borderRightWidth: 2 }]} />;
+}
+function CornerBL() {
+  return <View style={[styles.corner, { bottom: 0, left: 0, borderBottomWidth: 2, borderLeftWidth: 2 }]} />;
+}
+function CornerBR() {
+  return <View style={[styles.corner, { bottom: 0, right: 0, borderBottomWidth: 2, borderRightWidth: 2 }]} />;
+}
+
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#000' },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16, padding: 24 },
-
-  header: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: 20, paddingVertical: 8,
+  root: { flex: 1, backgroundColor: Colors.bgPrimary },
+  cameraRoot: { flex: 1, backgroundColor: '#000' },
+  permRoot: {
+    flex: 1,
     backgroundColor: Colors.bgPrimary,
-    borderBottomWidth: 1, borderBottomColor: Colors.border,
-  },
-  iconBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: Colors.bgCard,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  title: { color: Colors.textPrimary, fontSize: 17, fontWeight: '700' },
-
-  permMsg: { color: Colors.textSecondary, textAlign: 'center', fontSize: 14, lineHeight: 22 },
-
-  scanWrap: { flex: 1, backgroundColor: '#000' },
-  overlay: {
-    ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 24,
+  },
+
+  // Header
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[2],
+    paddingBottom: Spacing[4],
+    gap: Spacing[3],
+  },
+  headerTransparent: {
+    paddingTop: Spacing[2],
+  },
+  headerBtn: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: Radius.full,
+  },
+
+  // Camera overlay
+  cameraStage: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    gap: Spacing[5],
+  },
+  cameraVignetteTop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 160,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+  cameraVignetteBottom: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 220,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+
+  reticleWrap: {
+    width: 260,
+    height: 260,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: Spacing[6],
   },
   reticle: {
-    width: 260, height: 260,
-    borderWidth: 3,
-    borderColor: Colors.accentPrimary,
-    borderRadius: 24,
-    backgroundColor: 'transparent',
+    width: 260,
+    height: 260,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.35)',
+    borderRadius: Radius.sm,
   },
-  hint: { color: '#FFFFFF', fontSize: 14, fontWeight: '600', textAlign: 'center', paddingHorizontal: 40 },
+  corner: {
+    position: 'absolute',
+    width: 26,
+    height: 26,
+    borderColor: Colors.accentChampagne,
+  },
 
-  sheet: {
-    position: 'absolute', left: 0, right: 0, bottom: 0,
-    backgroundColor: Colors.bgCard,
-    borderTopLeftRadius: 24, borderTopRightRadius: 24,
-    padding: 24,
-    gap: 10,
+  resolvingRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    borderTopWidth: 1, borderColor: Colors.border,
+    gap: Spacing[2],
   },
-  sheetBadge: {
-    width: 56, height: 56, borderRadius: 28,
-    alignItems: 'center', justifyContent: 'center',
+  hint: {
+    color: 'rgba(255,255,255,0.7)',
+    maxWidth: 280,
   },
-  sheetKind: { color: Colors.textMuted, fontSize: 11, fontWeight: '700', letterSpacing: 1 },
-  sheetTitle: { color: Colors.textPrimary, fontSize: 20, fontWeight: '800' },
-  sheetSub: { color: Colors.textSecondary, textAlign: 'center', fontSize: 13, lineHeight: 20 },
-  sheetMeta: { width: '100%', gap: 6, paddingVertical: 8 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  rowLbl: { color: Colors.textPrimary, fontSize: 13, flex: 1 },
-  warnRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: 'rgba(244,163,64,0.12)',
-    paddingHorizontal: 10, paddingVertical: 6,
-    borderRadius: 8,
-    marginVertical: 4,
-  },
-  warnText: { color: Colors.accentPrimary, fontSize: 12, fontWeight: '700' },
 
-  sheetActions: { flexDirection: 'row', gap: 10, width: '100%', marginTop: 4 },
-  sheetCancel: {
-    flex: 1, height: 48, borderRadius: 14,
-    alignItems: 'center', justifyContent: 'center',
-    backgroundColor: Colors.bgElevated,
+  // Permission denied
+  permBody: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    gap: Spacing[3],
   },
-  sheetCancelLbl: { color: Colors.textPrimary, fontWeight: '700', fontSize: 14 },
-  sheetConfirm: {
-    flex: 1.5, height: 48, borderRadius: 14,
-    alignItems: 'center', justifyContent: 'center',
-    backgroundColor: Colors.accentPrimary,
+  permIconWrap: {
+    width: 80,
+    height: 80,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: Spacing[2],
   },
-  sheetConfirmLbl: { color: Colors.textInverse, fontWeight: '800', fontSize: 14 },
+  permIconFrame: {
+    position: 'absolute',
+    width: 80,
+    height: 80,
+    borderRadius: Radius.full,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.borderStrong,
+  },
+  permMsg: {
+    maxWidth: 280,
+    marginTop: Spacing[1],
+  },
+  permActions: {
+    marginTop: Spacing[6],
+    width: '100%',
+    gap: Spacing[3],
+  },
 
-  primaryBtn: {
-    paddingHorizontal: 24, paddingVertical: 14,
-    backgroundColor: Colors.accentPrimary,
-    borderRadius: Radius.button,
+  // Sheet body
+  sheetBody: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingBottom: Spacing[5],
   },
-  primaryBtnLbl: { color: Colors.textInverse, fontSize: 15, fontWeight: '700' },
-  secondaryBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    paddingHorizontal: 20, paddingVertical: 12,
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing[3],
   },
-  secondaryBtnLbl: { color: Colors.accentPrimary, fontSize: 14, fontWeight: '600' },
-
-  modalBackdrop: {
-    flex: 1, backgroundColor: 'rgba(0,0,0,0.75)',
-    alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24,
+  warnBlock: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing[2],
+    paddingHorizontal: Spacing[3],
+    paddingVertical: Spacing[2],
+    marginTop: Spacing[4],
+    backgroundColor: 'rgba(217,163,93,0.10)',
+    borderRadius: Radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(217,163,93,0.35)',
   },
-  modalCard: {
-    width: '100%', backgroundColor: Colors.bgCard,
-    borderRadius: 20, padding: 20, gap: 14,
-    borderWidth: 1, borderColor: Colors.border,
+  sheetActions: {
+    flexDirection: 'row',
+    gap: Spacing[3],
+    marginTop: Spacing[6],
   },
-  modalTitle: { color: Colors.textPrimary, fontSize: 17, fontWeight: '800' },
-  manualInput: {
-    backgroundColor: Colors.bgPrimary,
-    borderRadius: 12,
-    borderWidth: 1, borderColor: Colors.border,
-    padding: 14,
-    color: Colors.textPrimary,
-    fontSize: 16, fontFamily: 'monospace', letterSpacing: 2,
-  },
-  modalActions: { flexDirection: 'row', gap: 10, marginTop: 4 },
 });

@@ -1,24 +1,59 @@
-import { View, Text, StyleSheet, ScrollView, Alert, TouchableOpacity, TextInput, ActivityIndicator, KeyboardAvoidingView, Platform, Keyboard, TouchableWithoutFeedback } from 'react-native';
+// ─────────────────────────────────────────────
+//  New Reservation — Editorial Premium
+//
+//  Editorial form: kicker + Display title, then four editorial sections
+//  (venue, date, time, party, notes) separated by hairlines. Sticky
+//  primary CTA at the foot.
+// ─────────────────────────────────────────────
 import { useEffect, useState } from 'react';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import {
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  TextInput,
+  View,
+} from 'react-native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
-import { reservationsApi, venueApi, eventsApi } from '@/api/client';
+
+import {
+  Body,
+  Button,
+  Caption,
+  Confetti,
+  Display,
+  FadeIn,
+  Hairline,
+  Kicker,
+  Pressy,
+  Subhead,
+} from '@/components/ui';
+import { Colors, EditorialSpacing, Radius, Spacing, TypePresets } from '@/constants/tokens';
+import { HitSlop, Roles } from '@/constants/a11y';
+import { eventsApi, reservationsApi, venueApi } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { useAppStore } from '@/stores/app.store';
-import { Colors, Radius } from '@/constants/tokens';
 import { useFeedback } from '@/hooks/useFeedback';
-import { Confetti } from '@/components/ui';
 
 const PARTY_SIZES = [1, 2, 3, 4, 5, 6, 7, 8];
-const DEFAULT_TIME_SLOTS = ['18:00', '18:30', '19:00', '19:30', '20:00', '20:30', '21:00', '21:30', '22:00', '22:30', '23:00'];
+const DEFAULT_TIME_SLOTS = [
+  '18:00', '18:30', '19:00', '19:30', '20:00', '20:30',
+  '21:00', '21:30', '22:00', '22:30', '23:00',
+];
 
 /**
  * Build the available reservation slots from the venue's openTime/closeTime/slotMinutes.
  * Handles venues that close past midnight (e.g. open 20:00, close 02:00).
  * Returns DEFAULT_TIME_SLOTS if the venue has no config yet.
  */
-function buildSlotsFromVenue(venue: { openTime?: string | null; closeTime?: string | null; slotMinutes?: number | null }): string[] {
+function buildSlotsFromVenue(venue: {
+  openTime?: string | null;
+  closeTime?: string | null;
+  slotMinutes?: number | null;
+}): string[] {
   const open = venue.openTime;
   const close = venue.closeTime;
   const step = venue.slotMinutes ?? 30;
@@ -36,11 +71,9 @@ function buildSlotsFromVenue(venue: { openTime?: string | null; closeTime?: stri
 
   let start = toMin(open);
   let end = toMin(close);
-  // Closes past midnight — add 24h so the loop covers the right range.
   if (end <= start) end += 24 * 60;
 
   const out: string[] = [];
-  // Stop a bit before close so last slot fits in opening hours.
   for (let t = start; t <= end - step; t += step) out.push(fromMin(t));
   return out.length > 0 ? out : DEFAULT_TIME_SLOTS;
 }
@@ -65,7 +98,8 @@ function nextDays(count = 14): Date[] {
 }
 
 export default function NewReservation() {
-  const { venueId: venueIdParam, eventId: eventIdParam } = useLocalSearchParams<{ venueId: string; eventId: string }>();
+  const { venueId: venueIdParam, eventId: eventIdParam } =
+    useLocalSearchParams<{ venueId: string; eventId: string }>();
   const router = useRouter();
   const { language } = useAppStore();
   const t = language === 'es';
@@ -82,9 +116,8 @@ export default function NewReservation() {
   const [event, setEvent] = useState<any>(null);
   const [timeSlots, setTimeSlots] = useState<string[]>(DEFAULT_TIME_SLOTS);
   const [party, setParty] = useState(false);
-  // When coming from an event we pre-fill date + time but keep them EDITABLE.
-  // Users often want an earlier/later seating; forcing them to back out of the
-  // screen to change it was confusing. `dateLocked` is no longer set to true.
+
+  // Coming from an event we pre-fill date+time but keep them EDITABLE.
   const lockedToEvent = false;
 
   useEffect(() => {
@@ -180,64 +213,67 @@ export default function NewReservation() {
         keyboardVerticalOffset={0}
       >
         {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn} hitSlop={10}>
+        <View style={styles.headerRow}>
+          <Pressy
+            onPress={() => router.back()}
+            accessibilityRole={Roles.button}
+            accessibilityLabel={t ? 'Volver' : 'Back'}
+            hitSlop={HitSlop.expand}
+            style={styles.backBtn}
+          >
             <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
-          </TouchableOpacity>
-          <Text style={styles.title}>{t ? 'Reservar mesa' : 'Book a table'}</Text>
-          <View style={{ width: 40 }} />
+          </Pressy>
         </View>
 
         <ScrollView
-          contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 140 + insets.bottom, gap: 18 }}
+          contentContainerStyle={[styles.scroll, { paddingBottom: 140 + insets.bottom }]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
         >
-          {lockedToEvent && event && (
-            <View style={styles.eventBanner}>
-              <View style={styles.eventBannerIcon}>
-                <Feather name="star" size={18} color="#A855F7" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.eventBannerLabel}>
-                  {t ? 'Mesa para el evento' : 'Table for event'}
-                </Text>
-                <Text style={styles.eventBannerTitle} numberOfLines={1}>
-                  {t ? event.title : (event.titleEn || event.title)}
-                </Text>
-                {typeof event.maxCapacity === 'number' && (
-                  <Text style={styles.eventBannerMeta}>
-                    {t ? 'Cupo: ' : 'Capacity: '}{event.currentCapacity ?? 0}/{event.maxCapacity}
-                  </Text>
-                )}
-              </View>
-            </View>
-          )}
+          <FadeIn>
+            <Kicker tone="champagne">{t ? 'NUEVA RESERVA' : 'NEW BOOKING'}</Kicker>
+          </FadeIn>
+          <FadeIn delay={80} style={{ marginTop: Spacing[3] }}>
+            <Display size="md">{t ? 'Reservar mesa.' : 'Book a table.'}</Display>
+          </FadeIn>
 
-          {/* Venue card */}
-          <View style={styles.venueCard}>
-            <View style={styles.venueIcon}>
-              <Feather name="map-pin" size={18} color={Colors.accentPrimary} />
-            </View>
-            <View>
-              <Text style={styles.venueLabel}>{t ? 'Local' : 'Venue'}</Text>
-              <Text style={styles.venueName}>{venueName}</Text>
-            </View>
-          </View>
+          {lockedToEvent && event ? (
+            <FadeIn delay={160} style={{ marginTop: Spacing[6] }}>
+              <Kicker tone="champagne">
+                {t ? 'MESA PARA EL EVENTO' : 'TABLE FOR EVENT'}
+              </Kicker>
+              <Subhead style={{ marginTop: Spacing[2] }}>
+                {t ? event.title : event.titleEn || event.title}
+              </Subhead>
+              {typeof event.maxCapacity === 'number' ? (
+                <Caption tone="muted" style={{ marginTop: Spacing[1] }}>
+                  {t ? 'Cupo: ' : 'Capacity: '}{event.currentCapacity ?? 0}/{event.maxCapacity}
+                </Caption>
+              ) : null}
+            </FadeIn>
+          ) : null}
 
-          {/* Date */}
-          <View>
-            <Text style={styles.sectionLabel}>{t ? 'Fecha' : 'Date'}</Text>
-            {lockedToEvent ? (
-              <View style={styles.lockedRow}>
-                <Feather name="lock" size={14} color={Colors.textMuted} />
-                <Text style={styles.lockedText}>
-                  {new Date(dateStr).toLocaleDateString(language, { weekday: 'long', day: 'numeric', month: 'long' })}
-                </Text>
-              </View>
-            ) : (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingRight: 20 }}>
+          {/* Venue ─────────────────────────── */}
+          <FadeIn delay={180} style={styles.section}>
+            <Kicker tone="muted">{t ? 'LOCAL' : 'VENUE'}</Kicker>
+            <View style={{ marginTop: Spacing[2], flexDirection: 'row', alignItems: 'center', gap: Spacing[2] }}>
+              <Feather name="map-pin" size={14} color={Colors.accentPrimary} />
+              <Subhead>{venueName}</Subhead>
+            </View>
+          </FadeIn>
+
+          <Hairline variant="subtle" style={{ marginTop: Spacing[6] }} />
+
+          {/* Date ────────────────────────── */}
+          <FadeIn delay={240} style={styles.section}>
+            <Kicker tone="muted">{t ? 'FECHA' : 'DATE'}</Kicker>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ gap: Spacing[2], paddingRight: EditorialSpacing.pageGutter }}
+              style={{ marginTop: Spacing[3] }}
+            >
               {days.map((d) => {
                 const iso = formatDate(d);
                 const selected = iso === dateStr;
@@ -245,76 +281,89 @@ export default function NewReservation() {
                 const weekday = d.toLocaleDateString(language, { weekday: 'short' }).replace('.', '');
                 const month = d.toLocaleDateString(language, { month: 'short' }).replace('.', '');
                 return (
-                  <TouchableOpacity
+                  <Pressy
                     key={iso}
-                    style={[styles.dateChip, selected && styles.dateChipActive]}
                     onPress={() => setDateStr(iso)}
-                    activeOpacity={0.85}
+                    accessibilityRole={Roles.button}
+                    accessibilityLabel={`${weekday} ${day} ${month}`}
+                    accessibilityState={{ selected }}
+                    haptic="select"
+                    style={[styles.dateChip, selected && styles.dateChipActive]}
                   >
-                    <Text style={[styles.dateChipDay, selected && { color: Colors.textInverse }]}>{day}</Text>
-                    <Text style={[styles.dateChipSub, selected && { color: Colors.textInverse, opacity: 0.9 }]}>
-                      {weekday}
-                    </Text>
-                    <Text style={[styles.dateChipMonth, selected && { color: Colors.textInverse, opacity: 0.8 }]}>
-                      {month}
-                    </Text>
-                  </TouchableOpacity>
+                    <Caption tone={selected ? 'inverse' : 'muted'} style={styles.dateChipTopText}>
+                      {weekday.toUpperCase()}
+                    </Caption>
+                    <Body size="lg" tone={selected ? 'inverse' : 'primary'} weight="semiBold" style={{ marginTop: 2 }}>
+                      {day}
+                    </Body>
+                    <Caption tone={selected ? 'inverse' : 'muted'} style={styles.dateChipTopText}>
+                      {month.toUpperCase()}
+                    </Caption>
+                  </Pressy>
                 );
               })}
             </ScrollView>
-            )}
-          </View>
+          </FadeIn>
 
-          {/* Time */}
-          <View>
-            <Text style={styles.sectionLabel}>{t ? 'Horario' : 'Time'}</Text>
-            {lockedToEvent ? (
-              <View style={styles.lockedRow}>
-                <Feather name="lock" size={14} color={Colors.textMuted} />
-                <Text style={styles.lockedText}>{timeSlot || '—'}</Text>
-              </View>
-            ) : (
+          <Hairline variant="subtle" style={{ marginTop: Spacing[6] }} />
+
+          {/* Time ────────────────────────── */}
+          <FadeIn delay={300} style={styles.section}>
+            <Kicker tone="muted">{t ? 'HORARIO' : 'TIME'}</Kicker>
             <View style={styles.timeGrid}>
               {timeSlots.map((slot) => {
                 const selected = slot === timeSlot;
                 return (
-                  <TouchableOpacity
+                  <Pressy
                     key={slot}
-                    style={[styles.timeChip, selected && styles.timeChipActive]}
                     onPress={() => setTimeSlot(slot)}
-                    activeOpacity={0.85}
+                    accessibilityRole={Roles.button}
+                    accessibilityLabel={slot}
+                    accessibilityState={{ selected }}
+                    haptic="select"
+                    style={[styles.timeChip, selected && styles.timeChipActive]}
                   >
-                    <Text style={[styles.timeText, selected && styles.timeTextActive]}>{slot}</Text>
-                  </TouchableOpacity>
+                    <Body size="sm" tone={selected ? 'inverse' : 'secondary'} weight={selected ? 'semiBold' : 'regular'}>
+                      {slot}
+                    </Body>
+                  </Pressy>
                 );
               })}
             </View>
-            )}
-          </View>
+          </FadeIn>
 
-          {/* Party size */}
-          <View>
-            <Text style={styles.sectionLabel}>{t ? 'Personas' : 'Party size'}</Text>
+          <Hairline variant="subtle" style={{ marginTop: Spacing[6] }} />
+
+          {/* Party size ────────────────── */}
+          <FadeIn delay={360} style={styles.section}>
+            <Kicker tone="muted">{t ? 'PERSONAS' : 'PARTY SIZE'}</Kicker>
             <View style={styles.partyRow}>
               {PARTY_SIZES.map((n) => {
                 const selected = n === partySize;
                 return (
-                  <TouchableOpacity
+                  <Pressy
                     key={n}
-                    style={[styles.partyChip, selected && styles.partyChipActive]}
                     onPress={() => setPartySize(n)}
-                    activeOpacity={0.85}
+                    accessibilityRole={Roles.button}
+                    accessibilityLabel={`${n}`}
+                    accessibilityState={{ selected }}
+                    haptic="select"
+                    style={[styles.partyChip, selected && styles.partyChipActive]}
                   >
-                    <Text style={[styles.partyText, selected && styles.partyTextActive]}>{n}</Text>
-                  </TouchableOpacity>
+                    <Body size="md" tone={selected ? 'inverse' : 'secondary'} weight="semiBold">
+                      {n}
+                    </Body>
+                  </Pressy>
                 );
               })}
             </View>
-          </View>
+          </FadeIn>
 
-          {/* Notes */}
-          <View>
-            <Text style={styles.sectionLabel}>{t ? 'Notas (opcional)' : 'Notes (optional)'}</Text>
+          <Hairline variant="subtle" style={{ marginTop: Spacing[6] }} />
+
+          {/* Notes ──────────────────────── */}
+          <FadeIn delay={420} style={styles.section}>
+            <Kicker tone="muted">{t ? 'NOTAS (OPCIONAL)' : 'NOTES (OPTIONAL)'}</Kicker>
             <View style={styles.notesBox}>
               <TextInput
                 style={styles.notesInput}
@@ -324,28 +373,27 @@ export default function NewReservation() {
                 placeholderTextColor={Colors.textMuted}
                 multiline
                 textAlignVertical="top"
+                accessibilityLabel={t ? 'Notas' : 'Notes'}
               />
             </View>
-          </View>
+          </FadeIn>
         </ScrollView>
 
-        {/* CTA — uses safe area inset so it clears the home indicator. */}
-        <View style={[styles.cta, { paddingBottom: 12 + insets.bottom }]}>
-          <TouchableOpacity
-            style={[styles.ctaBtn, loading && { opacity: 0.6 }]}
-            onPress={handleSubmit}
-            disabled={loading}
-            activeOpacity={0.9}
-          >
-            {loading
-              ? <ActivityIndicator color={Colors.textInverse} />
-              : <>
-                  <Feather name="calendar" size={18} color={Colors.textInverse} />
-                  <Text style={styles.ctaLabel}>
-                    {t ? 'Confirmar reserva' : 'Confirm booking'}
-                  </Text>
-                </>}
-          </TouchableOpacity>
+        {/* Sticky CTA ─────────────────────── */}
+        <View style={[styles.ctaWrap, { paddingBottom: Spacing[4] + insets.bottom }]}>
+          <Hairline variant="subtle" />
+          <View style={styles.ctaInner}>
+            <Button
+              label={t ? 'Confirmar reserva' : 'Confirm booking'}
+              onPress={handleSubmit}
+              loading={loading}
+              disabled={loading}
+              variant="primary"
+              size="lg"
+              fullWidth
+              haptic="success"
+            />
+          </View>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -354,160 +402,109 @@ export default function NewReservation() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  headerRow: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[2],
+  },
+  backBtn: {
+    width: 44,
+    height: 44,
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 8,
+    justifyContent: 'center',
+    marginLeft: -Spacing[2],
   },
-  iconBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: Colors.bgCard,
-    alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1, borderColor: Colors.border,
-  },
-  title: { color: Colors.textPrimary, fontSize: 17, fontWeight: '700' },
 
-  eventBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    backgroundColor: 'rgba(168,85,247,0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(168,85,247,0.35)',
-    borderRadius: 14,
-    padding: 14,
-    marginTop: 8,
+  scroll: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[6],
   },
-  eventBannerIcon: {
-    width: 40, height: 40, borderRadius: 10,
-    backgroundColor: 'rgba(168,85,247,0.2)',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  eventBannerLabel: { color: '#A855F7', fontSize: 11, fontWeight: '700', letterSpacing: 0.5 },
-  eventBannerTitle: { color: Colors.textPrimary, fontSize: 15, fontWeight: '700', marginTop: 2 },
-  eventBannerMeta: { color: Colors.textMuted, fontSize: 12, marginTop: 2 },
-
-  lockedRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: Colors.bgCard,
-    borderRadius: 12,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  lockedText: { color: Colors.textSecondary, fontSize: 14, fontWeight: '600', flex: 1 },
-
-  venueCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    backgroundColor: Colors.bgCard,
-    borderRadius: Radius.card,
-    padding: 14,
-    marginTop: 8,
-  },
-  venueIcon: {
-    width: 40, height: 40, borderRadius: 10,
-    backgroundColor: Colors.bgElevated,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  venueLabel: { color: Colors.textMuted, fontSize: 11 },
-  venueName: { color: Colors.textPrimary, fontSize: 15, fontWeight: '700', marginTop: 2 },
-
-  sectionLabel: {
-    color: Colors.textSecondary,
-    fontSize: 13,
-    fontWeight: '700',
-    marginBottom: 10,
-    letterSpacing: 0.3,
-  },
+  section: { marginTop: Spacing[6] },
 
   dateChip: {
-    width: 64,
-    paddingVertical: 10,
-    borderRadius: 14,
-    backgroundColor: Colors.bgCard,
+    minWidth: 60,
+    paddingVertical: Spacing[3],
+    paddingHorizontal: Spacing[3],
+    borderRadius: Radius.md,
     borderWidth: 1,
     borderColor: Colors.border,
+    backgroundColor: Colors.bgCard,
     alignItems: 'center',
-    gap: 2,
   },
   dateChipActive: {
     backgroundColor: Colors.accentPrimary,
     borderColor: Colors.accentPrimary,
   },
-  dateChipDay: { color: Colors.textPrimary, fontSize: 20, fontWeight: '800' },
-  dateChipSub: { color: Colors.textMuted, fontSize: 10, textTransform: 'uppercase' },
-  dateChipMonth: { color: Colors.textMuted, fontSize: 10, textTransform: 'uppercase' },
+  dateChipTopText: { letterSpacing: 1.2 },
 
   timeGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    gap: Spacing[2],
+    marginTop: Spacing[3],
   },
   timeChip: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 20,
+    paddingHorizontal: Spacing[4],
+    paddingVertical: Spacing[2],
+    minHeight: 40,
+    borderRadius: Radius.full,
     borderWidth: 1,
     borderColor: Colors.border,
     backgroundColor: Colors.bgCard,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  timeChipActive: { backgroundColor: Colors.accentPrimary, borderColor: Colors.accentPrimary },
-  timeText: { color: Colors.textSecondary, fontSize: 14, fontWeight: '600' },
-  timeTextActive: { color: Colors.textInverse, fontWeight: '700' },
+  timeChipActive: {
+    backgroundColor: Colors.accentPrimary,
+    borderColor: Colors.accentPrimary,
+  },
 
-  partyRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
-  partyChip: {
-    width: 44, height: 44, borderRadius: 22,
-    borderWidth: 1, borderColor: Colors.border,
-    backgroundColor: Colors.bgCard,
-    alignItems: 'center', justifyContent: 'center',
+  partyRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing[2],
+    marginTop: Spacing[3],
   },
-  partyChipActive: { backgroundColor: Colors.accentPrimary, borderColor: Colors.accentPrimary },
-  partyText: { color: Colors.textSecondary, fontSize: 15, fontWeight: '700' },
-  partyTextActive: { color: Colors.textInverse },
+  partyChip: {
+    width: 48,
+    height: 48,
+    borderRadius: Radius.full,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.bgCard,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  partyChipActive: {
+    backgroundColor: Colors.accentPrimary,
+    borderColor: Colors.accentPrimary,
+  },
 
   notesBox: {
-    backgroundColor: Colors.bgCard,
-    borderRadius: Radius.button,
+    marginTop: Spacing[3],
+    borderRadius: Radius.lg,
     borderWidth: 1,
     borderColor: Colors.border,
-    padding: 12,
-    minHeight: 96,
+    backgroundColor: Colors.bgCard,
+    padding: Spacing[4],
+    minHeight: 110,
   },
   notesInput: {
     flex: 1,
     color: Colors.textPrimary,
-    fontSize: 14,
-    lineHeight: 20,
+    ...TypePresets.body,
     padding: 0,
-    minHeight: 72,
+    minHeight: 80,
   },
 
-  cta: {
+  ctaWrap: {
     position: 'absolute',
-    left: 0, right: 0, bottom: 0,
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: 24,
+    left: 0,
+    right: 0,
+    bottom: 0,
     backgroundColor: Colors.bgPrimary,
-    borderTopWidth: 1,
-    borderTopColor: Colors.border,
   },
-  ctaBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    height: 54,
-    backgroundColor: Colors.accentPrimary,
-    borderRadius: Radius.button,
+  ctaInner: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[4],
   },
-  ctaLabel: { color: Colors.textInverse, fontSize: 16, fontWeight: '700' },
 });

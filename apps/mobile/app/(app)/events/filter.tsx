@@ -1,97 +1,236 @@
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+// ─────────────────────────────────────────────
+//  Event Filter — Editorial Premium
+//
+//  Modal-style filter page: kicker + Heading title, hairline-divided
+//  sections (day / category), clear & apply actions in a sticky footer.
+// ─────────────────────────────────────────────
 import { useState } from 'react';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
-import { Button } from '@/components/ui';
-import { useAppStore } from '@/stores/app.store';
-import { Colors, Typography, Spacing, Radius } from '@/constants/tokens';
 
-const DAYS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+import {
+  Body,
+  Button,
+  Caption,
+  FadeIn,
+  Hairline,
+  Heading,
+  Kicker,
+  Pressy,
+  Subhead,
+} from '@/components/ui';
+import { Colors, EditorialSpacing, Radius, Spacing } from '@/constants/tokens';
+import { HitSlop, Roles } from '@/constants/a11y';
+import { useAppStore } from '@/stores/app.store';
+
+const DAYS_ES = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
 const DAYS_EN = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 export default function EventFilter() {
   const router = useRouter();
   const { language } = useAppStore();
   const t = language === 'es';
+
   const [selectedDays, setSelectedDays] = useState<number[]>([]);
   const [selectedCategory, setSelectedCategory] = useState('');
 
   const categories = [
-    { id: 'live_music', label: t ? '🎵 Música en vivo' : '🎵 Live music' },
-    { id: 'dj', label: '🎧 DJ' },
-    { id: 'art', label: t ? '🎨 Arte' : '🎨 Art' },
-    { id: 'food', label: t ? '🍴 Gastronomía' : '🍴 Food' },
+    { id: 'live_music', label: t ? 'Música en vivo' : 'Live music' },
+    { id: 'dj', label: 'DJ' },
+    { id: 'art', label: t ? 'Arte' : 'Art' },
+    { id: 'food', label: t ? 'Gastronomía' : 'Food' },
   ];
 
-  const days = t ? DAYS : DAYS_EN;
+  const days = t ? DAYS_ES : DAYS_EN;
 
   function toggleDay(i: number) {
-    setSelectedDays((prev) => prev.includes(i) ? prev.filter((x) => x !== i) : [...prev, i]);
+    setSelectedDays((prev) => (prev.includes(i) ? prev.filter((x) => x !== i) : [...prev, i]));
   }
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Text style={styles.backIcon}>←</Text>
-        </TouchableOpacity>
-        <Text style={styles.title}>{t ? 'Filtrar eventos' : 'Filter events'}</Text>
-        <TouchableOpacity onPress={() => { setSelectedDays([]); setSelectedCategory(''); }}>
-          <Text style={styles.clear}>{t ? 'Limpiar' : 'Clear'}</Text>
-        </TouchableOpacity>
+      <View style={styles.headerRow}>
+        <Pressy
+          onPress={() => router.back()}
+          accessibilityLabel={t ? 'Volver' : 'Back'}
+          accessibilityRole={Roles.button}
+          hitSlop={HitSlop.expand}
+          style={styles.iconBtn}
+        >
+          <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
+        </Pressy>
+        <Pressy
+          onPress={() => {
+            setSelectedDays([]);
+            setSelectedCategory('');
+          }}
+          accessibilityLabel={t ? 'Limpiar' : 'Clear'}
+          accessibilityRole={Roles.button}
+          hitSlop={HitSlop.expand}
+          haptic="select"
+          style={styles.clearBtn}
+        >
+          <Caption tone="accent">{t ? 'Limpiar' : 'Clear'}</Caption>
+        </Pressy>
       </View>
 
-      <ScrollView contentContainerStyle={styles.content}>
-        <Text style={styles.sectionTitle}>{t ? 'Día de la semana' : 'Day of week'}</Text>
-        <View style={styles.daysRow}>
-          {days.map((day, i) => (
-            <TouchableOpacity
-              key={i}
-              style={[styles.dayChip, selectedDays.includes(i) && styles.dayChipActive]}
-              onPress={() => toggleDay(i)}
-            >
-              <Text style={[styles.dayText, selectedDays.includes(i) && styles.dayTextActive]}>{day}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        <FadeIn>
+          <Kicker tone="champagne">{t ? 'AFINAR' : 'REFINE'}</Kicker>
+        </FadeIn>
+        <FadeIn delay={80} style={{ marginTop: Spacing[3] }}>
+          <Heading size="lg">{t ? 'Filtrar eventos.' : 'Filter events.'}</Heading>
+        </FadeIn>
 
-        <Text style={styles.sectionTitle}>{t ? 'Categoría' : 'Category'}</Text>
-        {categories.map((cat) => (
-          <TouchableOpacity
-            key={cat.id}
-            style={[styles.catRow, selectedCategory === cat.id && styles.catRowActive]}
-            onPress={() => setSelectedCategory(selectedCategory === cat.id ? '' : cat.id)}
-          >
-            <Text style={styles.catLabel}>{cat.label}</Text>
-            {selectedCategory === cat.id && <Feather name="check" size={16} color={Colors.accentPrimary} />}
-          </TouchableOpacity>
-        ))}
+        {/* Day of week ───────────────────── */}
+        <FadeIn delay={160} style={{ marginTop: Spacing[8] }}>
+          <Kicker tone="muted">{t ? 'DÍA DE LA SEMANA' : 'DAY OF WEEK'}</Kicker>
+          <View style={styles.daysRow}>
+            {days.map((day, i) => {
+              const active = selectedDays.includes(i);
+              return (
+                <Pressy
+                  key={i}
+                  onPress={() => toggleDay(i)}
+                  accessibilityRole={Roles.button}
+                  accessibilityLabel={day}
+                  accessibilityState={{ selected: active }}
+                  haptic="select"
+                  style={[styles.dayChip, active && styles.dayChipActive]}
+                >
+                  <Caption tone={active ? 'inverse' : 'secondary'} style={{ fontWeight: '600' }}>
+                    {day}
+                  </Caption>
+                </Pressy>
+              );
+            })}
+          </View>
+        </FadeIn>
+
+        {/* Category ────────────────────── */}
+        <FadeIn delay={240} style={{ marginTop: Spacing[8] }}>
+          <Kicker tone="muted">{t ? 'CATEGORÍA' : 'CATEGORY'}</Kicker>
+          <View style={{ marginTop: Spacing[3] }}>
+            <Hairline variant="subtle" />
+            {categories.map((cat) => {
+              const active = selectedCategory === cat.id;
+              return (
+                <View key={cat.id}>
+                  <Pressy
+                    onPress={() => setSelectedCategory(active ? '' : cat.id)}
+                    accessibilityRole={Roles.button}
+                    accessibilityLabel={cat.label}
+                    accessibilityState={{ selected: active }}
+                    haptic="select"
+                    style={styles.catRow}
+                  >
+                    <Subhead tone={active ? 'accent' : 'primary'}>{cat.label}</Subhead>
+                    {active ? (
+                      <Feather name="check" size={18} color={Colors.accentPrimary} />
+                    ) : null}
+                  </Pressy>
+                  <Hairline variant="subtle" />
+                </View>
+              );
+            })}
+          </View>
+        </FadeIn>
       </ScrollView>
 
       <View style={styles.footer}>
-        <Button label={t ? 'Aplicar filtros' : 'Apply filters'} onPress={() => router.back()} />
+        <Hairline variant="subtle" />
+        <View style={styles.footerInner}>
+          <Button
+            label={t ? 'Aplicar filtros' : 'Apply filters'}
+            onPress={() => router.back()}
+            variant="primary"
+            size="lg"
+            fullWidth
+          />
+        </View>
       </View>
     </SafeAreaView>
   );
 }
 
+void Body;
+
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: Spacing[5] },
-  backIcon: { fontSize: 22, color: Colors.textPrimary },
-  title: { fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.bold, color: Colors.textPrimary },
-  clear: { fontSize: Typography.fontSize.sm, color: Colors.accentPrimary },
-  content: { paddingHorizontal: Spacing[5], gap: Spacing[4] },
-  sectionTitle: { fontSize: Typography.fontSize.sm, color: Colors.textSecondary, fontWeight: Typography.fontWeight.semiBold, textTransform: 'uppercase', letterSpacing: 1, marginTop: Spacing[2] },
-  daysRow: { flexDirection: 'row', gap: Spacing[2], flexWrap: 'wrap' },
-  dayChip: { width: 44, height: 44, borderRadius: 22, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.bgCard, alignItems: 'center', justifyContent: 'center' },
-  dayChipActive: { backgroundColor: Colors.accentPrimary, borderColor: Colors.accentPrimary },
-  dayText: { fontSize: Typography.fontSize.xs, color: Colors.textSecondary, fontWeight: Typography.fontWeight.medium },
-  dayTextActive: { color: Colors.textInverse },
-  catRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: Spacing[4], backgroundColor: Colors.bgCard, borderRadius: Radius.lg, borderWidth: 1, borderColor: Colors.border },
-  catRowActive: { borderColor: Colors.accentPrimary },
-  catLabel: { fontSize: Typography.fontSize.base, color: Colors.textPrimary },
-  check: { fontSize: 16, color: Colors.accentPrimary },
-  footer: { padding: Spacing[5] },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[2],
+    paddingBottom: Spacing[2],
+  },
+  iconBtn: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: -Spacing[2],
+  },
+  clearBtn: {
+    minHeight: 44,
+    paddingHorizontal: Spacing[2],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  scroll: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[6],
+    paddingBottom: 120,
+  },
+
+  daysRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing[2],
+    marginTop: Spacing[3],
+  },
+  dayChip: {
+    width: 48,
+    height: 44,
+    borderRadius: Radius.full,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.bgCard,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dayChipActive: {
+    backgroundColor: Colors.accentPrimary,
+    borderColor: Colors.accentPrimary,
+  },
+
+  catRow: {
+    minHeight: 56,
+    paddingVertical: Spacing[4],
+    paddingHorizontal: Spacing[1],
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+
+  footer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: Colors.bgPrimary,
+  },
+  footerInner: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[4],
+    paddingBottom: Spacing[6],
+  },
 });

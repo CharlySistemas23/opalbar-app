@@ -24,7 +24,7 @@ import { toast } from '@/components/Toast';
 import { StoryRing } from '@/components/StoryRing';
 import { Heart } from '@/components/Heart';
 import { useFeedback } from '@/hooks/useFeedback';
-import { Colors, Radius } from '@/constants/tokens';
+import { Colors, EditorialSpacing, Radius, Spacing, TypePresets } from '@/constants/tokens';
 import { sharePost } from '@/utils/share';
 import { uploadImage, UploadError } from '@/utils/uploadImage';
 
@@ -454,11 +454,11 @@ export default function UserProfile() {
   }
 
   function handleReport() {
-    Alert.alert(
-      t ? 'Reportar perfil' : 'Report profile',
+    toast(
       t
         ? 'Gracias. Nuestro equipo revisará este perfil.'
         : 'Thanks. Our team will review this profile.',
+      'success',
     );
   }
 
@@ -485,7 +485,7 @@ export default function UserProfile() {
       const threadId = r.data?.data?.id;
       if (threadId) router.push(`/(app)/messages/${threadId}` as never);
     } catch (err: any) {
-      Alert.alert(t ? 'Error' : 'Error', err?.response?.data?.message || 'Error');
+      toast(err?.response?.data?.message || (t ? 'Error al abrir el chat.' : 'Could not open chat.'), 'danger');
     }
   }
 
@@ -1584,22 +1584,23 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[2],
+    paddingBottom: Spacing[3],
     backgroundColor: Colors.bgPrimary,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: Colors.border,
+    borderBottomColor: Colors.borderSubtle,
   },
   topBarBtn: {
-    width: 36,
-    height: 36,
+    width: 40,
+    height: 40,
     alignItems: 'center',
     justifyContent: 'center',
+    borderRadius: Radius.full,
   },
   topBarTitle: {
-    color: Colors.textPrimary,
-    fontSize: 16,
-    fontWeight: '700',
+    ...TypePresets.kicker,
+    color: Colors.textMuted,
     flex: 1,
     textAlign: 'center',
   },
@@ -1689,12 +1690,19 @@ const styles = StyleSheet.create({
   // Identity
   identity: {
     alignItems: 'center',
-    paddingHorizontal: 24,
-    marginTop: 10,
-    gap: 4,
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    marginTop: Spacing[3],
+    gap: Spacing[1],
   },
-  name: { color: Colors.textPrimary, fontSize: 22, fontWeight: '800' },
-  handle: { color: Colors.textMuted, fontSize: 13 },
+  name: {
+    ...TypePresets.headingLg,
+    color: Colors.textPrimary,
+    textAlign: 'center',
+  },
+  handle: {
+    ...TypePresets.caption,
+    color: Colors.textMuted,
+  },
   bio: {
     color: Colors.textSecondary,
     fontSize: 14,
@@ -1725,48 +1733,69 @@ const styles = StyleSheet.create({
   metaItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   metaText: { color: Colors.textMuted, fontSize: 12 },
 
-  // Stats (flat, IG)
+  // Stats (editorial numeric)
   statsRow: {
     flexDirection: 'row',
-    marginTop: 18,
-    paddingHorizontal: 24,
+    marginTop: Spacing[6],
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingVertical: Spacing[4],
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.borderSubtle,
   },
-  stat: { flex: 1, alignItems: 'center', gap: 2 },
-  statValue: { color: Colors.textPrimary, fontSize: 18, fontWeight: '800' },
-  statLabel: { color: Colors.textSecondary, fontSize: 12 },
+  stat: { flex: 1, alignItems: 'center', gap: Spacing[1] },
+  statValue: {
+    ...TypePresets.numericSm,
+    color: Colors.textPrimary,
+  },
+  statLabel: {
+    ...TypePresets.kicker,
+    color: Colors.textMuted,
+  },
 
   // Actions
   actionsRow: {
     flexDirection: 'row',
-    paddingHorizontal: 14,
-    gap: 8,
-    marginTop: 16,
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    gap: Spacing[2],
+    marginTop: Spacing[5],
   },
   followBtn: {
     flex: 2,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
-    height: 38,
-    backgroundColor: Colors.bgElevated,
-    borderRadius: 10,
+    gap: Spacing[2],
+    minHeight: 44,
+    backgroundColor: Colors.bgCard,
+    borderRadius: Radius.button,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.borderStrong,
+    borderTopColor: Colors.highlightTop,
   },
   followingBtn: {
-    backgroundColor: Colors.bgElevated,
+    backgroundColor: Colors.bgCard,
   },
-  followLabel: { color: Colors.textPrimary, fontSize: 14, fontWeight: '700' },
+  followLabel: {
+    ...TypePresets.subhead,
+    color: Colors.textPrimary,
+  },
   msgBtn: {
-    width: 44,
+    width: 48,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
-    height: 38,
-    backgroundColor: Colors.bgElevated,
-    borderRadius: 10,
+    minHeight: 44,
+    backgroundColor: Colors.bgCard,
+    borderRadius: Radius.button,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.borderStrong,
+    borderTopColor: Colors.highlightTop,
   },
-  msgLabel: { color: Colors.textPrimary, fontSize: 14, fontWeight: '700' },
+  msgLabel: {
+    ...TypePresets.subhead,
+    color: Colors.textPrimary,
+  },
 
   // Friend button (primary CTA in actionsRow)
   friendBtnPrimary: {
@@ -1774,43 +1803,46 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
-    height: 38,
+    gap: Spacing[2],
+    minHeight: 44,
     backgroundColor: Colors.accentPrimary,
-    borderRadius: 10,
+    borderRadius: Radius.button,
   },
   friendBtnPrimaryLabel: {
+    ...TypePresets.subhead,
     color: Colors.textInverse,
-    fontSize: 14,
-    fontWeight: '700',
   },
   friendBtnGhost: {
     flex: 2,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
-    height: 38,
-    backgroundColor: Colors.bgElevated,
-    borderRadius: 10,
+    gap: Spacing[2],
+    minHeight: 44,
+    backgroundColor: Colors.bgCard,
+    borderRadius: Radius.button,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.borderStrong,
+    borderTopColor: Colors.highlightTop,
   },
   friendBtnGhostLabel: {
+    ...TypePresets.subhead,
     color: Colors.textPrimary,
-    fontSize: 14,
-    fontWeight: '700',
   },
   friendIncomingWrap: {
     flex: 2,
     flexDirection: 'row',
-    gap: 6,
+    gap: Spacing[2],
   },
   friendBtnDecline: {
-    width: 38,
-    height: 38,
+    width: 44,
+    minHeight: 44,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: Colors.bgElevated,
-    borderRadius: 10,
+    backgroundColor: Colors.bgCard,
+    borderRadius: Radius.button,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.borderStrong,
   },
 
   // Mutuals hint
@@ -1833,22 +1865,27 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
-    height: 38,
-    backgroundColor: Colors.bgElevated,
-    borderRadius: 10,
+    gap: Spacing[2],
+    minHeight: 44,
+    backgroundColor: Colors.bgCard,
+    borderRadius: Radius.button,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.borderStrong,
+    borderTopColor: Colors.highlightTop,
   },
-  editLabel: { color: Colors.textPrimary, fontSize: 14, fontWeight: '700' },
+  editLabel: {
+    ...TypePresets.subhead,
+    color: Colors.textPrimary,
+  },
 
   // Bio — subtle, centered under identity
   bioBlock: {
-    paddingHorizontal: 28,
-    marginTop: 10,
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    marginTop: Spacing[3],
   },
   bioText: {
+    ...TypePresets.lead,
     color: Colors.textSecondary,
-    fontSize: 13.5,
-    lineHeight: 19,
     textAlign: 'center',
   },
   bioPrompt: {
@@ -1936,8 +1973,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 32,
     gap: 10,
   },
-  emptyTitle: { color: Colors.textPrimary, fontSize: 16, fontWeight: '700' },
-  emptySub: { color: Colors.textMuted, fontSize: 13, textAlign: 'center' },
+  emptyTitle: {
+    ...TypePresets.headingSm,
+    color: Colors.textPrimary,
+    textAlign: 'center',
+  },
+  emptySub: {
+    ...TypePresets.body,
+    color: Colors.textMuted,
+    textAlign: 'center',
+    maxWidth: 280,
+  },
 
   // Grid (IG 3-col)
   grid: {
@@ -1998,10 +2044,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  feedAvatarText: { color: Colors.textInverse, fontSize: 13, fontWeight: '700' },
-  feedName: { color: Colors.textPrimary, fontSize: 14, fontWeight: '700' },
-  feedTime: { color: Colors.textMuted, fontSize: 11, marginTop: 2 },
-  feedText: { color: Colors.textPrimary, fontSize: 14, lineHeight: 20 },
+  feedAvatarText: {
+    ...TypePresets.label,
+    color: Colors.textInverse,
+    fontSize: 12,
+  },
+  feedName: {
+    ...TypePresets.subhead,
+    color: Colors.textPrimary,
+  },
+  feedTime: {
+    ...TypePresets.captionSm,
+    color: Colors.textMuted,
+    marginTop: 2,
+  },
+  feedText: {
+    ...TypePresets.body,
+    color: Colors.textPrimary,
+  },
   feedImage: {
     width: '100%',
     aspectRatio: 4 / 5,
@@ -2072,9 +2132,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
   },
   fbText: {
+    ...TypePresets.body,
     color: Colors.textPrimary,
-    fontSize: 15,
-    lineHeight: 22,
   },
   fbImage: {
     width: '100%',
@@ -2102,30 +2161,30 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   fbStatsText: {
+    ...TypePresets.caption,
     color: Colors.textSecondary,
-    fontSize: 12,
     fontWeight: '600',
   },
   fbActions: {
     flexDirection: 'row',
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: Colors.border,
-    paddingVertical: 4,
-    paddingHorizontal: 6,
+    borderTopColor: Colors.borderSubtle,
+    paddingVertical: Spacing[1],
+    paddingHorizontal: Spacing[2],
   },
   fbActionBtn: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 10,
-    borderRadius: 8,
+    gap: Spacing[2],
+    paddingVertical: Spacing[3],
+    borderRadius: Radius.md,
   },
   fbActionLabel: {
-    color: Colors.textSecondary,
+    ...TypePresets.subhead,
     fontSize: 13,
-    fontWeight: '600',
+    color: Colors.textSecondary,
   },
 
   // Preview modal
@@ -2180,20 +2239,18 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   menuItemLabel: {
+    ...TypePresets.subhead,
     color: Colors.textPrimary,
-    fontSize: 15,
-    fontWeight: '600',
   },
   menuCancel: {
-    marginTop: 8,
-    paddingVertical: 14,
+    marginTop: Spacing[2],
+    paddingVertical: Spacing[4],
     alignItems: 'center',
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: Colors.border,
+    borderTopColor: Colors.borderSubtle,
   },
   menuCancelLabel: {
+    ...TypePresets.subhead,
     color: Colors.textSecondary,
-    fontSize: 14,
-    fontWeight: '600',
   },
 });

@@ -1,13 +1,39 @@
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ImageBackground, RefreshControl, FlatList } from 'react-native';
-import { Pressy, FadeIn } from '@/components/ui';
+// ─────────────────────────────────────────────
+//  Events — Editorial Premium
+//
+//  Magazine-style listing. Each card: 16:10 image (sharp, no shadow),
+//  small Kicker overline (date), serif Heading (title), Body for venue +
+//  capacity meta. No pill tags pressed into hero space — category lives
+//  as a Kicker label above the title.
+// ─────────────────────────────────────────────
 import { useCallback, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  FlatList,
+  Image,
+  RefreshControl,
+  StyleSheet,
+  View,
+} from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+
 import { eventsApi } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { useAppStore } from '@/stores/app.store';
-import { Colors, Radius } from '@/constants/tokens';
+import { Colors, EditorialSpacing, Radius, Spacing } from '@/constants/tokens';
+import { HitSlop, Roles } from '@/constants/a11y';
+import {
+  Body,
+  Caption,
+  FadeIn,
+  Hairline,
+  Heading,
+  Kicker,
+  Pressy,
+  SkeletonList,
+} from '@/components/ui';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 
@@ -17,7 +43,7 @@ interface EventItem {
   name?: string;
   startDate?: string;
   imageUrl?: string;
-  category?: string;
+  category?: { name?: string; color?: string } | null;
   spotsLeft?: number;
   attendees?: number;
   badge?: string;
@@ -25,7 +51,11 @@ interface EventItem {
   tagLabel?: string;
   tagColor?: string;
   isFree?: boolean;
+  venue?: { name?: string } | null;
+  venueName?: string;
 }
+
+const PAGE_SIZE = 20;
 
 export default function Events() {
   const router = useRouter();
@@ -41,110 +71,133 @@ export default function Events() {
   const [loadingMore, setLoadingMore] = useState(false);
   const reqIdRef = useRef(0);
 
-  const PAGE_SIZE = 20;
-
-  const load = useCallback(async (mode: 'fresh' | 'more' = 'fresh') => {
-    const nextPage = mode === 'more' ? page + 1 : 1;
-    if (mode === 'more' && (loadingMore || !hasMore)) return;
-    if (mode === 'more') setLoadingMore(true);
-    else setError(null);
-    const id = ++reqIdRef.current;
-    try {
-      const r = await eventsApi.list({ page: nextPage, limit: PAGE_SIZE });
-      if (reqIdRef.current !== id) return;
-      const payload = r.data?.data;
-      const rows: EventItem[] = payload?.data ?? [];
-      const meta = payload?.meta;
-      setItems((prev) => (mode === 'more' ? [...prev, ...rows] : rows));
-      setPage(nextPage);
-      setHasMore(meta ? !!meta.hasNextPage : rows.length === PAGE_SIZE);
-    } catch (err) {
-      if (reqIdRef.current !== id) return;
-      if (mode === 'fresh') setItems([]);
-      setError(apiError(err));
-    } finally {
-      if (reqIdRef.current === id) {
-        setLoading(false);
-        setRefreshing(false);
-        setLoadingMore(false);
+  const load = useCallback(
+    async (mode: 'fresh' | 'more' = 'fresh') => {
+      const nextPage = mode === 'more' ? page + 1 : 1;
+      if (mode === 'more' && (loadingMore || !hasMore)) return;
+      if (mode === 'more') setLoadingMore(true);
+      else setError(null);
+      const id = ++reqIdRef.current;
+      try {
+        const r = await eventsApi.list({ page: nextPage, limit: PAGE_SIZE });
+        if (reqIdRef.current !== id) return;
+        const payload = r.data?.data;
+        const rows: EventItem[] = payload?.data ?? [];
+        const meta = payload?.meta;
+        setItems((prev) => (mode === 'more' ? [...prev, ...rows] : rows));
+        setPage(nextPage);
+        setHasMore(meta ? !!meta.hasNextPage : rows.length === PAGE_SIZE);
+      } catch (err) {
+        if (reqIdRef.current !== id) return;
+        if (mode === 'fresh') setItems([]);
+        setError(apiError(err));
+      } finally {
+        if (reqIdRef.current === id) {
+          setLoading(false);
+          setRefreshing(false);
+          setLoadingMore(false);
+        }
       }
-    }
-  }, [page, loadingMore, hasMore]);
+    },
+    [page, loadingMore, hasMore],
+  );
 
-  useFocusEffect(useCallback(() => { load('fresh'); }, []));
-
-  const data = items;
+  useFocusEffect(
+    useCallback(() => {
+      load('fresh');
+    }, []),
+  );
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
-      {/* Header */}
+      {/* Editorial masthead. Kicker overline + serif Heading. */}
       <View style={styles.header}>
-        <Text style={styles.title}>{t ? 'Eventos' : 'Events'}</Text>
-        <TouchableOpacity
-          style={styles.searchBtn}
-          hitSlop={8}
+        <View style={{ flex: 1 }}>
+          <Kicker tone="champagne">{t ? 'AGENDA' : 'AGENDA'}</Kicker>
+          <Heading style={styles.title}>{t ? 'Eventos' : 'Events'}</Heading>
+        </View>
+        <Pressy
           onPress={() => router.push('/(app)/search' as never)}
+          hitSlop={HitSlop.expand}
+          accessibilityRole={Roles.button}
+          accessibilityLabel={t ? 'Buscar eventos' : 'Search events'}
+          style={styles.searchBtn}
         >
           <Feather name="search" size={18} color={Colors.textPrimary} />
-        </TouchableOpacity>
+        </Pressy>
       </View>
 
-      {/* Event list */}
-      {loading && data.length === 0 ? (
-        <ActivityIndicator color={Colors.accentPrimary} style={{ marginTop: 40 }} />
-      ) : error && data.length === 0 ? (
+      <Hairline variant="subtle" />
+
+      {loading && items.length === 0 ? (
+        <View style={styles.skeletonWrap}>
+          <SkeletonList count={4} itemHeight={280} />
+        </View>
+      ) : error && items.length === 0 ? (
         <ErrorState
           title={t ? 'No se pudieron cargar' : 'Could not load'}
           message={error}
           retryLabel={t ? 'Reintentar' : 'Retry'}
-          onRetry={() => { setLoading(true); load('fresh'); }}
+          onRetry={() => {
+            setLoading(true);
+            load('fresh');
+          }}
         />
       ) : (
         <FlatList
-          data={data}
+          data={items}
           keyExtractor={(ev, idx) => ev.id ?? `ev-${idx}`}
           contentContainerStyle={styles.list}
           showsVerticalScrollIndicator={false}
+          ItemSeparatorComponent={() => <View style={{ height: Spacing[8] }} />}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
-              onRefresh={() => { setRefreshing(true); load('fresh'); }}
-              tintColor={Colors.accentPrimary}
+              onRefresh={() => {
+                setRefreshing(true);
+                load('fresh');
+              }}
+              tintColor={Colors.textMuted}
             />
           }
-          renderItem={({ item: ev, index: idx }) => (
-            // Stagger the fade only on first paint; later pages drop it so
-            // appended items don't jitter as the user scrolls.
-            idx < 8 ? (
-              <FadeIn delay={idx * 70} from={24}>
+          renderItem={({ item, index }) =>
+            index < 8 ? (
+              <FadeIn delay={index * 70}>
                 <EventCard
-                  ev={ev}
+                  ev={item}
                   t={t}
                   lang={language}
-                  onPress={() => router.push(`/(app)/events/${ev.id}` as never)}
+                  onPress={() => router.push(`/(app)/events/${item.id}` as never)}
                 />
               </FadeIn>
             ) : (
               <EventCard
-                ev={ev}
+                ev={item}
                 t={t}
                 lang={language}
-                onPress={() => router.push(`/(app)/events/${ev.id}` as never)}
+                onPress={() => router.push(`/(app)/events/${item.id}` as never)}
               />
             )
-          )}
+          }
           onEndReachedThreshold={0.5}
           onEndReached={() => load('more')}
           ListFooterComponent={
             loadingMore ? (
-              <ActivityIndicator color={Colors.accentPrimary} style={{ paddingVertical: 16 }} />
+              <ActivityIndicator
+                color={Colors.textMuted}
+                style={{ paddingVertical: Spacing[6] }}
+              />
             ) : null
           }
           ListEmptyComponent={
             <EmptyState
               icon="calendar"
               title={t ? 'Sin eventos por ahora' : 'No events yet'}
-              message={t ? 'Pronto habrá nuevos eventos. Desliza hacia abajo para refrescar.' : 'New events coming soon. Pull down to refresh.'}
+              message={
+                t
+                  ? 'Pronto habrá nuevos eventos. Desliza hacia abajo para refrescar.'
+                  : 'New events coming soon. Pull down to refresh.'
+              }
             />
           }
         />
@@ -153,83 +206,115 @@ export default function Events() {
   );
 }
 
+// ─────────────────────────────────────────────
+//  EventCard — editorial layout
+//  · 16:10 image, no shadow, sharp top-corners
+//  · Kicker overline (date) sits above the title
+//  · Heading (serif) for the title
+//  · Body for venue + capacity
+// ─────────────────────────────────────────────
 function EventCard({
-  ev, t, lang, onPress,
-}: { ev: EventItem; t: boolean; lang: 'es' | 'en'; onPress: () => void }) {
+  ev,
+  t,
+  lang,
+  onPress,
+}: {
+  ev: EventItem;
+  t: boolean;
+  lang: 'es' | 'en';
+  onPress: () => void;
+}) {
+  const dateObj = ev.startDate ? new Date(ev.startDate) : null;
+  const dateLabel = dateObj
+    ? dateObj.toLocaleDateString(lang === 'es' ? 'es-MX' : 'en-US', {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : t
+      ? 'Fecha por confirmar'
+      : 'Date to be announced';
+
+  const category = ev.category?.name ?? ev.tagLabel ?? null;
+  const venue = ev.venue?.name ?? ev.venueName ?? null;
+
+  const a11yLabel = [
+    ev.title || ev.name,
+    category,
+    dateLabel,
+  ]
+    .filter(Boolean)
+    .join('. ');
+
   return (
-    <Pressy style={styles.card} onPress={onPress}>
+    <Pressy
+      onPress={onPress}
+      accessibilityRole={Roles.button}
+      accessibilityLabel={a11yLabel}
+      accessibilityHint={t ? 'Abre los detalles del evento' : 'Opens event details'}
+      style={styles.card}
+    >
       {ev.imageUrl ? (
-        <ImageBackground
-          source={{ uri: ev.imageUrl }}
-          style={styles.cardImg}
-          imageStyle={{ borderTopLeftRadius: Radius.card, borderTopRightRadius: Radius.card }}
-        />
+        <Image source={{ uri: ev.imageUrl }} style={styles.cardImg} resizeMode="cover" />
       ) : (
-        <View style={[styles.cardImg, { backgroundColor: Colors.bgElevated }]} />
+        <View style={[styles.cardImg, styles.cardImgPlaceholder]}>
+          <Feather name="calendar" size={28} color={Colors.textMuted} />
+        </View>
       )}
 
       <View style={styles.cardBody}>
-        <View style={styles.topRow}>
-          {(() => {
-            const cat = (ev as any).category;
-            const label = cat?.name ?? ev.tagLabel;
-            const color = cat?.color ?? ev.tagColor ?? Colors.accentPrimary;
-            if (!label) return null;
-            return (
-              <View style={[styles.tagPill, { backgroundColor: color + '20' }]}>
-                <Text style={[styles.tagPillText, { color }]}>
-                  {String(label).toUpperCase()}
-                </Text>
-              </View>
-            );
-          })()}
-          {ev.isFree && (
-            <View style={[styles.tagPill, { backgroundColor: Colors.accentSuccess + '20' }]}>
-              <Text style={[styles.tagPillText, { color: Colors.accentSuccess }]}>
-                {t ? 'Entrada libre' : 'Free entry'}
-              </Text>
-            </View>
-          )}
-          {!ev.isFree && ev.badge && (
-            <View style={[styles.tagPill, { backgroundColor: (ev.badgeColor || Colors.accentDanger) + '20' }]}>
-              <Text style={[styles.tagPillText, { color: ev.badgeColor || Colors.accentDanger }]}>
-                {ev.badge}
-              </Text>
-            </View>
-          )}
-        </View>
+        <Kicker tone={category ? 'champagne' : 'muted'}>
+          {category ? String(category).toUpperCase() : dateLabel}
+        </Kicker>
 
-        <Text style={styles.cardTitle} numberOfLines={1}>
+        <Heading size="sm" style={styles.cardTitle}>
           {ev.title || ev.name}
-        </Text>
+        </Heading>
 
         <View style={styles.metaRow}>
-          <View style={styles.metaItem}>
-            <Feather name="calendar" size={12} color={Colors.textMuted} />
-            <Text style={styles.metaText}>
-              {ev.startDate
-                ? new Date(ev.startDate).toLocaleDateString(lang, {
-                    weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-                  })
-                : t ? 'Vie 18 Abr • 21:00' : 'Fri Apr 18 • 21:00'}
-            </Text>
-          </View>
-          <View style={styles.metaItem}>
-            <Feather name="users" size={12} color={Colors.accentPrimary} />
-            <Text style={[styles.metaText, { color: Colors.accentPrimary }]}>
-              {t ? `${ev.spotsLeft ?? 12} plazas libres` : `${ev.spotsLeft ?? 12} spots left`}
-            </Text>
-          </View>
+          {category ? (
+            <Body size="sm" tone="secondary">
+              {dateLabel}
+            </Body>
+          ) : null}
+          {venue ? (
+            <>
+              {category ? (
+                <Caption tone="muted" style={styles.metaDot}>
+                  ·
+                </Caption>
+              ) : null}
+              <Body size="sm" tone="secondary">
+                {venue}
+              </Body>
+            </>
+          ) : null}
         </View>
 
-        <View style={styles.footerRow}>
-          <Text style={styles.attendees}>
-            {t ? `${ev.attendees ?? 23} asistentes confirmados` : `${ev.attendees ?? 23} confirmed attendees`}
-          </Text>
-          <View style={styles.bookBtn}>
-            <Text style={styles.bookBtnLabel}>{t ? 'Reservar mesa' : 'Book a table'}</Text>
+        {ev.spotsLeft != null || ev.attendees != null || ev.isFree ? (
+          <View style={styles.footerRow}>
+            {ev.isFree ? (
+              <Body size="sm" tone="success" weight="semiBold">
+                {t ? 'Entrada libre' : 'Free entry'}
+              </Body>
+            ) : ev.spotsLeft != null ? (
+              <Body size="sm" tone="accent" weight="semiBold">
+                {t
+                  ? `${ev.spotsLeft} plazas libres`
+                  : `${ev.spotsLeft} spots left`}
+              </Body>
+            ) : null}
+            {ev.attendees != null ? (
+              <Caption tone="muted">
+                {t
+                  ? `${ev.attendees} confirmados`
+                  : `${ev.attendees} confirmed`}
+              </Caption>
+            ) : null}
           </View>
-        </View>
+        ) : null}
       </View>
     </Pressy>
   );
@@ -240,50 +325,70 @@ const styles = StyleSheet.create({
 
   header: {
     flexDirection: 'row',
+    alignItems: 'flex-end',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 12,
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[4],
+    paddingBottom: Spacing[5],
+    gap: Spacing[3],
   },
-  title: { color: Colors.textPrimary, fontSize: 26, fontWeight: '800' },
+  title: {
+    marginTop: Spacing[1],
+  },
   searchBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: Colors.bgCard,
-    alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1, borderColor: Colors.border,
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: Spacing[1],
   },
 
-  list: { paddingHorizontal: 20, paddingBottom: 24, gap: 14, paddingTop: 8 },
-  empty: { alignItems: 'center', paddingTop: 80, paddingHorizontal: 40, gap: 10 },
-  emptyTitle: { color: Colors.textPrimary, fontSize: 16, fontWeight: '700', marginTop: 8 },
-  emptyText: { color: Colors.textMuted, fontSize: 13, lineHeight: 19, textAlign: 'center' },
-  card: {
-    backgroundColor: Colors.bgCard,
-    borderRadius: Radius.card,
-    overflow: 'hidden',
+  skeletonWrap: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[6],
+    gap: Spacing[8],
   },
-  cardImg: { height: 140, width: '100%' },
-  cardBody: { padding: 16, gap: 8 },
-  topRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 8 },
-  tagPill: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
-  tagPillText: { fontSize: 10, fontWeight: '700', letterSpacing: 0.5 },
-  cardTitle: { color: Colors.textPrimary, fontSize: 17, fontWeight: '700' },
-  metaRow: { flexDirection: 'row', gap: 16, flexWrap: 'wrap' },
-  metaItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  metaText: { color: Colors.textSecondary, fontSize: 12 },
+
+  list: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[6],
+    paddingBottom: Spacing[10],
+  },
+
+  card: {
+    backgroundColor: Colors.bgPrimary,
+  },
+  cardImg: {
+    width: '100%',
+    aspectRatio: 16 / 10,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.bgElevated,
+  },
+  cardImgPlaceholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cardBody: {
+    paddingTop: Spacing[4],
+    gap: Spacing[2],
+  },
+  cardTitle: {
+    marginTop: Spacing[1],
+  },
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: Spacing[2],
+    marginTop: Spacing[1],
+  },
+  metaDot: {
+    paddingHorizontal: 2,
+  },
   footerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 6,
+    marginTop: Spacing[3],
   },
-  attendees: { color: Colors.textMuted, fontSize: 12 },
-  bookBtn: {
-    backgroundColor: Colors.accentPrimary,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: Radius.button,
-  },
-  bookBtnLabel: { color: Colors.textInverse, fontSize: 13, fontWeight: '700' },
 });

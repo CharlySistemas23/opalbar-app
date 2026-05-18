@@ -1,52 +1,81 @@
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert } from 'react-native';
+// ─────────────────────────────────────────────
+//  Profile — Editorial Premium
+//
+//  Magazine-style identity page:
+//   · Identity block: StoryRing + Display name + handle/since (no cards)
+//   · Stats block: 3 numeric (Fraunces serif) with kicker labels beneath,
+//     separated by hairlines
+//   · "Mi muro" — 3 wall actions as bordered tiles (kicker + icon)
+//   · Activity + Account — grouped using <ListItem> primitives with
+//     hairline separators (no colored icon bubbles — too tech-app)
+//   · Staff section (conditional) — same ListItem treatment
+//   · Danger zone — danger Button for logout, ghost link for delete
+//
+//  Confirmations use <ConfirmDialog> (replaces legacy ConfirmSheet).
+//  Delete still asks for an explicit "ELIMINAR" type via Input.
+// ─────────────────────────────────────────────
 import { useCallback, useState } from 'react';
-import { useRouter, useFocusEffect } from 'expo-router';
+import { ScrollView, StyleSheet, View } from 'react-native';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+
+import { Colors, EditorialSpacing, Radius, Spacing } from '@/constants/tokens';
+import { Roles } from '@/constants/a11y';
 import { useAuthStore } from '@/stores/auth.store';
 import { useAppStore } from '@/stores/app.store';
 import { usersApi } from '@/api/client';
 import { apiError } from '@/api/errors';
-import { ConfirmSheet } from '@/components/ConfirmSheet';
-import { StoryRing } from '@/components/StoryRing';
-import { Colors, Radius } from '@/constants/tokens';
 import { useFeedback } from '@/hooks/useFeedback';
+import { StoryRing } from '@/components/StoryRing';
+import {
+  Body,
+  Button,
+  Caption,
+  ConfirmDialog,
+  FadeIn,
+  Hairline,
+  Heading,
+  Input,
+  Kicker,
+  ListItem,
+  Numeric,
+  Pressy,
+} from '@/components/ui';
+import { toast } from '@/components/Toast';
 
 type FeatherIcon = React.ComponentProps<typeof Feather>['name'];
 
 interface MenuEntry {
   icon: FeatherIcon;
   label: { es: string; en: string };
-  tint: string;
   path: string;
 }
 
 const ACTIVITY_MENU: MenuEntry[] = [
-  { icon: 'calendar', label: { es: 'Mis reservas', en: 'My bookings' }, tint: Colors.accentPrimary, path: '/(app)/reservations/my' },
-  { icon: 'star', label: { es: 'Mis puntos', en: 'My points' }, tint: Colors.accentSuccess, path: '/(app)/profile/wallet' },
-  { icon: 'gift', label: { es: 'Historial de canjes', en: 'Redemption history' }, tint: '#A855F7', path: '/(app)/profile/redemptions' },
-  { icon: 'bookmark', label: { es: 'Guardados', en: 'Saved' }, tint: '#60A5FA', path: '/(app)/profile/saved' },
+  { icon: 'calendar', label: { es: 'Mis reservas', en: 'My bookings' }, path: '/(app)/reservations/my' },
+  { icon: 'star', label: { es: 'Mis puntos', en: 'My points' }, path: '/(app)/profile/wallet' },
+  { icon: 'gift', label: { es: 'Historial de canjes', en: 'Redemption history' }, path: '/(app)/profile/redemptions' },
+  { icon: 'bookmark', label: { es: 'Guardados', en: 'Saved' }, path: '/(app)/profile/saved' },
 ];
 
 const ACCOUNT_MENU: MenuEntry[] = [
-  { icon: 'user', label: { es: 'Editar perfil', en: 'Edit profile' }, tint: Colors.textPrimary, path: '/(app)/profile/edit' },
-  { icon: 'message-circle', label: { es: 'Mensajes', en: 'Messages' }, tint: '#60A5FA', path: '/(app)/messages' },
-  { icon: 'user-plus', label: { es: 'Solicitudes de amistad', en: 'Friend requests' }, tint: Colors.accentPrimary, path: '/(app)/profile/friend-requests' },
-  { icon: 'user-check', label: { es: 'Solicitudes de etiqueta', en: 'Tag requests' }, tint: Colors.accentChampagne, path: '/(app)/profile/mention-requests' },
-  { icon: 'bell', label: { es: 'Notificaciones', en: 'Notifications' }, tint: '#A855F7', path: '/(app)/profile/notifications' },
-  { icon: 'settings', label: { es: 'Configuración', en: 'Settings' }, tint: Colors.textMuted, path: '/(app)/profile/preferences' },
+  { icon: 'user', label: { es: 'Editar perfil', en: 'Edit profile' }, path: '/(app)/profile/edit' },
+  { icon: 'message-circle', label: { es: 'Mensajes', en: 'Messages' }, path: '/(app)/messages' },
+  { icon: 'user-plus', label: { es: 'Solicitudes de amistad', en: 'Friend requests' }, path: '/(app)/profile/friend-requests' },
+  { icon: 'user-check', label: { es: 'Solicitudes de etiqueta', en: 'Tag requests' }, path: '/(app)/profile/mention-requests' },
+  { icon: 'bell', label: { es: 'Notificaciones', en: 'Notifications' }, path: '/(app)/profile/notifications' },
+  { icon: 'settings', label: { es: 'Ajustes', en: 'Settings' }, path: '/(app)/profile/preferences' },
 ];
 
 const ADMIN_ENTRY: MenuEntry = {
   icon: 'grid',
   label: { es: 'Panel admin', en: 'Admin panel' },
-  tint: Colors.accentPrimary,
   path: '/(admin)/dashboard',
 };
 const STAFF_SCAN: MenuEntry = {
   icon: 'camera',
   label: { es: 'Escanear QR (Staff)', en: 'Scan QR (Staff)' },
-  tint: Colors.accentSuccess,
   path: '/(app)/staff/scan',
 };
 const STAFF_ROLES = ['ADMIN', 'SUPER_ADMIN', 'MODERATOR'];
@@ -56,13 +85,21 @@ export default function Profile() {
   const { user, logout, refreshUser } = useAuthStore();
   const { language } = useAppStore();
   const t = language === 'es';
+  const fb = useFeedback();
 
-  useFocusEffect(useCallback(() => { refreshUser(); }, [refreshUser]));
+  useFocusEffect(
+    useCallback(() => {
+      refreshUser();
+    }, [refreshUser]),
+  );
 
   const firstName = user?.profile?.firstName ?? '';
   const lastName = user?.profile?.lastName ?? '';
-  const fullName = `${firstName} ${lastName}`.trim() || (user?.email?.split('@')[0] ?? (t ? 'Usuario' : 'User'));
+  const fullName =
+    `${firstName} ${lastName}`.trim() ||
+    (user?.email?.split('@')[0] ?? (t ? 'Usuario' : 'User'));
   const initials = ((firstName[0] || fullName[0] || 'U') + (lastName[0] || '')).slice(0, 2);
+  const handle = (user?.email || '').split('@')[0] || 'opalbar';
   const points = user?.points ?? 0;
   const bookings = (user as any)?._count?.reservations ?? 0;
   const redemptions = (user as any)?._count?.offerRedemptions ?? 0;
@@ -70,44 +107,46 @@ export default function Profile() {
 
   const [showLogout, setShowLogout] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
-  const [loggingOut, setLoggingOut] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-
-  function handleLogout() {
-    setShowLogout(true);
-  }
-
-  const fb = useFeedback();
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
 
   async function confirmLogout() {
-    setLoggingOut(true);
     try {
       await logout();
       fb.logout();
       setShowLogout(false);
       router.replace('/(auth)/login' as never);
-    } finally { setLoggingOut(false); }
+    } catch (err) {
+      fb.error();
+      toast(apiError(err, t ? 'Error al cerrar sesión.' : 'Logout failed.'), 'danger');
+    }
   }
 
-  async function confirmDelete(_input?: string) {
-    setDeleting(true);
+  async function confirmDelete() {
+    const expected = t ? 'ELIMINAR' : 'DELETE';
+    if (deleteConfirmText.trim().toUpperCase() !== expected) {
+      toast(
+        t ? `Escribe ${expected} para confirmar.` : `Type ${expected} to confirm.`,
+        'warning',
+      );
+      return;
+    }
     try {
-      await usersApi.deleteAccount(_input);
+      await usersApi.deleteAccount(deleteConfirmText);
       fb.destructive();
       setShowDelete(false);
       await logout();
       router.replace('/(auth)/welcome' as never);
     } catch (err) {
       fb.error();
-      Alert.alert(t ? 'Error' : 'Error', apiError(err));
-    } finally { setDeleting(false); }
+      toast(apiError(err), 'danger');
+    }
   }
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        {/* ───── 1 · Identidad ───── */}
-        <View style={styles.profileHero}>
+        {/* ── Identity ── */}
+        <FadeIn style={styles.identityBlock}>
           <StoryRing
             userId={user?.id}
             avatarUrl={user?.profile?.avatarUrl ?? null}
@@ -118,39 +157,44 @@ export default function Profile() {
             isSelf
             onPressNoStories={() => router.push('/(app)/community/new-story' as never)}
           />
-          <Text style={styles.profileName}>{fullName}</Text>
-          <Text style={styles.profileHandle}>
-            @{(user?.email || '').split('@')[0] || 'opalbar'}
-          </Text>
-          <Text style={styles.profileBio}>
-            {t ? `Miembro desde ${memberYear}` : `Member since ${memberYear}`}
-          </Text>
-        </View>
+          <FadeIn delay={80}>
+            <Heading size="lg" align="center" style={{ marginTop: Spacing[4] }}>
+              {fullName}
+            </Heading>
+          </FadeIn>
+          <FadeIn delay={140}>
+            <Caption tone="muted" align="center" style={{ marginTop: Spacing[1] }}>
+              @{handle}
+            </Caption>
+          </FadeIn>
+          <FadeIn delay={200}>
+            <Kicker tone="champagne" align="center" style={{ marginTop: Spacing[3] }}>
+              {t ? `MIEMBRO DESDE ${memberYear}` : `MEMBER SINCE ${memberYear}`}
+            </Kicker>
+          </FadeIn>
+        </FadeIn>
 
-        <View style={styles.statsContainer}>
-          <View style={styles.statItem}>
-            <Text style={styles.statNumber}>{points.toLocaleString(language)}</Text>
-            <Text style={styles.statLabel}>{t ? 'Puntos' : 'Points'}</Text>
+        {/* ── Stats ── */}
+        <FadeIn delay={260}>
+          <Hairline variant="subtle" />
+          <View style={styles.stats}>
+            <StatCell value={points.toLocaleString(language)} label={t ? 'PUNTOS' : 'POINTS'} />
+            <View style={styles.statsDivider} />
+            <StatCell value={String(bookings)} label={t ? 'RESERVAS' : 'BOOKINGS'} />
+            <View style={styles.statsDivider} />
+            <StatCell value={String(redemptions)} label={t ? 'CANJES' : 'REDEEMED'} />
           </View>
-          <View style={styles.statItem}>
-            <Text style={styles.statNumber}>{bookings}</Text>
-            <Text style={styles.statLabel}>{t ? 'Reservas' : 'Bookings'}</Text>
-          </View>
-          <View style={styles.statItem}>
-            <Text style={styles.statNumber}>{redemptions}</Text>
-            <Text style={styles.statLabel}>{t ? 'Canjes' : 'Redeemed'}</Text>
-          </View>
-        </View>
+          <Hairline variant="subtle" />
+        </FadeIn>
 
-        {/* ───── 2 · Mi muro (bloque protagonista) ───── */}
-        <View style={styles.wallBlock}>
-          <View style={styles.blockHeader}>
-            <Feather name="layout" size={13} color={Colors.accentPrimary} />
-            <Text style={styles.blockTitle}>{t ? 'Mi muro' : 'My wall'}</Text>
-          </View>
+        {/* ── Mi muro ── */}
+        <FadeIn delay={320} style={styles.wallBlock}>
+          <Kicker tone="muted" style={{ marginBottom: Spacing[3] }}>
+            {t ? 'MI MURO' : 'MY WALL'}
+          </Kicker>
           <View style={styles.wallTiles}>
             <WallTile
-              icon="layout"
+              icon="grid"
               label={t ? 'Ver muro' : 'View wall'}
               primary
               onPress={() => router.push(`/(app)/users/${user?.id}` as never)}
@@ -166,338 +210,268 @@ export default function Profile() {
               onPress={() => router.push('/(app)/community/new-story' as never)}
             />
           </View>
-        </View>
+        </FadeIn>
 
-        {/* ───── 3 · Actividad ───── */}
-        <View style={styles.blockHeader}>
-          <Feather name="activity" size={13} color={Colors.accentPrimary} />
-          <Text style={styles.blockTitle}>{t ? 'Actividad' : 'Activity'}</Text>
-        </View>
-        <View style={styles.listCard}>
-          {ACTIVITY_MENU.map((m, idx) => (
-            <MenuRow
-              key={m.path}
-              entry={m}
-              language={language}
-              isLast={idx === ACTIVITY_MENU.length - 1}
-              onPress={() => router.push(m.path as never)}
-            />
-          ))}
-        </View>
+        {/* ── Actividad ── */}
+        <MenuSection
+          kicker={t ? 'ACTIVIDAD' : 'ACTIVITY'}
+          entries={ACTIVITY_MENU}
+          language={language}
+          onPress={(path) => router.push(path as never)}
+          delay={380}
+        />
 
-        {/* ───── 4 · Cuenta ───── */}
-        <View style={styles.blockHeader}>
-          <Feather name="user" size={13} color={Colors.accentPrimary} />
-          <Text style={styles.blockTitle}>{t ? 'Cuenta' : 'Account'}</Text>
-        </View>
-        <View style={styles.listCard}>
-          {ACCOUNT_MENU.map((m, idx) => (
-            <MenuRow
-              key={m.path}
-              entry={m}
-              language={language}
-              isLast={idx === ACCOUNT_MENU.length - 1}
-              onPress={() => router.push(m.path as never)}
-            />
-          ))}
-        </View>
+        {/* ── Cuenta ── */}
+        <MenuSection
+          kicker={t ? 'CUENTA' : 'ACCOUNT'}
+          entries={ACCOUNT_MENU}
+          language={language}
+          onPress={(path) => router.push(path as never)}
+          delay={440}
+        />
 
-        {/* ───── 5 · Staff / Admin (condicional) ───── */}
-        {STAFF_ROLES.includes(user?.role ?? '') && (
-          <>
-            <View style={styles.blockHeader}>
-              <Feather name="shield" size={13} color={Colors.accentPrimary} />
-              <Text style={styles.blockTitle}>{t ? 'Staff' : 'Staff'}</Text>
-            </View>
-            <View style={styles.listCard}>
-              <MenuRow entry={ADMIN_ENTRY} language={language} isLast={false} onPress={() => router.push(ADMIN_ENTRY.path as never)} />
-              <MenuRow entry={STAFF_SCAN} language={language} isLast={true} onPress={() => router.push(STAFF_SCAN.path as never)} />
-            </View>
-          </>
-        )}
+        {/* ── Staff (condicional) ── */}
+        {STAFF_ROLES.includes(user?.role ?? '') ? (
+          <MenuSection
+            kicker={t ? 'STAFF' : 'STAFF'}
+            entries={[ADMIN_ENTRY, STAFF_SCAN]}
+            language={language}
+            onPress={(path) => router.push(path as never)}
+            delay={500}
+          />
+        ) : null}
 
-        {/* ───── 6 · Danger ───── */}
-        <View style={styles.dangerZone}>
-          <TouchableOpacity style={styles.logoutBtn} activeOpacity={0.85} onPress={handleLogout}>
-            <Feather name="log-out" size={18} color={Colors.accentDanger} />
-            <Text style={styles.logoutLabel}>{t ? 'Cerrar sesión' : 'Log out'}</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.deleteAccountBtn}
-            activeOpacity={0.85}
-            onPress={() => setShowDelete(true)}
+        {/* ── Danger zone ── */}
+        <FadeIn delay={560} style={styles.dangerZone}>
+          <Hairline variant="subtle" />
+          <View style={{ height: Spacing[6] }} />
+          <Button
+            label={t ? 'Cerrar sesión' : 'Log out'}
+            onPress={() => setShowLogout(true)}
+            variant="danger"
+            size="md"
+            fullWidth
+            haptic="destructive"
+            leftIcon={<Feather name="log-out" size={16} color={Colors.accentDanger} />}
+          />
+          <Pressy
+            onPress={() => {
+              setDeleteConfirmText('');
+              setShowDelete(true);
+            }}
+            accessibilityRole={Roles.button}
+            accessibilityLabel={t ? 'Eliminar mi cuenta' : 'Delete my account'}
+            style={styles.deleteLink}
           >
-            <Text style={styles.deleteAccountLbl}>
+            <Body size="sm" tone="muted" weight="semiBold" align="center">
               {t ? 'Eliminar mi cuenta' : 'Delete my account'}
-            </Text>
-          </TouchableOpacity>
-        </View>
+            </Body>
+          </Pressy>
+        </FadeIn>
       </ScrollView>
 
-      <ConfirmSheet
-        visible={showLogout}
+      <ConfirmDialog
+        open={showLogout}
         onClose={() => setShowLogout(false)}
-        icon="log-out"
-        variant="danger"
-        title={t ? 'Cerrar sesión' : 'Log out'}
-        message={t
-          ? 'Tu sesión se cerrará en este dispositivo. Podrás volver a iniciar cuando quieras.'
-          : 'Your session will end on this device. You can log back in anytime.'}
-        confirmLabel={t ? 'Cerrar sesión' : 'Log out'}
-        loading={loggingOut}
         onConfirm={confirmLogout}
+        title={t ? 'Cerrar sesión' : 'Log out'}
+        description={
+          t
+            ? 'Tu sesión se cerrará en este dispositivo. Podrás volver a iniciar cuando quieras.'
+            : 'Your session will end on this device. You can log back in anytime.'
+        }
+        confirmLabel={t ? 'Cerrar sesión' : 'Log out'}
+        confirmVariant="danger"
       />
 
-      <ConfirmSheet
-        visible={showDelete}
+      <ConfirmDialog
+        open={showDelete}
         onClose={() => setShowDelete(false)}
-        icon="trash-2"
-        variant="danger"
-        title={t ? 'Eliminar cuenta permanentemente' : 'Delete account permanently'}
-        message={t
-          ? 'Perderás todos tus puntos, reservas, canjes y posts. Esta acción no se puede deshacer.'
-          : 'You will lose all your points, reservations, redemptions and posts. This cannot be undone.'}
-        inputLabel={t ? 'Confirmación' : 'Confirmation'}
-        inputPlaceholder={t ? 'Escribe ELIMINAR' : 'Type DELETE'}
-        requireText={t ? 'ELIMINAR' : 'DELETE'}
-        confirmLabel={t ? 'Eliminar mi cuenta' : 'Delete my account'}
-        loading={deleting}
         onConfirm={confirmDelete}
+        title={t ? 'Eliminar cuenta permanente' : 'Delete account permanently'}
+        confirmLabel={t ? 'Eliminar mi cuenta' : 'Delete my account'}
+        confirmVariant="danger"
+        description={
+          <View style={{ gap: Spacing[4] }}>
+            <Body tone="secondary">
+              {t
+                ? 'Perderás todos tus puntos, reservas, canjes y posts. Esta acción no se puede deshacer.'
+                : 'You will lose all your points, reservations, redemptions and posts. This cannot be undone.'}
+            </Body>
+            <Input
+              label={t ? 'CONFIRMACIÓN' : 'CONFIRMATION'}
+              placeholder={t ? 'Escribe ELIMINAR' : 'Type DELETE'}
+              value={deleteConfirmText}
+              onChangeText={setDeleteConfirmText}
+              autoCapitalize="characters"
+              autoCorrect={false}
+            />
+          </View>
+        }
       />
-
     </SafeAreaView>
   );
 }
 
-function WallTile({
-  icon, label, onPress, primary,
-}: { icon: FeatherIcon; label: string; onPress: () => void; primary?: boolean }) {
+// ── Stat cell ────────────────────────────────
+function StatCell({ value, label }: { value: string; label: string }) {
   return (
-    <TouchableOpacity
-      style={[styles.wallTile, primary && styles.wallTilePrimary]}
-      onPress={onPress}
-      activeOpacity={0.85}
-    >
-      <View style={[styles.wallTileIcon, primary && styles.wallTileIconPrimary]}>
-        <Feather name={icon} size={20} color={primary ? Colors.textInverse : Colors.accentPrimary} />
-      </View>
-      <Text style={[styles.wallTileLabel, primary && styles.wallTileLabelPrimary]} numberOfLines={1}>
+    <View style={styles.statCell}>
+      <Numeric size="sm" align="center">
+        {value}
+      </Numeric>
+      <Kicker tone="muted" align="center" style={{ marginTop: Spacing[1] }}>
         {label}
-      </Text>
-    </TouchableOpacity>
+      </Kicker>
+    </View>
   );
 }
 
-function MenuRow({
-  entry, language, isLast, onPress,
-}: { entry: MenuEntry; language: 'es' | 'en'; isLast: boolean; onPress: () => void }) {
+// ── Wall tile ────────────────────────────────
+function WallTile({
+  icon,
+  label,
+  primary,
+  onPress,
+}: {
+  icon: FeatherIcon;
+  label: string;
+  primary?: boolean;
+  onPress: () => void;
+}) {
   return (
-    <TouchableOpacity
-      style={[styles.menuRow, !isLast && styles.menuRowBorder]}
+    <Pressy
       onPress={onPress}
-      activeOpacity={0.7}
+      haptic="select"
+      accessibilityRole={Roles.button}
+      accessibilityLabel={label}
+      style={[styles.wallTile, primary && styles.wallTilePrimary]}
     >
-      <View style={[styles.menuRowIcon, { backgroundColor: entry.tint + '1F' }]}>
-        <Feather name={entry.icon} size={17} color={entry.tint} />
+      <Feather
+        name={icon}
+        size={18}
+        color={primary ? Colors.textInverse : Colors.textPrimary}
+      />
+      <Caption
+        tone={primary ? 'inverse' : 'primary'}
+        align="center"
+        style={{ marginTop: Spacing[2] }}
+      >
+        {label}
+      </Caption>
+    </Pressy>
+  );
+}
+
+// ── Menu section ─────────────────────────────
+function MenuSection({
+  kicker,
+  entries,
+  language,
+  onPress,
+  delay,
+}: {
+  kicker: string;
+  entries: MenuEntry[];
+  language: 'es' | 'en';
+  onPress: (path: string) => void;
+  delay?: number;
+}) {
+  return (
+    <FadeIn delay={delay} style={styles.menuSection}>
+      <Kicker tone="muted" style={{ marginBottom: Spacing[3] }}>
+        {kicker}
+      </Kicker>
+      <View style={styles.listShell}>
+        {entries.map((m, idx) => (
+          <View key={m.path}>
+            <ListItem
+              title={m.label[language]}
+              leftIcon={<Feather name={m.icon} size={18} color={Colors.textSecondary} />}
+              onPress={() => onPress(m.path)}
+              showChevron
+            />
+            {idx < entries.length - 1 ? <ListItem.Separator /> : null}
+          </View>
+        ))}
       </View>
-      <Text style={styles.menuRowLabel}>{entry.label[language]}</Text>
-      <Feather name="chevron-right" size={18} color={Colors.textMuted} />
-    </TouchableOpacity>
+    </FadeIn>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
-  scroll: { paddingBottom: 24 },
+  scroll: { paddingBottom: Spacing[10] },
 
-  // Profile Hero Section (Instagram-style)
-  profileHero: {
+  identityBlock: {
     alignItems: 'center',
-    paddingVertical: 24,
-    paddingHorizontal: 20,
-    gap: 8,
-  },
-  profileAvatar: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
-    backgroundColor: Colors.accentPrimary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: 'rgba(244, 163, 64, 0.3)',
-  },
-  profileAvatarText: {
-    color: Colors.textInverse,
-    fontSize: 32,
-    fontWeight: '800',
-  },
-  profileName: {
-    color: Colors.textPrimary,
-    fontSize: 20,
-    fontWeight: '800',
-    marginTop: 4,
-  },
-  profileHandle: {
-    color: Colors.textMuted,
-    fontSize: 13,
-    marginTop: 2,
-  },
-  profileBio: {
-    color: Colors.textMuted,
-    fontSize: 13,
-    marginTop: 4,
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[6],
+    paddingBottom: Spacing[8],
   },
 
-  // Stats Container (Instagram-style row)
-  statsContainer: {
+  stats: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
-    paddingVertical: 16,
-    borderTopWidth: 1,
-    borderBottomWidth: 1,
-    borderTopColor: Colors.border,
-    borderBottomColor: Colors.border,
+    paddingVertical: Spacing[5],
+    paddingHorizontal: EditorialSpacing.pageGutter,
   },
-  statItem: {
+  statCell: {
+    flex: 1,
     alignItems: 'center',
-    gap: 4,
   },
-  statNumber: {
-    color: Colors.textPrimary,
-    fontSize: 18,
-    fontWeight: '800',
-  },
-  statLabel: {
-    color: Colors.textMuted,
-    fontSize: 12,
+  statsDivider: {
+    width: StyleSheet.hairlineWidth,
+    backgroundColor: Colors.border,
+    marginVertical: Spacing[2],
   },
 
-  // ───── Block header (grupo) ─────
-  blockHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
-    paddingHorizontal: 24,
-    paddingTop: 22,
-    paddingBottom: 10,
-  },
-  blockTitle: {
-    color: Colors.textMuted,
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 0.7,
-    textTransform: 'uppercase',
-  },
-
-  // ───── Mi muro (bloque protagonista) ─────
   wallBlock: {
-    paddingHorizontal: 20,
-    marginTop: 18,
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    marginTop: Spacing[8],
   },
   wallTiles: {
     flexDirection: 'row',
-    gap: 10,
+    gap: Spacing[3],
   },
   wallTile: {
     flex: 1,
-    height: 88,
-    borderRadius: 14,
+    minHeight: 88,
+    borderRadius: Radius.lg,
     backgroundColor: Colors.bgCard,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: Colors.border,
+    borderTopColor: Colors.highlightTop,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
+    paddingHorizontal: Spacing[3],
   },
   wallTilePrimary: {
     backgroundColor: Colors.accentPrimary,
     borderColor: Colors.accentPrimary,
   },
-  wallTileIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(244,163,64,0.15)',
-  },
-  wallTileIconPrimary: {
-    backgroundColor: 'rgba(255,255,255,0.22)',
-  },
-  wallTileLabel: {
-    color: Colors.textPrimary,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  wallTileLabelPrimary: {
-    color: Colors.textInverse,
-  },
 
-  // ───── Lista agrupada (estilo iOS settings) ─────
-  listCard: {
-    marginHorizontal: 20,
+  menuSection: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    marginTop: Spacing[8],
+  },
+  listShell: {
     backgroundColor: Colors.bgCard,
-    borderWidth: 1,
+    borderRadius: Radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: Colors.border,
-    borderRadius: 14,
+    borderTopColor: Colors.highlightTop,
     overflow: 'hidden',
   },
-  menuRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 13,
-  },
-  menuRowBorder: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: Colors.border,
-  },
-  menuRowIcon: {
-    width: 34,
-    height: 34,
-    borderRadius: 9,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  menuRowLabel: {
-    flex: 1,
-    color: Colors.textPrimary,
-    fontSize: 14,
-    fontWeight: '600',
-  },
 
-  // Danger Zone
   dangerZone: {
-    paddingHorizontal: 20,
-    paddingTop: 24,
-    gap: 10,
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    marginTop: Spacing[10],
+    gap: Spacing[3],
   },
-  logoutBtn: {
-    flexDirection: 'row',
+  deleteLink: {
+    minHeight: 44,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
-    padding: 14,
-    backgroundColor: 'rgba(228, 88, 88, 0.08)',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(228, 88, 88, 0.2)',
-  },
-  logoutLabel: {
-    color: Colors.accentDanger,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  deleteAccountBtn: {
-    alignItems: 'center',
-    paddingVertical: 12,
-  },
-  deleteAccountLbl: {
-    color: Colors.textMuted,
-    fontSize: 12,
-    fontWeight: '600',
+    marginTop: Spacing[2],
   },
 });

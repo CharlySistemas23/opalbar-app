@@ -1,20 +1,55 @@
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity } from 'react-native';
+// ─────────────────────────────────────────────
+//  Loyalty Levels — Editorial Premium
+//
+//  Magazine layout:
+//   · Hero block: kicker NIVEL ACTUAL + serif Heading level name +
+//     Numeric points + progress hairline rule to next level
+//   · Section TODOS LOS NIVELES — each level is an editorial Card:
+//     icon (or padlock) + name + range + benefits paragraph. Current
+//     level gets accent border; locked levels dim by 0.55.
+// ─────────────────────────────────────────────
 import { useEffect, useMemo, useState } from 'react';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+
 import { loyaltyApi } from '@/api/client';
 import { useAuthStore } from '@/stores/auth.store';
 import { useAppStore } from '@/stores/app.store';
-import { Colors, Typography, Spacing, Radius } from '@/constants/tokens';
+import { Colors, EditorialSpacing, Radius, Spacing } from '@/constants/tokens';
+import { HitSlop, Roles } from '@/constants/a11y';
+import {
+  Body,
+  Caption,
+  FadeIn,
+  Hairline,
+  Heading,
+  Kicker,
+  Numeric,
+  Pressy,
+  SkeletonList,
+} from '@/components/ui';
 
 type FeatherName = React.ComponentProps<typeof Feather>['name'];
 
-const FEATHER_ICONS = new Set<string>(['star', 'award', 'gift', 'shield', 'zap', 'heart', 'crown', 'trophy']);
+const FEATHER_ICONS = new Set<string>([
+  'star', 'award', 'gift', 'shield', 'zap', 'heart', 'crown', 'trophy',
+]);
 
 function resolveIcon(raw?: string | null): FeatherName {
   if (raw && FEATHER_ICONS.has(raw)) return raw as FeatherName;
   return 'star';
+}
+
+interface Level {
+  id: string;
+  name: string;
+  minPoints?: number;
+  maxPoints?: number;
+  color?: string;
+  icon?: string | null;
+  benefits?: string;
 }
 
 export default function LoyaltyLevels() {
@@ -22,7 +57,8 @@ export default function LoyaltyLevels() {
   const { user } = useAuthStore();
   const { language } = useAppStore();
   const t = language === 'es';
-  const [levels, setLevels] = useState<any[]>([]);
+
+  const [levels, setLevels] = useState<Level[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -30,7 +66,7 @@ export default function LoyaltyLevels() {
       .levels()
       .then((r) => {
         const payload = r.data?.data;
-        const items = Array.isArray(payload) ? payload : payload?.items ?? [];
+        const items: Level[] = Array.isArray(payload) ? payload : payload?.items ?? [];
         const sorted = [...items].sort((a, b) => (a.minPoints ?? 0) - (b.minPoints ?? 0));
         setLevels(sorted);
       })
@@ -40,9 +76,9 @@ export default function LoyaltyLevels() {
   const currentPoints = user?.points ?? 0;
 
   const { currentLevel, nextLevel, progress } = useMemo(() => {
-    if (!levels.length) return { currentLevel: null, nextLevel: null, progress: 0 };
-    let current = levels[0];
-    let next: any = null;
+    if (!levels.length) return { currentLevel: null as Level | null, nextLevel: null as Level | null, progress: 0 };
+    let current: Level = levels[0];
+    let next: Level | null = null;
     for (let i = 0; i < levels.length; i++) {
       if (currentPoints >= (levels[i].minPoints ?? 0)) {
         current = levels[i];
@@ -58,111 +94,119 @@ export default function LoyaltyLevels() {
     return { currentLevel: current, nextLevel: next, progress: pct };
   }, [levels, currentPoints]);
 
-  const currentColor = currentLevel?.color ?? Colors.accentPrimary;
-
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn} hitSlop={10}>
+        <Pressy
+          onPress={() => router.back()}
+          haptic="select"
+          accessibilityRole={Roles.button}
+          accessibilityLabel={t ? 'Atrás' : 'Back'}
+          hitSlop={HitSlop.expand}
+          style={styles.backBtn}
+        >
           <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
-        </TouchableOpacity>
-        <Text style={styles.title}>{t ? 'Niveles' : 'Levels'}</Text>
-        <View style={{ width: 40 }} />
+        </Pressy>
       </View>
 
       {loading ? (
-        <View style={styles.center}>
-          <ActivityIndicator color={Colors.accentPrimary} />
+        <View style={{ paddingHorizontal: EditorialSpacing.pageGutter, gap: Spacing[6] }}>
+          <SkeletonList count={1} itemHeight={200} />
+          <SkeletonList count={4} itemHeight={92} />
         </View>
       ) : (
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-          <View style={[styles.hero, { backgroundColor: currentColor }]}>
-            <View style={styles.heroTop}>
-              <View style={styles.heroIconBox}>
-                <Feather name={resolveIcon(currentLevel?.icon)} size={26} color={Colors.textInverse} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.heroLabel}>{t ? 'Tu nivel' : 'Your level'}</Text>
-                <Text style={styles.heroLevelName}>{currentLevel?.name ?? '—'}</Text>
-              </View>
-              <View style={styles.heroPointsBox}>
-                <Text style={styles.heroPointsValue}>{currentPoints}</Text>
-                <Text style={styles.heroPointsLabel}>{t ? 'pts' : 'pts'}</Text>
-              </View>
+        <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+          {/* ── Hero ── */}
+          <FadeIn style={styles.hero}>
+            <Kicker tone="muted">{t ? 'NIVEL ACTUAL' : 'CURRENT TIER'}</Kicker>
+            <Heading size="lg" style={{ marginTop: Spacing[3] }}>
+              {currentLevel?.name ?? '—'}
+            </Heading>
+            <View style={{ flexDirection: 'row', alignItems: 'baseline', marginTop: Spacing[5], gap: Spacing[2] }}>
+              <Numeric size="md">{currentPoints.toLocaleString(language)}</Numeric>
+              <Caption tone="champagne">{t ? 'PTS' : 'PTS'}</Caption>
             </View>
 
             {nextLevel ? (
-              <View style={styles.progressBlock}>
-                <View style={styles.progressLabels}>
-                  <Text style={styles.progressText}>
-                    {t ? 'Siguiente' : 'Next'}: {nextLevel.name}
-                  </Text>
-                  <Text style={styles.progressText}>
-                    {Math.max(0, (nextLevel.minPoints ?? 0) - currentPoints)} {t ? 'pts restantes' : 'pts to go'}
-                  </Text>
-                </View>
+              <View style={{ marginTop: Spacing[5] }}>
                 <View style={styles.progressTrack}>
                   <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
                 </View>
+                <Caption tone="muted" style={{ marginTop: Spacing[3] }}>
+                  {t
+                    ? `${Math.max(0, (nextLevel.minPoints ?? 0) - currentPoints)} pts para ${nextLevel.name}`
+                    : `${Math.max(0, (nextLevel.minPoints ?? 0) - currentPoints)} pts to ${nextLevel.name}`}
+                </Caption>
               </View>
             ) : (
-              <View style={styles.maxBadge}>
-                <Feather name="check-circle" size={14} color={Colors.textInverse} />
-                <Text style={styles.maxBadgeText}>
-                  {t ? 'Has alcanzado el nivel máximo' : 'You have reached the top tier'}
-                </Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: Spacing[5], gap: Spacing[2] }}>
+                <Feather name="check-circle" size={14} color={Colors.accentSuccess} />
+                <Caption tone="success">
+                  {t ? 'Has alcanzado el nivel máximo.' : 'You have reached the top tier.'}
+                </Caption>
               </View>
             )}
-          </View>
+          </FadeIn>
 
-          <Text style={styles.sectionTitle}>{t ? 'Todos los niveles' : 'All levels'}</Text>
+          <FadeIn delay={120}>
+            <Hairline variant="subtle" style={{ marginHorizontal: EditorialSpacing.pageGutter }} />
+          </FadeIn>
 
-          {levels.map((level) => {
-            const isCurrent = currentLevel?.id === level.id;
-            const achieved = currentPoints >= (level.minPoints ?? 0);
-            const tint = level.color ?? Colors.accentPrimary;
-            return (
-              <View
-                key={level.id}
-                style={[
-                  styles.levelCard,
-                  isCurrent && { borderColor: tint, borderWidth: 1.5 },
-                  !achieved && styles.levelCardLocked,
-                ]}
-              >
-                <View style={[styles.levelIcon, { backgroundColor: achieved ? `${tint}20` : Colors.bgPrimary }]}>
-                  <Feather
-                    name={achieved ? resolveIcon(level.icon) : 'lock'}
-                    size={20}
-                    color={achieved ? tint : Colors.textMuted}
-                  />
-                </View>
-                <View style={styles.levelInfo}>
-                  <View style={styles.levelTitleRow}>
-                    <Text style={[styles.levelName, { color: achieved ? Colors.textPrimary : Colors.textMuted }]}>
-                      {level.name}
-                    </Text>
-                    {isCurrent && (
-                      <View style={[styles.currentPill, { backgroundColor: `${tint}20` }]}>
-                        <Text style={[styles.currentPillText, { color: tint }]}>
-                          {t ? 'Actual' : 'Current'}
-                        </Text>
+          {/* ── All levels ── */}
+          <FadeIn delay={160} style={styles.section}>
+            <Kicker tone="muted">{t ? 'TODOS LOS NIVELES' : 'ALL TIERS'}</Kicker>
+            <Heading size="sm" style={{ marginTop: Spacing[1], marginBottom: Spacing[5] }}>
+              {t ? 'La escalera' : 'The ladder'}
+            </Heading>
+
+            <View style={{ gap: Spacing[3] }}>
+              {levels.map((level, idx) => {
+                const isCurrent = currentLevel?.id === level.id;
+                const achieved = currentPoints >= (level.minPoints ?? 0);
+                const tint = level.color ?? Colors.accentPrimary;
+                return (
+                  <FadeIn key={level.id} delay={70 * idx}>
+                    <View
+                      style={[
+                        styles.levelCard,
+                        isCurrent && { borderColor: tint },
+                        !achieved && styles.levelCardLocked,
+                      ]}
+                    >
+                      <View style={styles.levelIconBox}>
+                        <Feather
+                          name={achieved ? resolveIcon(level.icon) : 'lock'}
+                          size={20}
+                          color={achieved ? tint : Colors.textMuted}
+                        />
                       </View>
-                    )}
-                  </View>
-                  <Text style={styles.levelReq}>
-                    {level.minPoints ?? 0}
-                    {level.maxPoints ? ` – ${level.maxPoints}` : '+'} {t ? 'pts' : 'pts'}
-                  </Text>
-                  {level.benefits ? (
-                    <Text style={styles.levelBenefits} numberOfLines={3}>
-                      {level.benefits}
-                    </Text>
-                  ) : null}
-                </View>
-              </View>
-            );
-          })}
+                      <View style={{ flex: 1 }}>
+                        <View style={styles.levelRow}>
+                          <Heading size="sm" tone={achieved ? 'primary' : 'muted'}>
+                            {level.name}
+                          </Heading>
+                          {isCurrent ? (
+                            <Caption tone="champagne" style={{ marginLeft: Spacing[2] }}>
+                              {t ? 'ACTUAL' : 'CURRENT'}
+                            </Caption>
+                          ) : null}
+                        </View>
+                        <Caption tone="muted" style={{ marginTop: 2 }}>
+                          {level.minPoints ?? 0}
+                          {level.maxPoints ? ` – ${level.maxPoints}` : '+'} {t ? 'pts' : 'pts'}
+                        </Caption>
+                        {level.benefits ? (
+                          <Body size="sm" tone="secondary" style={{ marginTop: Spacing[3] }} numberOfLines={4}>
+                            {level.benefits}
+                          </Body>
+                        ) : null}
+                      </View>
+                    </View>
+                  </FadeIn>
+                );
+              })}
+            </View>
+          </FadeIn>
         </ScrollView>
       )}
     </SafeAreaView>
@@ -171,94 +215,61 @@ export default function LoyaltyLevels() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 8,
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[2],
+    paddingBottom: Spacing[4],
   },
-  iconBtn: {
+  backBtn: {
     width: 40,
     height: 40,
-    borderRadius: 20,
-    backgroundColor: Colors.bgCard,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: Colors.border,
   },
-  title: { color: Colors.textPrimary, fontSize: 18, fontWeight: '700' },
-  content: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 28, gap: 16 },
-
+  scroll: {
+    paddingBottom: Spacing[12],
+  },
   hero: {
-    borderRadius: Radius.xl,
-    padding: 18,
-    gap: 16,
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingBottom: Spacing[8],
   },
-  heroTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  heroIconBox: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: 'rgba(255,255,255,0.18)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  heroLabel: { color: 'rgba(255,255,255,0.75)', fontSize: 12, fontWeight: '600', letterSpacing: 0.3, textTransform: 'uppercase' },
-  heroLevelName: { color: Colors.textInverse, fontSize: 22, fontWeight: '800', letterSpacing: -0.3, marginTop: 2 },
-  heroPointsBox: { alignItems: 'flex-end' },
-  heroPointsValue: { color: Colors.textInverse, fontSize: 28, fontWeight: '800', letterSpacing: -0.5 },
-  heroPointsLabel: { color: 'rgba(255,255,255,0.75)', fontSize: 11, fontWeight: '600', letterSpacing: 0.3, textTransform: 'uppercase' },
-
-  progressBlock: { gap: 8 },
-  progressLabels: { flexDirection: 'row', justifyContent: 'space-between' },
-  progressText: { color: 'rgba(255,255,255,0.85)', fontSize: 12, fontWeight: '600' },
   progressTrack: {
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: 'rgba(255,255,255,0.22)',
+    height: 2,
+    backgroundColor: Colors.border,
     overflow: 'hidden',
   },
-  progressFill: { height: '100%', backgroundColor: Colors.textInverse, borderRadius: 4 },
-
-  maxBadge: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  maxBadgeText: { color: Colors.textInverse, fontSize: 12, fontWeight: '600' },
-
-  sectionTitle: {
-    color: Colors.textSecondary,
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-    marginTop: 4,
+  progressFill: {
+    height: '100%',
+    backgroundColor: Colors.accentPrimary,
   },
-
+  section: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    marginTop: Spacing[8],
+  },
   levelCard: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
+    alignItems: 'flex-start',
+    gap: Spacing[4],
+    padding: Spacing[5],
     backgroundColor: Colors.bgCard,
     borderRadius: Radius.card,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: Colors.border,
-    padding: 14,
+    borderTopColor: Colors.highlightTop,
   },
-  levelCardLocked: { opacity: 0.6 },
-  levelIcon: {
+  levelCardLocked: { opacity: 0.55 },
+  levelIconBox: {
     width: 44,
     height: 44,
-    borderRadius: 22,
+    borderRadius: Radius.full,
+    backgroundColor: Colors.bgElevated,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  levelInfo: { flex: 1, gap: 2 },
-  levelTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  levelName: { fontSize: 15, fontWeight: '700' },
-  levelReq: { fontSize: 12, color: Colors.textSecondary, fontWeight: '500' },
-  levelBenefits: { fontSize: 12, color: Colors.textSecondary, marginTop: 4, lineHeight: 17 },
-  currentPill: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 },
-  currentPillText: { fontSize: 10, fontWeight: '700', letterSpacing: 0.3, textTransform: 'uppercase' },
+  levelRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+  },
 });

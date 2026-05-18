@@ -1,15 +1,50 @@
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, Modal, Platform, Image } from 'react-native';
+// ─────────────────────────────────────────────
+//  Offer Detail — Editorial Premium
+//
+//  Full-bleed hero image (16:10), kicker + Display title, lead paragraph,
+//  numeric stat blocks separated by hairlines, an editorial terms card,
+//  and a single primary CTA. QR rendered inside the editorial Modal.
+// ─────────────────────────────────────────────
 import { useEffect, useState } from 'react';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import {
+  Alert,
+  Dimensions,
+  Image,
+  Modal as RNModal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  View,
+} from 'react-native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import QRCode from 'react-native-qrcode-svg';
+
+import {
+  Body,
+  Button,
+  Caption,
+  Display,
+  FadeIn,
+  Hairline,
+  Heading,
+  Kicker,
+  Modal,
+  Numeric,
+  Pressy,
+  Skeleton,
+  Subhead,
+} from '@/components/ui';
+import { Colors, EditorialSpacing, Radius, Spacing } from '@/constants/tokens';
+import { HitSlop, Roles } from '@/constants/a11y';
 import { offersApi } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { useAuthStore } from '@/stores/auth.store';
 import { useAppStore } from '@/stores/app.store';
 import { useFeedback } from '@/hooks/useFeedback';
-import { Colors, Radius } from '@/constants/tokens';
+
+const HERO_RATIO = 16 / 10;
 
 export default function OfferDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -56,13 +91,25 @@ export default function OfferDetail() {
   }
 
   if (loading) {
-    return <View style={styles.center}><ActivityIndicator color={Colors.accentPrimary} /></View>;
+    return (
+      <SafeAreaView style={styles.root} edges={['top']}>
+        <View style={styles.headerBar}>
+          <BackBtn onPress={() => router.back()} label={t ? 'Volver' : 'Back'} />
+        </View>
+        <View style={{ paddingHorizontal: EditorialSpacing.pageGutter, gap: Spacing[5], marginTop: Spacing[6] }}>
+          <Skeleton width="40%" height={12} />
+          <Skeleton width="80%" height={36} />
+          <Skeleton width="100%" height={220} radius={Radius.lg} />
+          <Skeleton width="100%" height={80} radius={Radius.lg} />
+        </View>
+      </SafeAreaView>
+    );
   }
   if (!offer) {
     return (
-      <View style={styles.center}>
-        <Text style={styles.notFound}>{t ? 'Oferta no encontrada' : 'Offer not found'}</Text>
-      </View>
+      <SafeAreaView style={[styles.root, styles.center]} edges={['top']}>
+        <Body tone="secondary">{t ? 'Oferta no encontrada' : 'Offer not found'}</Body>
+      </SafeAreaView>
     );
   }
 
@@ -75,357 +122,303 @@ export default function OfferDetail() {
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
-
-        {/* Hero image or icon */}
-        {offer.imageUrl ? (
-          <View style={styles.heroImgWrapper}>
-            <TouchableOpacity activeOpacity={0.95} onPress={() => setPreviewVisible(true)}>
+      <ScrollView contentContainerStyle={{ paddingBottom: 140 }} showsVerticalScrollIndicator={false}>
+        {/* Hero ─────────────────────────────── */}
+        <View style={styles.heroWrap}>
+          {offer.imageUrl ? (
+            <Pressable
+              onPress={() => setPreviewVisible(true)}
+              accessibilityRole={Roles.imagebutton}
+              accessibilityLabel={t ? 'Ampliar imagen' : 'Zoom image'}
+            >
               <Image
                 source={{ uri: offer.imageUrl }}
                 style={styles.heroImg}
                 resizeMode="cover"
+                accessibilityIgnoresInvertColors
               />
-            </TouchableOpacity>
-            {/* Back button as overlay on image */}
-            <TouchableOpacity onPress={() => router.back()} style={styles.iconBtnOverlay} hitSlop={10}>
-              <Feather name="arrow-left" size={20} color="#FFFFFF" />
-            </TouchableOpacity>
-            {/* Zoom hint */}
-            <TouchableOpacity style={styles.previewHint} onPress={() => setPreviewVisible(true)} activeOpacity={0.8}>
-              <Feather name="maximize-2" size={12} color={Colors.textPrimary} />
-              <Text style={styles.previewHintText}>{t ? 'Toca para ampliar' : 'Tap to zoom'}</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          <>
-            <View style={styles.headerBar}>
-              <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn} hitSlop={10}>
-                <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
-              </TouchableOpacity>
-            </View>
-            <View style={styles.heroBox}>
-              <View style={styles.heroIcon}>
-                <Feather name="tag" size={52} color={Colors.accentPrimary} />
-              </View>
-            </View>
-          </>
-        )}
-
-        <View style={styles.content}>
-          <Text style={styles.title}>{title}</Text>
-
-          {description ? <Text style={styles.description}>{description}</Text> : null}
-
-          {/* Info cards */}
-          <View style={styles.cardsRow}>
-            {usesLeft !== undefined && usesLeft !== null && (
-              <View style={styles.card}>
-                <Feather name="check-circle" size={18} color={Colors.accentSuccess} />
-                <Text style={styles.cardValue}>{usesLeft}</Text>
-                <Text style={styles.cardLabel}>{t ? 'Disponibles' : 'Available'}</Text>
-              </View>
-            )}
-            {validUntil && (
-              <View style={styles.card}>
-                <Feather name="clock" size={18} color={Colors.accentPrimary} />
-                <Text style={styles.cardValue} numberOfLines={1}>
-                  {validUntil.toLocaleDateString(language, { day: 'numeric', month: 'short' })}
-                </Text>
-                <Text style={styles.cardLabel}>{t ? 'Válido hasta' : 'Valid until'}</Text>
-              </View>
-            )}
-            {offer.pointsCost ? (
-              <View style={styles.card}>
-                <Feather name="star" size={18} color={Colors.accentPrimary} />
-                <Text style={styles.cardValue}>{offer.pointsCost}</Text>
-                <Text style={styles.cardLabel}>{t ? 'Puntos' : 'Points'}</Text>
-              </View>
-            ) : null}
-          </View>
-
-          {/* Venue */}
-          {offer.venue?.name && (
-            <View style={styles.venueRow}>
-              <Feather name="map-pin" size={16} color={Colors.textSecondary} />
-              <Text style={styles.venueText}>{offer.venue.name}</Text>
+            </Pressable>
+          ) : (
+            <View style={[styles.heroImg, styles.heroFallback]}>
+              <Feather name="tag" size={56} color={Colors.accentChampagne} />
             </View>
           )}
-
-          {/* Terms */}
-          <View style={styles.termsBox}>
-            <Text style={styles.termsTitle}>
-              {t ? 'Términos y condiciones' : 'Terms and conditions'}
-            </Text>
-            <Text style={styles.termsText}>
-              {offer.terms ||
-                (t
-                  ? '• No acumulable con otras promociones\n• Sujeto a disponibilidad\n• Presenta esta pantalla al personal'
-                  : '• Cannot be combined with other promotions\n• Subject to availability\n• Show this screen to staff')}
-            </Text>
+          <View style={styles.heroHeader}>
+            <BackBtn onPress={() => router.back()} label={t ? 'Volver' : 'Back'} overlay />
           </View>
+        </View>
+
+        {/* Body ─────────────────────────────── */}
+        <View style={styles.body}>
+          <FadeIn>
+            <Kicker tone="champagne">{t ? 'OFERTA' : 'OFFER'}</Kicker>
+          </FadeIn>
+          <FadeIn delay={80} style={{ marginTop: Spacing[3] }}>
+            <Display size="md">{title}</Display>
+          </FadeIn>
+
+          {description ? (
+            <FadeIn delay={160} style={{ marginTop: Spacing[4] }}>
+              <Body size="lg" tone="secondary">
+                {description}
+              </Body>
+            </FadeIn>
+          ) : null}
+
+          {/* Stat strip ─────────────────────── */}
+          <FadeIn delay={240} style={styles.statStrip}>
+            {usesLeft !== undefined && usesLeft !== null ? (
+              <StatBlock
+                kicker={t ? 'DISPONIBLES' : 'AVAILABLE'}
+                value={String(usesLeft)}
+              />
+            ) : null}
+            {validUntil ? (
+              <StatBlock
+                kicker={t ? 'VÁLIDO HASTA' : 'VALID UNTIL'}
+                value={validUntil.toLocaleDateString(language, { day: 'numeric', month: 'short' })}
+              />
+            ) : null}
+            {offer.pointsCost ? (
+              <StatBlock kicker={t ? 'PUNTOS' : 'POINTS'} value={String(offer.pointsCost)} />
+            ) : null}
+          </FadeIn>
+
+          {/* Venue line ─────────────────────── */}
+          {offer.venue?.name ? (
+            <FadeIn delay={320} style={styles.venueRow}>
+              <Feather name="map-pin" size={14} color={Colors.textMuted} />
+              <Caption tone="secondary">{offer.venue.name}</Caption>
+            </FadeIn>
+          ) : null}
+
+          {/* Terms ──────────────────────────── */}
+          <FadeIn delay={380} style={{ marginTop: Spacing[8] }}>
+            <Hairline variant="normal" />
+            <View style={{ marginTop: Spacing[5] }}>
+              <Kicker tone="muted">
+                {t ? 'TÉRMINOS Y CONDICIONES' : 'TERMS AND CONDITIONS'}
+              </Kicker>
+              <Body tone="secondary" style={{ marginTop: Spacing[3] }}>
+                {offer.terms ||
+                  (t
+                    ? '· No acumulable con otras promociones\n· Sujeto a disponibilidad\n· Presenta esta pantalla al staff'
+                    : '· Cannot be combined with other promotions\n· Subject to availability\n· Show this screen to staff')}
+              </Body>
+            </View>
+          </FadeIn>
         </View>
       </ScrollView>
 
-      {/* Sticky CTA */}
-      <View style={styles.cta}>
-        <TouchableOpacity
-          style={[styles.ctaBtn, (redeemed || busy) && { opacity: redeemed ? 0.7 : 0.6 }]}
-          onPress={handleRedeem}
-          disabled={busy || redeemed}
-          activeOpacity={0.9}
-        >
-          {busy
-            ? <ActivityIndicator color={Colors.textInverse} />
-            : <>
-                <Feather
-                  name={redeemed ? 'check' : 'gift'}
-                  size={18}
-                  color={Colors.textInverse}
-                />
-                <Text style={styles.ctaLabel}>
-                  {redeemed ? (t ? 'Ver QR' : 'Show QR') : (t ? 'Canjear oferta' : 'Redeem offer')}
-                </Text>
-              </>
-          }
-        </TouchableOpacity>
+      {/* Sticky CTA ─────────────────────────── */}
+      <View style={styles.ctaWrap}>
+        <Hairline variant="subtle" />
+        <View style={styles.ctaInner}>
+          <Button
+            label={
+              redeemed
+                ? t ? 'Ver QR' : 'Show QR'
+                : t ? 'Canjear oferta' : 'Redeem offer'
+            }
+            onPress={handleRedeem}
+            loading={busy}
+            disabled={busy}
+            variant="primary"
+            size="lg"
+            fullWidth
+            haptic={redeemed ? 'tap' : 'success'}
+          />
+        </View>
       </View>
 
-      <Modal
+      {/* Image preview ─────────────────────── */}
+      <RNModal
         visible={previewVisible}
         transparent
         animationType="fade"
         onRequestClose={() => setPreviewVisible(false)}
       >
         <View style={styles.previewBackdrop}>
-          <TouchableOpacity style={styles.previewClose} onPress={() => setPreviewVisible(false)} hitSlop={10}>
+          <Pressy
+            onPress={() => setPreviewVisible(false)}
+            accessibilityLabel={t ? 'Cerrar' : 'Close'}
+            haptic="select"
+            style={styles.previewClose}
+          >
             <Feather name="x" size={20} color={Colors.textPrimary} />
-          </TouchableOpacity>
+          </Pressy>
           <Image source={{ uri: offer.imageUrl }} style={styles.previewImage} resizeMode="contain" />
         </View>
-      </Modal>
+      </RNModal>
 
+      {/* QR Modal ─────────────────────────── */}
       <Modal
-        visible={showQr}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowQr(false)}
+        open={showQr}
+        onClose={() => setShowQr(false)}
+        title={t ? 'Oferta canjeada' : 'Offer redeemed'}
+        size="md"
       >
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <TouchableOpacity style={styles.modalClose} onPress={() => setShowQr(false)} hitSlop={10}>
-              <Feather name="x" size={20} color={Colors.textPrimary} />
-            </TouchableOpacity>
-
-            <View style={styles.successBadge}>
-              <Feather name="check-circle" size={20} color={Colors.accentSuccess} />
-              <Text style={styles.successText}>{t ? '¡Oferta canjeada!' : 'Offer redeemed!'}</Text>
-            </View>
-
-            <Text style={styles.modalTitle} numberOfLines={2}>{title}</Text>
-
-            {redemption?.code ? (
-              <>
-                <View style={styles.qrBox}>
-                  <QRCode value={redemption.code} size={220} backgroundColor="#FFFFFF" color="#0D0D0F" />
-                </View>
-                <Text style={styles.qrCode}>{redemption.code.slice(-8).toUpperCase()}</Text>
-              </>
-            ) : null}
-
-            <Text style={styles.modalHint}>
-              {t
-                ? 'Muestra este QR al staff para canjear tu oferta.'
-                : 'Show this QR to staff to redeem your offer.'}
-            </Text>
-
-            {redemption?.expiresAt && (
-              <Text style={styles.expiresText}>
-                {t ? 'Expira: ' : 'Expires: '}
-                {new Date(redemption.expiresAt).toLocaleString(language, {
-                  day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
-                })}
-              </Text>
-            )}
-          </View>
+        <View style={{ alignItems: 'center', gap: Spacing[4] }}>
+          <Kicker tone="champagne">{t ? 'PRESENTA AL STAFF' : 'SHOW TO STAFF'}</Kicker>
+          <Subhead align="center">{title}</Subhead>
+          {redemption?.code ? (
+            <>
+              <View style={styles.qrBox}>
+                <QRCode value={redemption.code} size={200} backgroundColor="#FFFFFF" color="#0D0D0F" />
+              </View>
+              <Body weight="semiBold" style={styles.qrCode}>
+                {redemption.code.slice(-8).toUpperCase()}
+              </Body>
+            </>
+          ) : null}
+          {redemption?.expiresAt ? (
+            <Caption tone="muted" align="center">
+              {t ? 'Expira: ' : 'Expires: '}
+              {new Date(redemption.expiresAt).toLocaleString(language, {
+                day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
+              })}
+            </Caption>
+          ) : null}
         </View>
       </Modal>
     </SafeAreaView>
   );
 }
 
+function StatBlock({ kicker, value }: { kicker: string; value: string }) {
+  return (
+    <View style={styles.statBlock}>
+      <Kicker tone="muted">{kicker}</Kicker>
+      <View style={{ marginTop: Spacing[2] }}>
+        <Numeric size="sm">{value}</Numeric>
+      </View>
+    </View>
+  );
+}
+
+function BackBtn({
+  onPress,
+  label,
+  overlay,
+}: {
+  onPress: () => void;
+  label: string;
+  overlay?: boolean;
+}) {
+  return (
+    <Pressy
+      onPress={onPress}
+      accessibilityRole={Roles.button}
+      accessibilityLabel={label}
+      hitSlop={HitSlop.expand}
+      style={[styles.backBtn, overlay && styles.backBtnOverlay]}
+    >
+      <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
+    </Pressy>
+  );
+}
+
+const screenWidth = Dimensions.get('window').width;
+const heroHeight = Math.round(screenWidth / HERO_RATIO);
+
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.bgPrimary },
-  notFound: { color: Colors.textSecondary },
+  center: { alignItems: 'center', justifyContent: 'center' },
 
-  headerBar: { paddingHorizontal: 20, paddingTop: 8 },
-  iconBtn: {
-    width: 40, height: 40, borderRadius: 20,
+  headerBar: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[2],
+  },
+
+  heroWrap: { width: '100%' },
+  heroImg: { width: '100%', height: heroHeight },
+  heroFallback: {
     backgroundColor: Colors.bgCard,
-    alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1, borderColor: Colors.border,
-  },
-  iconBtnOverlay: {
-    position: 'absolute',
-    top: 12,
-    left: 16,
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  heroImgWrapper: {
-    position: 'relative',
-    width: '100%',
-  },
-
-  heroBox: {
-    alignItems: 'center',
-    paddingVertical: 28,
-  },
-  heroImg: {
-    width: '100%',
-    height: 260,
-  },
-  heroIcon: {
-    width: 128, height: 128, borderRadius: 28,
-    backgroundColor: Colors.bgCard,
-    alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1, borderColor: Colors.border,
-  },
-
-  content: { paddingHorizontal: 20, gap: 14 },
-
-  title: { color: Colors.textPrimary, fontSize: 24, fontWeight: '800' },
-  description: { color: Colors.textSecondary, fontSize: 14, lineHeight: 21 },
-
-  cardsRow: { flexDirection: 'row', gap: 10 },
-  card: {
-    flex: 1,
-    backgroundColor: Colors.bgCard,
-    borderRadius: Radius.card,
-    paddingVertical: 14,
-    alignItems: 'center',
-    gap: 4,
-  },
-  cardValue: { color: Colors.textPrimary, fontSize: 16, fontWeight: '800' },
-  cardLabel: { color: Colors.textMuted, fontSize: 11 },
-
-  venueRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  venueText: { color: Colors.textSecondary, fontSize: 14 },
-
-  termsBox: {
-    backgroundColor: Colors.bgCard,
-    borderRadius: Radius.card,
-    padding: 16,
-    gap: 8,
-    marginTop: 6,
-  },
-  termsTitle: { color: Colors.textPrimary, fontSize: 14, fontWeight: '700' },
-  termsText: { color: Colors.textSecondary, fontSize: 13, lineHeight: 20 },
-
-  cta: {
-    position: 'absolute',
-    left: 0, right: 0, bottom: 0,
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: 24,
-    backgroundColor: Colors.bgPrimary,
-    borderTopWidth: 1,
-    borderTopColor: Colors.border,
-  },
-  ctaBtn: {
-    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
-    height: 54,
-    backgroundColor: Colors.accentPrimary,
-    borderRadius: Radius.button,
   },
-  ctaLabel: { color: Colors.textInverse, fontSize: 16, fontWeight: '700' },
+  heroHeader: {
+    position: 'absolute',
+    top: Spacing[2],
+    left: EditorialSpacing.pageGutter,
+  },
+  backBtn: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: -Spacing[2],
+  },
+  backBtnOverlay: {
+    backgroundColor: 'rgba(8,7,6,0.45)',
+    borderRadius: Radius.full,
+    width: 40,
+    height: 40,
+    marginLeft: 0,
+  },
+
+  body: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[8],
+  },
+
+  statStrip: {
+    marginTop: Spacing[8],
+    flexDirection: 'row',
+    gap: Spacing[4],
+  },
+  statBlock: {
+    flex: 1,
+  },
+
+  venueRow: {
+    marginTop: Spacing[6],
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing[2],
+  },
+
+  ctaWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: Colors.bgPrimary,
+  },
+  ctaInner: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[4],
+    paddingBottom: Spacing[6],
+  },
 
   previewBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.92)',
+    backgroundColor: Colors.bgOverlay,
     alignItems: 'center',
     justifyContent: 'center',
   },
   previewClose: {
     position: 'absolute',
     top: 52,
-    right: 20,
+    right: EditorialSpacing.pageGutter,
     width: 40,
     height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.15)',
+    borderRadius: Radius.full,
+    backgroundColor: 'rgba(246,241,231,0.12)',
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 2,
   },
-  previewImage: {
-    width: '100%',
-    height: '80%',
-  },
-  previewHint: {
-    position: 'absolute',
-    right: 16,
-    bottom: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 20,
-  },
-  previewHintText: { color: Colors.textPrimary, fontSize: 11, fontWeight: '700' },
+  previewImage: { width: '100%', height: '80%' },
 
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.75)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 24,
-  },
-  modalCard: {
-    width: '100%',
-    backgroundColor: Colors.bgCard,
-    borderRadius: 24,
-    padding: 24,
-    alignItems: 'center',
-    gap: 14,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  modalClose: {
-    position: 'absolute', top: 12, right: 12,
-    width: 36, height: 36, borderRadius: 18,
-    backgroundColor: Colors.bgElevated,
-    alignItems: 'center', justifyContent: 'center',
-    zIndex: 2,
-  },
-  successBadge: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    backgroundColor: 'rgba(56,199,147,0.12)',
-    paddingHorizontal: 14, paddingVertical: 8,
-    borderRadius: 20,
-    marginTop: 8,
-  },
-  successText: { color: Colors.accentSuccess, fontSize: 13, fontWeight: '700' },
-  modalTitle: { color: Colors.textPrimary, fontSize: 18, fontWeight: '800', textAlign: 'center' },
   qrBox: {
-    padding: 16,
+    padding: Spacing[4],
     backgroundColor: '#FFFFFF',
-    borderRadius: 16,
+    borderRadius: Radius.lg,
   },
   qrCode: {
-    color: Colors.textPrimary,
-    fontSize: 20,
-    fontWeight: '800',
     letterSpacing: 4,
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
-  modalHint: { color: Colors.textSecondary, fontSize: 13, textAlign: 'center', lineHeight: 19 },
-  expiresText: { color: Colors.textMuted, fontSize: 12 },
 });
+
+void Heading;

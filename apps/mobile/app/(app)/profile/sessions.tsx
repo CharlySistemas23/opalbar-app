@@ -1,13 +1,47 @@
-import { View, Text, StyleSheet, FlatList, ActivityIndicator, Alert, TouchableOpacity } from 'react-native';
-import { useEffect, useState } from 'react';
+// ─────────────────────────────────────────────
+//  Sessions — Editorial Premium
+//
+//  Magazine layout:
+//   · Kicker + Heading header + Lead summary copy
+//   · FlatList of editorial rows: device icon + device name + meta line
+//     (ip · last seen) + current pill OR ghost "Revoke" button
+//   · Confirm via <ConfirmDialog> for destructive revoke (was Alert).
+// ─────────────────────────────────────────────
+import { useCallback, useEffect, useState } from 'react';
+import { FlatList, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Feather } from '@expo/vector-icons';
+
 import { authApi } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { useAppStore } from '@/stores/app.store';
+import { Colors, EditorialSpacing, Radius, Spacing } from '@/constants/tokens';
+import { HitSlop, Roles } from '@/constants/a11y';
+import {
+  Button,
+  Caption,
+  ConfirmDialog,
+  FadeIn,
+  Heading,
+  Kicker,
+  Lead,
+  Pressy,
+  SkeletonList,
+  Subhead,
+} from '@/components/ui';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
-import { Colors, Typography, Spacing, Radius } from '@/constants/tokens';
+import { toast } from '@/components/Toast';
+
+interface SessionRow {
+  id: string;
+  deviceName?: string;
+  deviceOs?: string;
+  ipAddress?: string;
+  updatedAt?: string;
+  isCurrent?: boolean;
+}
 
 function isMobileOs(os?: string | null) {
   if (!os) return false;
@@ -18,13 +52,16 @@ export default function Sessions() {
   const router = useRouter();
   const { language } = useAppStore();
   const t = language === 'es';
-  const [sessions, setSessions] = useState<any[]>([]);
+
+  const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [confirmId, setConfirmId] = useState<string | null>(null);
 
-  const load = () => {
+  const load = useCallback(() => {
     setError(null);
-    authApi.sessions()
+    authApi
+      .sessions()
       .then((r) => {
         const payload = r.data?.data;
         const items = Array.isArray(payload) ? payload : payload?.items ?? [];
@@ -32,100 +69,200 @@ export default function Sessions() {
       })
       .catch((err) => setError(apiError(err)))
       .finally(() => setLoading(false));
-  };
+  }, []);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+  }, [load]);
 
-  async function handleRevoke(sessionId: string) {
-    Alert.alert(
-      t ? 'Cerrar sesión' : 'Sign out',
-      t ? '¿Cerrar esta sesión?' : 'Sign out of this session?',
-      [
-        { text: t ? 'Cancelar' : 'Cancel', style: 'cancel' },
-        {
-          text: t ? 'Cerrar' : 'Sign out', style: 'destructive',
-          onPress: async () => {
-            try {
-              await authApi.revokeSession(sessionId);
-              setSessions((prev) => prev.filter((s) => s.id !== sessionId));
-            } catch {}
-          },
-        },
-      ],
-    );
+  async function confirmRevoke() {
+    if (!confirmId) return;
+    const id = confirmId;
+    setConfirmId(null);
+    try {
+      await authApi.revokeSession(id);
+      setSessions((prev) => prev.filter((s) => s.id !== id));
+      toast(t ? 'Sesión cerrada.' : 'Session revoked.', 'success');
+    } catch (err: any) {
+      toast(apiError(err, t ? 'No se pudo cerrar.' : "Couldn't revoke."), 'danger');
+    }
   }
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Text style={styles.backIcon}>←</Text>
-        </TouchableOpacity>
-        <Text style={styles.title}>{t ? 'Sesiones activas' : 'Active sessions'}</Text>
-        <View style={{ width: 24 }} />
+        <Pressy
+          onPress={() => router.back()}
+          haptic="select"
+          accessibilityRole={Roles.button}
+          accessibilityLabel={t ? 'Atrás' : 'Back'}
+          hitSlop={HitSlop.expand}
+          style={styles.backBtn}
+        >
+          <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
+        </Pressy>
+      </View>
+
+      <View style={styles.titleBlock}>
+        <Kicker tone="muted">{t ? 'SEGURIDAD' : 'SECURITY'}</Kicker>
+        <Heading size="md" style={{ marginTop: Spacing[2] }}>
+          {t ? 'Sesiones activas' : 'Active sessions'}
+        </Heading>
+        <Lead tone="secondary" style={{ marginTop: Spacing[3] }}>
+          {t
+            ? 'Dispositivos donde tu cuenta tiene sesión abierta.'
+            : 'Devices where your account is currently signed in.'}
+        </Lead>
       </View>
 
       {loading ? (
-        <ActivityIndicator color={Colors.accentPrimary} style={{ marginTop: Spacing[8] }} />
+        <View style={{ paddingHorizontal: EditorialSpacing.pageGutter }}>
+          <SkeletonList count={3} itemHeight={80} />
+        </View>
       ) : error && sessions.length === 0 ? (
         <ErrorState
           message={error}
           retryLabel={t ? 'Reintentar' : 'Retry'}
-          onRetry={() => { setLoading(true); load(); }}
+          onRetry={() => {
+            setLoading(true);
+            load();
+          }}
         />
       ) : (
         <FlatList
           data={sessions}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.list}
-          showsVerticalScrollIndicator={false}
-          renderItem={({ item }) => (
-            <View style={styles.sessionCard}>
-              <View style={styles.sessionIcon}>
-                <Text style={styles.sessionEmoji}>{isMobileOs(item.deviceOs) ? '📱' : '💻'}</Text>
-              </View>
-              <View style={styles.sessionInfo}>
-                <Text style={styles.sessionDevice}>
-                  {item.deviceName ?? item.deviceOs ?? (t ? 'Dispositivo desconocido' : 'Unknown device')}
-                </Text>
-                <Text style={styles.sessionMeta}>
-                  {[item.ipAddress, item.updatedAt ? new Date(item.updatedAt).toLocaleDateString(language) : null].filter(Boolean).join(' · ')}
-                </Text>
-                {item.isCurrent && <Text style={styles.currentTag}>{t ? 'Esta sesión' : 'This session'}</Text>}
-              </View>
-              {!item.isCurrent && (
-                <TouchableOpacity onPress={() => handleRevoke(item.id)} style={styles.revokeBtn}>
-                  <Text style={styles.revokeText}>{t ? 'Cerrar' : 'Revoke'}</Text>
-                </TouchableOpacity>
-              )}
-            </View>
+          keyExtractor={(s) => s.id}
+          contentContainerStyle={{
+            paddingHorizontal: EditorialSpacing.pageGutter,
+            paddingTop: Spacing[2],
+            paddingBottom: Spacing[12],
+            gap: Spacing[3],
+          }}
+          renderItem={({ item, index }) => (
+            <FadeIn delay={40 * index}>
+              <SessionCard
+                session={item}
+                language={language}
+                t={t}
+                onRevoke={() => setConfirmId(item.id)}
+              />
+            </FadeIn>
           )}
           ListEmptyComponent={
-            <EmptyState
-              icon="shield"
-              title={t ? 'Sin sesiones activas' : 'No active sessions'}
-            />
+            <View style={{ minHeight: 280 }}>
+              <EmptyState
+                icon="shield"
+                title={t ? 'Sin sesiones activas' : 'No active sessions'}
+              />
+            </View>
           }
         />
       )}
+
+      <ConfirmDialog
+        open={!!confirmId}
+        onClose={() => setConfirmId(null)}
+        onConfirm={confirmRevoke}
+        title={t ? 'Cerrar sesión remota' : 'Revoke session'}
+        description={
+          t
+            ? 'Esta sesión cerrará inmediatamente en su dispositivo.'
+            : 'This session will be signed out on its device immediately.'
+        }
+        confirmLabel={t ? 'Cerrar sesión' : 'Revoke'}
+        confirmVariant="danger"
+      />
     </SafeAreaView>
+  );
+}
+
+function SessionCard({
+  session,
+  language,
+  t,
+  onRevoke,
+}: {
+  session: SessionRow;
+  language: 'es' | 'en';
+  t: boolean;
+  onRevoke: () => void;
+}) {
+  const icon = isMobileOs(session.deviceOs) ? 'smartphone' : 'monitor';
+  return (
+    <View style={styles.card}>
+      <View style={styles.iconBox}>
+        <Feather name={icon} size={20} color={Colors.textSecondary} />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Subhead numberOfLines={1}>
+          {session.deviceName ?? session.deviceOs ?? (t ? 'Dispositivo desconocido' : 'Unknown device')}
+        </Subhead>
+        <Caption tone="muted" style={{ marginTop: 2 }}>
+          {[
+            session.ipAddress,
+            session.updatedAt ? new Date(session.updatedAt).toLocaleDateString(language) : null,
+          ]
+            .filter(Boolean)
+            .join(' · ')}
+        </Caption>
+        {session.isCurrent ? (
+          <Caption tone="champagne" style={{ marginTop: 4 }}>
+            {t ? 'ESTA SESIÓN' : 'THIS SESSION'}
+          </Caption>
+        ) : null}
+      </View>
+      {!session.isCurrent ? (
+        <Button
+          label={t ? 'Cerrar' : 'Revoke'}
+          onPress={onRevoke}
+          variant="ghost"
+          size="sm"
+          fullWidth={false}
+          haptic="warning"
+        />
+      ) : null}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: Spacing[5], paddingVertical: Spacing[4] },
-  backIcon: { fontSize: 22, color: Colors.textPrimary },
-  title: { fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.bold, color: Colors.textPrimary },
-  list: { paddingHorizontal: Spacing[5], gap: Spacing[3], paddingBottom: Spacing[8] },
-  sessionCard: { flexDirection: 'row', alignItems: 'center', gap: Spacing[3], backgroundColor: Colors.bgCard, borderRadius: Radius.xl, borderWidth: 1, borderColor: Colors.border, padding: Spacing[4] },
-  sessionIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: Colors.bgPrimary, alignItems: 'center', justifyContent: 'center' },
-  sessionEmoji: { fontSize: 20 },
-  sessionInfo: { flex: 1, gap: 2 },
-  sessionDevice: { fontSize: Typography.fontSize.sm, fontWeight: Typography.fontWeight.semiBold, color: Colors.textPrimary },
-  sessionMeta: { fontSize: Typography.fontSize.xs, color: Colors.textSecondary },
-  currentTag: { fontSize: Typography.fontSize.xs, color: Colors.accentPrimary, marginTop: 2 },
-  revokeBtn: { paddingHorizontal: Spacing[3], paddingVertical: Spacing[1] },
-  revokeText: { fontSize: Typography.fontSize.sm, color: Colors.accentDanger },
-  empty: { textAlign: 'center', color: Colors.textSecondary, marginTop: Spacing[8] },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[2],
+    paddingBottom: Spacing[3],
+  },
+  backBtn: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  titleBlock: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingBottom: Spacing[6],
+  },
+  card: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing[4],
+    padding: Spacing[4],
+    borderRadius: Radius.card,
+    backgroundColor: Colors.bgCard,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+    borderTopColor: Colors.highlightTop,
+  },
+  iconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: Radius.full,
+    backgroundColor: Colors.bgElevated,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+  },
 });

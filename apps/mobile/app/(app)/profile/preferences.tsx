@@ -1,20 +1,39 @@
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal } from 'react-native';
+// ─────────────────────────────────────────────
+//  Preferences — Editorial Premium
+//
+//  Magazine layout: Kicker + Heading header, then grouped editorial
+//  ListItem stacks split by kicker overlines: CUENTA · APP · SEGURIDAD ·
+//  SOPORTE. Language picker opens an editorial Sheet via ConfirmDialog-
+//  style Modal (existing <Modal>).
+// ─────────────────────────────────────────────
 import { useState } from 'react';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+
 import { useAppStore } from '@/stores/app.store';
-import { Colors, Radius } from '@/constants/tokens';
+import { Colors, EditorialSpacing, Spacing } from '@/constants/tokens';
+import { HitSlop, Roles } from '@/constants/a11y';
+import {
+  Body,
+  FadeIn,
+  Heading,
+  Kicker,
+  ListItem,
+  Modal as UIModal,
+  Pressy,
+} from '@/components/ui';
 
 type FeatherIcon = React.ComponentProps<typeof Feather>['name'];
 
-interface Row {
+interface MenuEntry {
   icon: FeatherIcon;
   label: { es: string; en: string };
-  sub?: { es: string; en: string };
+  subtitle?: { es: string; en: string };
   path?: string;
-  color: string;
-  right?: string;
+  meta?: string;
+  onPress?: () => void;
 }
 
 export default function Preferences() {
@@ -23,166 +42,245 @@ export default function Preferences() {
   const t = language === 'es';
   const [langOpen, setLangOpen] = useState(false);
 
-  const sections: { title: { es: string; en: string }; rows: Row[] }[] = [
+  const account: MenuEntry[] = [
     {
-      title: { es: 'CUENTA', en: 'ACCOUNT' },
-      rows: [
-        { icon: 'user', label: { es: 'Perfil', en: 'Profile' }, sub: { es: 'Nombre, bio, foto', en: 'Name, bio, photo' }, color: Colors.accentPrimary, path: '/(app)/profile/edit' },
-        { icon: 'lock', label: { es: 'Cambiar contraseña', en: 'Change password' }, sub: { es: 'Actualiza tus credenciales', en: 'Update your credentials' }, color: '#60A5FA', path: '/(app)/profile/change-password' },
-        { icon: 'monitor', label: { es: 'Sesiones activas', en: 'Active sessions' }, sub: { es: 'Dispositivos conectados', en: 'Connected devices' }, color: '#A855F7', path: '/(app)/profile/sessions' },
-      ],
+      icon: 'user',
+      label: { es: 'Perfil', en: 'Profile' },
+      subtitle: { es: 'Nombre, biografía, foto.', en: 'Name, bio, photo.' },
+      path: '/(app)/profile/edit',
     },
     {
-      title: { es: 'APP', en: 'APP' },
-      rows: [
-        {
-          icon: 'globe',
-          label: { es: 'Idioma', en: 'Language' },
-          right: t ? 'Español' : 'English',
-          color: Colors.accentSuccess,
-        },
-        { icon: 'bell', label: { es: 'Notificaciones', en: 'Notifications' }, sub: { es: 'Qué alertas recibir', en: 'Which alerts to receive' }, color: Colors.accentPrimary, path: '/(app)/profile/notification-settings' },
-      ],
+      icon: 'lock',
+      label: { es: 'Cambiar contraseña', en: 'Change password' },
+      subtitle: { es: 'Actualiza tus credenciales.', en: 'Update your credentials.' },
+      path: '/(app)/profile/change-password',
     },
     {
-      title: { es: 'SEGURIDAD Y DATOS', en: 'SECURITY & DATA' },
-      rows: [
-        { icon: 'shield', label: { es: 'Privacidad', en: 'Privacy' }, sub: { es: 'Bloqueos y visibilidad', en: 'Blocks and visibility' }, color: '#60A5FA', path: '/(app)/profile/privacy' },
-        { icon: 'download', label: { es: 'Mis datos (GDPR)', en: 'My data (GDPR)' }, sub: { es: 'Exportar o eliminar', en: 'Export or delete' }, color: Colors.accentDanger, path: '/(app)/profile/gdpr' },
-      ],
-    },
-    {
-      title: { es: 'SOPORTE', en: 'SUPPORT' },
-      rows: [
-        { icon: 'help-circle', label: { es: 'Centro de ayuda', en: 'Help center' }, color: '#60A5FA', path: '/(app)/support' },
-        { icon: 'info', label: { es: 'Acerca de OPALBAR', en: 'About OPALBAR' }, sub: { es: 'Versión y términos', en: 'Version and terms' }, color: Colors.textMuted, path: '/(app)/profile/about' },
-      ],
+      icon: 'monitor',
+      label: { es: 'Sesiones activas', en: 'Active sessions' },
+      subtitle: { es: 'Dispositivos conectados.', en: 'Connected devices.' },
+      path: '/(app)/profile/sessions',
     },
   ];
+
+  const app: MenuEntry[] = [
+    {
+      icon: 'globe',
+      label: { es: 'Idioma', en: 'Language' },
+      meta: t ? 'Español' : 'English',
+      onPress: () => setLangOpen(true),
+    },
+    {
+      icon: 'bell',
+      label: { es: 'Notificaciones', en: 'Notifications' },
+      subtitle: { es: 'Qué alertas quieres recibir.', en: 'Which alerts to receive.' },
+      path: '/(app)/profile/notification-settings',
+    },
+  ];
+
+  const security: MenuEntry[] = [
+    {
+      icon: 'shield',
+      label: { es: 'Privacidad', en: 'Privacy' },
+      subtitle: { es: 'Bloqueos y visibilidad.', en: 'Blocks and visibility.' },
+      path: '/(app)/profile/privacy',
+    },
+    {
+      icon: 'download',
+      label: { es: 'Mis datos (GDPR)', en: 'My data (GDPR)' },
+      subtitle: { es: 'Exportar o eliminar tu cuenta.', en: 'Export or delete your account.' },
+      path: '/(app)/profile/gdpr',
+    },
+  ];
+
+  const support: MenuEntry[] = [
+    {
+      icon: 'help-circle',
+      label: { es: 'Centro de ayuda', en: 'Help center' },
+      path: '/(app)/support',
+    },
+    {
+      icon: 'info',
+      label: { es: 'Acerca de OPALBAR', en: 'About OPALBAR' },
+      subtitle: { es: 'Versión y términos.', en: 'Version and terms.' },
+      path: '/(app)/profile/about',
+    },
+  ];
+
+  function go(entry: MenuEntry) {
+    if (entry.onPress) return entry.onPress();
+    if (entry.path) router.push(entry.path as never);
+  }
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} hitSlop={10}>
+        <Pressy
+          onPress={() => router.back()}
+          haptic="select"
+          accessibilityRole={Roles.button}
+          accessibilityLabel={t ? 'Atrás' : 'Back'}
+          hitSlop={HitSlop.expand}
+          style={styles.backBtn}
+        >
           <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
-        </TouchableOpacity>
-        <Text style={styles.title}>{t ? 'Preferencias' : 'Preferences'}</Text>
-        <View style={styles.backBtn} />
+        </Pressy>
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40, gap: 18 }}>
-        {sections.map((sec) => (
-          <View key={sec.title.es} style={{ gap: 8 }}>
-            <Text style={styles.sectionLbl}>{t ? sec.title.es : sec.title.en}</Text>
-            <View style={styles.group}>
-              {sec.rows.map((r, i) => {
-                const isLang = r.icon === 'globe';
-                return (
-                  <TouchableOpacity
-                    key={r.label.es}
-                    style={[styles.row, i > 0 && styles.rowBorder]}
-                    activeOpacity={0.85}
-                    onPress={() => {
-                      if (isLang) setLangOpen(true);
-                      else if (r.path) router.push(r.path as never);
-                    }}
-                    disabled={!isLang && !r.path}
-                  >
-                    <View style={[styles.iconBox, { backgroundColor: r.color + '20' }]}>
-                      <Feather name={r.icon} size={16} color={r.color} />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.rowLbl}>{t ? r.label.es : r.label.en}</Text>
-                      {r.sub ? <Text style={styles.rowSub}>{t ? r.sub.es : r.sub.en}</Text> : null}
-                    </View>
-                    {r.right ? (
-                      <Text style={styles.rowRight}>{r.right}</Text>
-                    ) : (
-                      <Feather name="chevron-right" size={16} color={Colors.textMuted} />
-                    )}
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          </View>
-        ))}
+      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        <FadeIn>
+          <Kicker tone="muted">{t ? 'AJUSTES' : 'SETTINGS'}</Kicker>
+          <Heading size="md" style={{ marginTop: Spacing[2] }}>
+            {t ? 'Preferencias' : 'Preferences'}
+          </Heading>
+        </FadeIn>
+
+        <Section
+          kicker={t ? 'CUENTA' : 'ACCOUNT'}
+          entries={account}
+          language={language}
+          onPress={go}
+          delay={80}
+        />
+        <Section
+          kicker={t ? 'APLICACIÓN' : 'APPLICATION'}
+          entries={app}
+          language={language}
+          onPress={go}
+          delay={140}
+        />
+        <Section
+          kicker={t ? 'SEGURIDAD Y DATOS' : 'SECURITY & DATA'}
+          entries={security}
+          language={language}
+          onPress={go}
+          delay={200}
+        />
+        <Section
+          kicker={t ? 'SOPORTE' : 'SUPPORT'}
+          entries={support}
+          language={language}
+          onPress={go}
+          delay={260}
+        />
       </ScrollView>
 
-      <Modal visible={langOpen} transparent animationType="fade" onRequestClose={() => setLangOpen(false)}>
-        <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={() => setLangOpen(false)}>
-          <TouchableOpacity activeOpacity={1} onPress={() => {}} style={styles.langCard}>
-            <Text style={styles.langTitle}>{t ? 'Idioma' : 'Language'}</Text>
-            {(['es', 'en'] as const).map((lng) => {
-              const active = language === lng;
-              return (
-                <TouchableOpacity
-                  key={lng}
-                  style={[styles.langOption, active && styles.langOptionActive]}
-                  onPress={() => { setLanguage(lng); setLangOpen(false); }}
-                  activeOpacity={0.85}
-                >
-                  <Text style={styles.langFlag}>{lng === 'es' ? '🇪🇸' : '🇬🇧'}</Text>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.langName}>{lng === 'es' ? 'Español' : 'English'}</Text>
-                    <Text style={styles.langSub}>{lng === 'es' ? 'Idioma predeterminado' : 'Secondary'}</Text>
-                  </View>
-                  {active && <Feather name="check" size={18} color={Colors.accentPrimary} />}
-                </TouchableOpacity>
-              );
-            })}
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
+      <UIModal
+        open={langOpen}
+        onClose={() => setLangOpen(false)}
+        title={t ? 'Idioma' : 'Language'}
+      >
+        <View style={{ gap: Spacing[2] }}>
+          {(['es', 'en'] as const).map((lng) => {
+            const active = language === lng;
+            return (
+              <Pressy
+                key={lng}
+                onPress={() => {
+                  setLanguage(lng);
+                  setLangOpen(false);
+                }}
+                haptic="select"
+                accessibilityRole={Roles.button}
+                accessibilityLabel={lng === 'es' ? 'Español' : 'English'}
+                accessibilityState={{ selected: active }}
+                style={[styles.langOption, active && styles.langOptionActive]}
+              >
+                <View style={{ flex: 1 }}>
+                  <Body weight="semiBold">{lng === 'es' ? 'Español' : 'English'}</Body>
+                  <Body size="sm" tone="muted">
+                    {lng === 'es' ? 'Idioma principal' : 'Secondary'}
+                  </Body>
+                </View>
+                {active ? (
+                  <Feather name="check" size={18} color={Colors.accentPrimary} />
+                ) : null}
+              </Pressy>
+            );
+          })}
+        </View>
+      </UIModal>
     </SafeAreaView>
+  );
+}
+
+function Section({
+  kicker,
+  entries,
+  language,
+  onPress,
+  delay,
+}: {
+  kicker: string;
+  entries: MenuEntry[];
+  language: 'es' | 'en';
+  onPress: (e: MenuEntry) => void;
+  delay?: number;
+}) {
+  return (
+    <FadeIn delay={delay} style={styles.section}>
+      <Kicker tone="muted" style={{ marginBottom: Spacing[3] }}>
+        {kicker}
+      </Kicker>
+      <View style={styles.listShell}>
+        {entries.map((entry, idx) => (
+          <View key={entry.label.es}>
+            <ListItem
+              title={entry.label[language]}
+              subtitle={entry.subtitle ? entry.subtitle[language] : undefined}
+              meta={entry.meta}
+              leftIcon={<Feather name={entry.icon} size={18} color={Colors.textSecondary} />}
+              onPress={() => onPress(entry)}
+              showChevron={!entry.meta}
+            />
+            {idx < entries.length - 1 ? <ListItem.Separator /> : null}
+          </View>
+        ))}
+      </View>
+    </FadeIn>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
   header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 20, paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[2],
+    paddingBottom: Spacing[4],
   },
   backBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: Colors.bgCard, borderWidth: 1, borderColor: Colors.border,
-    alignItems: 'center', justifyContent: 'center',
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  title: { color: Colors.textPrimary, fontSize: 17, fontWeight: '800' },
-
-  sectionLbl: { color: Colors.textMuted, fontSize: 11, fontWeight: '700', letterSpacing: 0.5 },
-  group: {
+  scroll: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingBottom: Spacing[12],
+  },
+  section: {
+    marginTop: Spacing[8],
+  },
+  listShell: {
     backgroundColor: Colors.bgCard,
-    borderRadius: Radius.button,
-    borderWidth: 1, borderColor: Colors.border,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+    borderTopColor: Colors.highlightTop,
     overflow: 'hidden',
   },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14 },
-  rowBorder: { borderTopWidth: 1, borderTopColor: Colors.border },
-  iconBox: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  rowLbl: { color: Colors.textPrimary, fontSize: 14, fontWeight: '700' },
-  rowSub: { color: Colors.textMuted, fontSize: 12, marginTop: 2 },
-  rowRight: { color: Colors.accentPrimary, fontSize: 13, fontWeight: '700' },
-
-  backdrop: {
-    flex: 1, backgroundColor: 'rgba(0,0,0,0.75)',
-    alignItems: 'center', justifyContent: 'center', padding: 24,
-  },
-  langCard: {
-    width: '100%', gap: 10,
-    padding: 20, borderRadius: 20,
-    backgroundColor: Colors.bgCard,
-    borderWidth: 1, borderColor: Colors.border,
-  },
-  langTitle: { color: Colors.textPrimary, fontSize: 17, fontWeight: '800', marginBottom: 4 },
   langOption: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    padding: 14, borderRadius: 12,
-    borderWidth: 1, borderColor: Colors.border,
-    backgroundColor: Colors.bgPrimary,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: Spacing[4],
+    paddingVertical: Spacing[4],
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
   },
-  langOptionActive: { borderColor: Colors.accentPrimary, backgroundColor: 'rgba(244,163,64,0.1)' },
-  langFlag: { fontSize: 22 },
-  langName: { color: Colors.textPrimary, fontSize: 15, fontWeight: '700' },
-  langSub: { color: Colors.textMuted, fontSize: 12, marginTop: 2 },
+  langOptionActive: {
+    borderColor: Colors.accentPrimary,
+  },
 });

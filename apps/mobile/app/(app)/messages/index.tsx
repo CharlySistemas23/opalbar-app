@@ -1,15 +1,46 @@
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Image, TextInput } from 'react-native';
-import { useEffect, useState, useCallback, useMemo } from 'react';
+// ─────────────────────────────────────────────
+//  Messages · Lista de conversaciones — Editorial Premium
+//
+//  Header: Kicker "MENSAJES" + Display "Conversaciones"
+//  Tabs underline: Activos | Solicitudes (Solicitudes navega a /requests)
+//  Lista: ListItem-style con avatar + nombre + preview + timestamp + unread dot.
+//
+//  Loading → SkeletonList. Empty → <EmptyState>. Error → <ErrorState>.
+// ─────────────────────────────────────────────
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  FlatList,
+  Image,
+  RefreshControl,
+  StyleSheet,
+  TextInput,
+  View,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+
+import {
+  Badge,
+  Body,
+  Caption,
+  Display,
+  FadeIn,
+  Hairline,
+  Kicker,
+  Pressy,
+  SkeletonList,
+  Subhead,
+  Tabs,
+} from '@/components/ui';
+import { EmptyState } from '@/components/EmptyState';
+import { ErrorState } from '@/components/ErrorState';
+import { Colors, EditorialSpacing, Radius, Spacing, Typography } from '@/constants/tokens';
+import { HitSlop, Roles } from '@/constants/a11y';
 import { messagesApi } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { useAppStore } from '@/stores/app.store';
 import { useAuthStore } from '@/stores/auth.store';
-import { Colors, Radius, Shadows, Typography } from '@/constants/tokens';
-import { EmptyState } from '@/components/EmptyState';
-import { ErrorState } from '@/components/ErrorState';
 
 const AVATAR_COLORS = ['#F4A340', '#60A5FA', '#A855F7', '#6FB892', '#E06868', '#EC4899'];
 function colorFor(id: string) {
@@ -27,6 +58,8 @@ function relTime(d?: string, t?: boolean) {
   return dt.toLocaleDateString(t ? 'es' : 'en', { day: 'numeric', month: 'short' });
 }
 
+type TabKey = 'active' | 'requests';
+
 export default function MessagesList() {
   const router = useRouter();
   const { language } = useAppStore();
@@ -39,6 +72,7 @@ export default function MessagesList() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  const [tab, setTab] = useState<TabKey>('active');
 
   const load = useCallback(async () => {
     setError(null);
@@ -59,7 +93,18 @@ export default function MessagesList() {
 
   useEffect(() => { load(); }, [load]);
 
-  // Client-side filter — premium UIs always give a search bar on lists.
+  // Switching to Solicitudes pushes the dedicated screen — there's no
+  // shared list shape that fits both, and the requests screen has its own
+  // accept/decline UX. Snap back to 'active' so returning shows that tab.
+  useEffect(() => {
+    if (tab === 'requests') {
+      router.push('/(app)/messages/requests' as never);
+      const timer = setTimeout(() => setTab('active'), 200);
+      return () => clearTimeout(timer);
+    }
+    return undefined;
+  }, [tab, router]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return threads;
@@ -71,33 +116,54 @@ export default function MessagesList() {
     });
   }, [threads, query]);
 
-  const totalUnread = useMemo(
-    () => threads.reduce((s, thr) => s + (thr.unreadCount || 0), 0),
-    [threads],
-  );
-
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn} hitSlop={10}>
+      {/* Header ───────────────────────────────── */}
+      <View style={styles.headerRow}>
+        <Pressy
+          onPress={() => router.back()}
+          accessibilityLabel={t ? 'Volver' : 'Back'}
+          accessibilityRole={Roles.button}
+          hitSlop={HitSlop.expand}
+          style={styles.backBtn}
+        >
           <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
-        </TouchableOpacity>
-        <View style={styles.titleBox}>
-          <Text style={styles.title}>{t ? 'Mensajes' : 'Messages'}</Text>
-          {totalUnread > 0 && (
-            <View style={styles.titleBadge}>
-              <Text style={styles.titleBadgeText}>{totalUnread}</Text>
-            </View>
-          )}
-        </View>
-        <TouchableOpacity style={styles.iconBtn} hitSlop={10} onPress={() => router.push('/(app)/search' as never)}>
+        </Pressy>
+        <Pressy
+          onPress={() => router.push('/(app)/search' as never)}
+          accessibilityLabel={t ? 'Nueva conversación' : 'New conversation'}
+          accessibilityRole={Roles.button}
+          hitSlop={HitSlop.expand}
+          style={styles.newBtn}
+        >
           <Feather name="edit" size={18} color={Colors.textPrimary} />
-        </TouchableOpacity>
+        </Pressy>
       </View>
 
-      {/* Search */}
-      {threads.length > 0 && (
+      <View style={styles.hero}>
+        <FadeIn>
+          <Kicker tone="champagne">{t ? 'MENSAJES' : 'MESSAGES'}</Kicker>
+        </FadeIn>
+        <FadeIn delay={80} style={{ marginTop: Spacing[3] }}>
+          <Display size="md">{t ? 'Conversaciones.' : 'Conversations.'}</Display>
+        </FadeIn>
+      </View>
+
+      <FadeIn delay={160} style={styles.tabsWrap}>
+        <Tabs<TabKey>
+          value={tab}
+          onChange={setTab}
+          options={[
+            { value: 'active', label: t ? 'Activos' : 'Active' },
+            {
+              value: 'requests',
+              label: `${t ? 'Solicitudes' : 'Requests'}${requestsCount > 0 ? ` (${requestsCount})` : ''}`,
+            },
+          ]}
+        />
+      </FadeIn>
+
+      {threads.length > 0 && !loading ? (
         <View style={styles.searchWrap}>
           <Feather name="search" size={15} color={Colors.textMuted} />
           <TextInput
@@ -106,17 +172,25 @@ export default function MessagesList() {
             placeholder={t ? 'Buscar' : 'Search'}
             placeholderTextColor={Colors.textMuted}
             style={styles.searchInput}
+            accessibilityLabel={t ? 'Buscar conversaciones' : 'Search conversations'}
           />
           {query.length > 0 && (
-            <TouchableOpacity onPress={() => setQuery('')} hitSlop={8}>
+            <Pressy
+              onPress={() => setQuery('')}
+              accessibilityLabel={t ? 'Limpiar búsqueda' : 'Clear search'}
+              hitSlop={HitSlop.expand}
+              haptic="select"
+            >
               <Feather name="x-circle" size={15} color={Colors.textMuted} />
-            </TouchableOpacity>
+            </Pressy>
           )}
         </View>
-      )}
+      ) : null}
 
       {loading ? (
-        <View style={styles.center}><ActivityIndicator color={Colors.accentPrimary} /></View>
+        <View style={styles.listPad}>
+          <SkeletonList count={6} itemHeight={72} />
+        </View>
       ) : error && threads.length === 0 ? (
         <ErrorState
           message={error}
@@ -127,122 +201,47 @@ export default function MessagesList() {
         <FlatList
           data={filtered}
           keyExtractor={(x) => x.id}
-          refreshing={refreshing}
-          onRefresh={() => { setRefreshing(true); load(); }}
-          contentContainerStyle={{ paddingBottom: 24, paddingTop: 4 }}
-          ItemSeparatorComponent={() => <View style={styles.sep} />}
-          ListHeaderComponent={
-            requestsCount > 0 && query.length === 0 ? (
-              <TouchableOpacity
-                style={styles.requestsRow}
-                onPress={() => router.push('/(app)/messages/requests' as never)}
-                activeOpacity={0.85}
-              >
-                <View style={styles.requestsIcon}>
-                  <Feather name="user-plus" size={18} color={Colors.accentPrimary} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.requestsTitle}>{t ? 'Solicitudes' : 'Requests'}</Text>
-                  <Text style={styles.requestsBody}>
-                    {requestsCount}{' '}
-                    {t
-                      ? requestsCount === 1 ? 'persona quiere chatear contigo' : 'personas quieren chatear contigo'
-                      : requestsCount === 1 ? 'person wants to chat' : 'people want to chat'}
-                  </Text>
-                </View>
-                <View style={styles.requestsBadge}>
-                  <Text style={styles.requestsBadgeText}>{requestsCount > 99 ? '99+' : requestsCount}</Text>
-                </View>
-                <Feather name="chevron-right" size={18} color={Colors.textMuted} />
-              </TouchableOpacity>
-            ) : null
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => { setRefreshing(true); load(); }}
+              tintColor={Colors.textMuted}
+            />
           }
-          renderItem={({ item }) => {
-            const other = item.otherUser;
-            const first = other?.profile?.firstName ?? '';
-            const last = other?.profile?.lastName ?? '';
-            const name = `${first} ${last}`.trim() || 'Usuario';
-            const initials = ((first[0] || '') + (last[0] || '')).toUpperCase() || 'U';
-            const lastMsg = item.lastMessage;
-            const isMine = !!lastMsg && lastMsg.senderId === me?.id;
-            const hasUnread = item.unreadCount > 0;
-            const previewBody = lastMsg?.stickerKey
-              ? `${lastMsg.stickerKey}  ${t ? 'Sticker' : 'Sticker'}`
-              : lastMsg?.imageUrl
-                ? (t ? '📷 Foto' : '📷 Photo')
-                : (lastMsg?.content ?? '');
-            const preview = isMine && previewBody
-              ? `${t ? 'Tú' : 'You'}: ${previewBody}`
-              : previewBody;
-            return (
-              <TouchableOpacity
-                style={styles.row}
+          contentContainerStyle={styles.listContent}
+          ItemSeparatorComponent={() => (
+            <View style={styles.separator} />
+          )}
+          renderItem={({ item, index }) => (
+            <FadeIn delay={Math.min(index, 6) * 60}>
+              <ThreadRow
+                thread={item}
+                meId={me?.id}
+                t={t}
                 onPress={() => router.push(`/(app)/messages/${item.id}` as never)}
-                activeOpacity={0.75}
-              >
-                <View style={styles.avatarWrap}>
-                  {other?.profile?.avatarUrl
-                    ? <Image source={{ uri: other.profile.avatarUrl }} style={styles.avatar} />
-                    : <View style={[styles.avatar, { backgroundColor: colorFor(other?.id || item.id) }]}>
-                        <Text style={styles.avatarText}>{initials}</Text>
-                      </View>}
-                  {hasUnread && <View style={styles.unreadRing} pointerEvents="none" />}
-                </View>
-                <View style={{ flex: 1 }}>
-                  <View style={styles.rowTop}>
-                    <Text
-                      style={[styles.name, hasUnread && styles.nameUnread]}
-                      numberOfLines={1}
-                    >
-                      {name}
-                    </Text>
-                    <Text style={[styles.time, hasUnread && { color: Colors.accentPrimary, fontWeight: '700' }]}>
-                      {relTime(item.lastMessageAt, t)}
-                    </Text>
-                  </View>
-                  <View style={styles.rowBottom}>
-                    {isMine && lastMsg && (
-                      <Feather
-                        name={lastMsg.isRead ? 'check-circle' : 'check'}
-                        size={12}
-                        color={lastMsg.isRead ? Colors.accentPrimary : Colors.textMuted}
-                        style={{ marginRight: 5 }}
-                      />
-                    )}
-                    <Text
-                      style={[
-                        styles.preview,
-                        hasUnread && styles.previewUnread,
-                      ]}
-                      numberOfLines={1}
-                    >
-                      {preview || (t ? 'Empieza a conversar' : 'Start the conversation')}
-                    </Text>
-                    {hasUnread && (
-                      <View style={styles.badge}>
-                        <Text style={styles.badgeText}>
-                          {item.unreadCount > 99 ? '99+' : item.unreadCount}
-                        </Text>
-                      </View>
-                    )}
-                  </View>
-                </View>
-              </TouchableOpacity>
-            );
-          }}
+              />
+            </FadeIn>
+          )}
           ListEmptyComponent={
             query.length > 0 ? (
               <View style={styles.emptySearch}>
                 <Feather name="search" size={20} color={Colors.textMuted} />
-                <Text style={styles.emptySearchText}>
+                <Body size="sm" tone="secondary" style={{ marginTop: Spacing[2] }}>
                   {t ? 'Sin resultados para ' : 'No results for '}
-                  <Text style={{ color: Colors.textPrimary, fontWeight: '700' }}>"{query}"</Text>
-                </Text>
+                  <Body size="sm" tone="primary" weight="bold">
+                    {'"' + query + '"'}
+                  </Body>
+                </Body>
               </View>
             ) : (
               <EmptyState
                 icon="message-circle"
                 title={t ? 'Aún no hay mensajes' : 'No messages yet'}
+                message={
+                  t
+                    ? 'Cuando inicies una conversación aparecerá aquí.'
+                    : 'When you start a conversation it will show up here.'
+                }
                 actionLabel={t ? 'Buscar personas' : 'Find people'}
                 onAction={() => router.push('/(app)/search' as never)}
               />
@@ -254,65 +253,145 @@ export default function MessagesList() {
   );
 }
 
+function ThreadRow({
+  thread,
+  meId,
+  t,
+  onPress,
+}: {
+  thread: any;
+  meId?: string;
+  t: boolean;
+  onPress: () => void;
+}) {
+  const other = thread.otherUser;
+  const first = other?.profile?.firstName ?? '';
+  const last = other?.profile?.lastName ?? '';
+  const name = `${first} ${last}`.trim() || (t ? 'Usuario' : 'User');
+  const initials = ((first[0] || '') + (last[0] || '')).toUpperCase() || 'U';
+  const lastMsg = thread.lastMessage;
+  const isMine = !!lastMsg && lastMsg.senderId === meId;
+  const hasUnread = thread.unreadCount > 0;
+  const previewBody = lastMsg?.stickerKey
+    ? `${lastMsg.stickerKey}  ${t ? 'Sticker' : 'Sticker'}`
+    : lastMsg?.imageUrl
+      ? (t ? 'Foto' : 'Photo')
+      : (lastMsg?.content ?? '');
+  const preview = isMine && previewBody
+    ? `${t ? 'Tú' : 'You'}: ${previewBody}`
+    : previewBody;
+
+  return (
+    <Pressy
+      onPress={onPress}
+      accessibilityRole={Roles.button}
+      accessibilityLabel={`${name}. ${preview || (t ? 'Sin mensajes' : 'No messages')}`}
+      style={styles.row}
+    >
+      <View style={styles.avatarWrap}>
+        {other?.profile?.avatarUrl ? (
+          <Image source={{ uri: other.profile.avatarUrl }} style={styles.avatar} />
+        ) : (
+          <View style={[styles.avatar, { backgroundColor: colorFor(other?.id || thread.id) }]}>
+            <Body size="md" tone="inverse" weight="bold">{initials}</Body>
+          </View>
+        )}
+        {hasUnread && <View style={styles.unreadDot} />}
+      </View>
+      <View style={{ flex: 1 }}>
+        <View style={styles.rowTop}>
+          <Subhead numberOfLines={1} style={{ flex: 1 }}>
+            {name}
+          </Subhead>
+          <Caption
+            size="sm"
+            tone={hasUnread ? 'accent' : 'muted'}
+            style={{ marginLeft: Spacing[2] }}
+          >
+            {relTime(thread.lastMessageAt, t)}
+          </Caption>
+        </View>
+        <View style={styles.rowBottom}>
+          {isMine && lastMsg && (
+            <Feather
+              name={lastMsg.isRead ? 'check-circle' : 'check'}
+              size={11}
+              color={lastMsg.isRead ? Colors.accentPrimary : Colors.textMuted}
+              style={{ marginRight: 5 }}
+            />
+          )}
+          <Body
+            size="sm"
+            tone={hasUnread ? 'primary' : 'secondary'}
+            numberOfLines={1}
+            style={{ flex: 1 }}
+            weight={hasUnread ? 'semiBold' : 'regular'}
+          >
+            {preview || (t ? 'Empieza a conversar' : 'Start the conversation')}
+          </Body>
+          {hasUnread && (
+            <View style={{ marginLeft: Spacing[2] }}>
+              <Badge
+                label={thread.unreadCount > 99 ? '99+' : String(thread.unreadCount)}
+                variant="accent"
+                size="sm"
+              />
+            </View>
+          )}
+        </View>
+      </View>
+    </Pressy>
+  );
+}
+
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
-  header: {
+  headerRow: {
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingTop: 4,
-    paddingBottom: 10,
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[2],
   },
-  iconBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    alignItems: 'center', justifyContent: 'center',
-    backgroundColor: Colors.bgCard,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: Colors.borderStrong,
-  },
-  titleBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  title: {
-    color: Colors.textPrimary,
-    fontSize: Typography.fontSize['2xl'],
-    fontFamily: Typography.fontFamily.serifSemiBold,
-    letterSpacing: Typography.letterSpacing.tighter,
-  },
-  titleBadge: {
-    minWidth: 22,
-    height: 22,
-    borderRadius: 11,
-    paddingHorizontal: 7,
-    backgroundColor: Colors.accentPrimary,
+  backBtn: {
+    width: 44,
+    height: 44,
     alignItems: 'center',
     justifyContent: 'center',
+    marginLeft: -Spacing[2],
   },
-  titleBadgeText: {
-    color: Colors.textInverse,
-    fontSize: Typography.fontSize.xs,
-    fontFamily: Typography.fontFamily.sansBold,
+  newBtn: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: -Spacing[2],
   },
 
-  // Search bar
+  hero: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[4],
+    paddingBottom: Spacing[5],
+  },
+
+  tabsWrap: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+  },
+
   searchWrap: {
-    marginHorizontal: 16,
-    marginTop: 6,
-    marginBottom: 12,
-    paddingHorizontal: 14,
-    height: 42,
-    borderRadius: Radius.full,
+    marginHorizontal: EditorialSpacing.pageGutter,
+    marginTop: Spacing[4],
+    marginBottom: Spacing[2],
+    paddingHorizontal: Spacing[4],
+    height: 44,
+    borderRadius: Radius.md,
     backgroundColor: Colors.bgCard,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: Colors.borderStrong,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: Spacing[2],
   },
   searchInput: {
     flex: 1,
@@ -322,139 +401,67 @@ const styles = StyleSheet.create({
     padding: 0,
   },
 
-  // Rows
-  sep: {
+  listPad: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[4],
+  },
+  listContent: {
+    paddingTop: Spacing[3],
+    paddingBottom: Spacing[10],
+  },
+
+  separator: {
     height: StyleSheet.hairlineWidth,
     backgroundColor: Colors.borderSubtle,
-    marginLeft: 84,
+    marginLeft: EditorialSpacing.pageGutter + 54 + Spacing[3],
   },
+
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    gap: Spacing[3],
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingVertical: Spacing[3],
   },
   avatarWrap: {
     position: 'relative',
-    padding: 2,
   },
   avatar: {
-    width: 54, height: 54, borderRadius: 27,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  avatarText: {
-    color: Colors.textInverse,
-    fontSize: 18,
-    fontFamily: Typography.fontFamily.sansBold,
-  },
-  unreadRing: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    borderRadius: 29,
-    borderWidth: 2,
-    borderColor: Colors.accentPrimary,
-  },
-  rowTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  rowBottom: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
-  name: {
-    color: Colors.textPrimary,
-    fontSize: Typography.fontSize.md,
-    fontFamily: Typography.fontFamily.sansSemiBold,
-    flex: 1,
-    letterSpacing: Typography.letterSpacing.tight,
-  },
-  nameUnread: { fontFamily: Typography.fontFamily.sansBold },
-  time: {
-    color: Colors.textMuted,
-    fontSize: Typography.fontSize.xs,
-    fontFamily: Typography.fontFamily.sansMedium,
-    marginLeft: 8,
-  },
-  preview: {
-    flex: 1,
-    color: Colors.textSecondary,
-    fontSize: Typography.fontSize.sm,
-    fontFamily: Typography.fontFamily.sans,
-    lineHeight: Typography.fontSize.sm * Typography.lineHeight.snug,
-  },
-  previewUnread: {
-    color: Colors.textPrimary,
-    fontFamily: Typography.fontFamily.sansSemiBold,
-  },
-  badge: {
-    minWidth: 20,
-    height: 20,
-    borderRadius: 10,
-    paddingHorizontal: 6,
-    marginLeft: 8,
-    backgroundColor: Colors.accentPrimary,
+    width: 54,
+    height: 54,
+    borderRadius: 27,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: Colors.bgElevated,
   },
-  badgeText: {
-    color: Colors.textInverse,
-    fontSize: Typography.fontSize.xs,
-    fontFamily: Typography.fontFamily.sansBold,
+  unreadDot: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: Colors.accentPrimary,
+    borderWidth: 2,
+    borderColor: Colors.bgPrimary,
+  },
+  rowTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  rowBottom: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
   },
 
   emptySearch: {
     alignItems: 'center',
-    paddingTop: 60,
-    gap: 10,
-  },
-  emptySearchText: {
-    color: Colors.textSecondary,
-    fontSize: Typography.fontSize.sm,
-    fontFamily: Typography.fontFamily.sans,
-  },
-
-  // Requests entry row
-  requestsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    marginHorizontal: 16,
-    marginBottom: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-    backgroundColor: 'rgba(244, 163, 64, 0.07)',
-    borderRadius: Radius.lg,
-    borderWidth: 1,
-    borderColor: 'rgba(244, 163, 64, 0.18)',
-    ...Shadows.sm,
-  },
-  requestsIcon: {
-    width: 44, height: 44, borderRadius: 22,
-    backgroundColor: 'rgba(244, 163, 64, 0.14)',
-    borderWidth: 1,
-    borderColor: 'rgba(244, 163, 64, 0.28)',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  requestsTitle: {
-    color: Colors.textPrimary,
-    fontSize: Typography.fontSize.md,
-    fontFamily: Typography.fontFamily.serifSemiBold,
-    letterSpacing: Typography.letterSpacing.tight,
-  },
-  requestsBody: {
-    color: Colors.textSecondary,
-    fontSize: Typography.fontSize.sm,
-    fontFamily: Typography.fontFamily.sans,
-    marginTop: 2,
-  },
-  requestsBadge: {
-    minWidth: 22, height: 22, borderRadius: 11,
-    paddingHorizontal: 7,
-    backgroundColor: Colors.accentPrimary,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  requestsBadgeText: {
-    color: Colors.textInverse,
-    fontSize: Typography.fontSize.xs,
-    fontFamily: Typography.fontFamily.sansBold,
+    paddingTop: Spacing[10],
+    gap: Spacing[2],
   },
 });
+
+// Hairline kept for future use (separator pattern).
+void Hairline;

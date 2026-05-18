@@ -1,86 +1,52 @@
 // ─────────────────────────────────────────────
-//  FadeIn — wraps anything with a fade+slide-up mount animation
-//   · Great for list items (stagger via `delay`)
-//   · Great for screen content blocks
-//   · Uses native driver for smoothness
+//  FadeIn — Editorial Premium content enter
+//
+//  Wraps anything with the default content-enter motion:
+//  opacity 0 → 1 + translateY (distance) → 0, eased with outQuint.
+//
+//  Editorial: no scale, no rebound, no X translate. Movement supports
+//  content, never decorates it. Use `delay` for stagger inside lists
+//  (or use useStaggerItem(index) directly for that case).
+//
+//  Honors OS Reduce Motion (collapses to a 1ms opacity fade).
 // ─────────────────────────────────────────────
-import React, { useEffect, useRef } from 'react';
-import { Animated, Easing, ViewStyle, StyleProp } from 'react-native';
+import React from 'react';
+import Animated from 'react-native-reanimated';
+import { StyleProp, ViewStyle } from 'react-native';
+
+import { useFadeRise } from '@/animations';
 
 interface FadeInProps {
   children: React.ReactNode;
-  /** Delay before animation starts (ms). Stagger lists with index * 50. */
+  /** Delay before animation starts (ms). Stagger lists with index * 70. */
   delay?: number;
-  /** Total duration (ms). Default 360. */
+  /** Total duration (ms). Default uses Motion.fadeRise.duration (380). */
   duration?: number;
-  /** Starting Y offset (px). Default 16. */
-  from?: number;
-  /** Starting X offset (px). 0 means pure fade+vertical. */
-  fromX?: number;
-  /** Apply a scale-in instead of slide (1 = none). */
-  initialScale?: number;
+  /** Starting Y offset (px). Default 8 (Motion.fadeRise.distance). */
+  distance?: number;
+  /** When false, renders fully visible without animating. */
+  enabled?: boolean;
   style?: StyleProp<ViewStyle>;
+  /** @deprecated Use `distance` instead. Kept for backward compatibility. */
+  from?: number;
+  /** @deprecated Editorial Premium never uses horizontal slides. Ignored. */
+  fromX?: number;
+  /** @deprecated Use the new motion system; this prop is ignored. */
+  initialScale?: number;
 }
 
 export function FadeIn({
   children,
   delay = 0,
-  duration = 360,
-  from = 16,
-  fromX = 0,
-  initialScale = 1,
+  duration,
+  distance,
+  from,
+  enabled = true,
   style,
 }: FadeInProps) {
-  const opacity = useRef(new Animated.Value(0)).current;
-  const translateY = useRef(new Animated.Value(from)).current;
-  const translateX = useRef(new Animated.Value(fromX)).current;
-  const scale = useRef(new Animated.Value(initialScale)).current;
-
-  useEffect(() => {
-    Animated.parallel([
-      Animated.timing(opacity, {
-        toValue: 1,
-        duration,
-        delay,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }),
-      Animated.timing(translateY, {
-        toValue: 0,
-        duration,
-        delay,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }),
-      Animated.timing(translateX, {
-        toValue: 0,
-        duration,
-        delay,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }),
-      Animated.spring(scale, {
-        toValue: 1,
-        delay,
-        tension: 80,
-        friction: 9,
-        useNativeDriver: true,
-      }),
-    ]).start();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  return (
-    <Animated.View
-      style={[
-        style,
-        {
-          opacity,
-          transform: [{ translateY }, { translateX }, { scale }],
-        },
-      ]}
-    >
-      {children}
-    </Animated.View>
-  );
+  // Backward-compat: `from` was the old name for `distance`. Prefer the new
+  // explicit prop; fall back to the legacy one if only that is provided.
+  const resolvedDistance = distance ?? from;
+  const animatedStyle = useFadeRise({ delay, duration, distance: resolvedDistance, enabled });
+  return <Animated.View style={[style, animatedStyle]}>{children}</Animated.View>;
 }

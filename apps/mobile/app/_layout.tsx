@@ -127,9 +127,9 @@ function SessionGuard() {
       // be authenticated (step1-profile calls updateProfile, etc.). They must
       // NOT be kicked back to home by the "isAuthenticated && inAuth" rule.
       // Segment 1 is the folder name ('register' or 'onboarding').
+      const seg1 = (segments as unknown as string[])[1];
       const isOnboardingFlow =
-        inAuth &&
-        (segments[1] === 'register' || segments[1] === 'onboarding');
+        inAuth && (seg1 === 'register' || seg1 === 'onboarding');
 
       // While index.tsx is doing its own redirect, stay out of the way
       if (inIndex) return;

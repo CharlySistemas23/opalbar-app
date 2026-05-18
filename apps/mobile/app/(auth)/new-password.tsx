@@ -1,12 +1,40 @@
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, ActivityIndicator, KeyboardAvoidingView, Platform, Alert } from 'react-native';
+// ─────────────────────────────────────────────
+//  New Password — Editorial Premium
+//
+//  Reset flow final step. Kicker + Display title, two password inputs,
+//  inline rule line. Single eye toggle covers both fields. Success
+//  emits a toast and redirects to login.
+// ─────────────────────────────────────────────
 import { useState } from 'react';
+import {
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  View,
+} from 'react-native';
+
+import { toast } from '@/components/Toast';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+
 import { authApi } from '@/api/client';
 import { useAppStore } from '@/stores/app.store';
 import { apiError } from '@/api/errors';
-import { Colors, Radius } from '@/constants/tokens';
+import { Colors, EditorialSpacing, Spacing } from '@/constants/tokens';
+import { HitSlop } from '@/constants/a11y';
+import {
+  Body,
+  Button,
+  Caption,
+  Display,
+  FadeIn,
+  Input,
+  Kicker,
+  Lead,
+} from '@/components/ui';
 
 export default function NewPassword() {
   const router = useRouter();
@@ -20,7 +48,12 @@ export default function NewPassword() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const passOk = password.length >= 8 && /[A-Z]/.test(password) && /[0-9]/.test(password) && /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password);
+  const passOk =
+    password.length >= 8 &&
+    /[A-Z]/.test(password) &&
+    /[0-9]/.test(password) &&
+    /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password);
+  const matchOk = confirm.length > 0 && confirm === password;
 
   async function handleReset() {
     setError(null);
@@ -39,11 +72,11 @@ export default function NewPassword() {
         otpCode: code,
         newPassword: password,
       });
-      Alert.alert(
-        t ? '¡Listo!' : 'Done!',
+      toast(
         t ? 'Contraseña actualizada. Inicia sesión.' : 'Password updated. Please sign in.',
-        [{ text: 'OK', onPress: () => router.replace('/(auth)/login' as never) }],
+        'success',
       );
+      router.replace('/(auth)/login' as never);
     } catch (err: any) {
       setError(apiError(err, t ? 'No se pudo actualizar.' : 'Could not update.'));
     } finally {
@@ -53,78 +86,138 @@ export default function NewPassword() {
 
   return (
     <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} hitSlop={10}>
-            <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.content}>
-          <View style={styles.iconCircle}>
-            <Feather name="shield" size={28} color={Colors.accentPrimary} />
-          </View>
-          <Text style={styles.title}>
-            {t ? 'Nueva contraseña' : 'New password'}
-          </Text>
-          <Text style={styles.subtitle}>
-            {t ? 'Elige una contraseña segura para tu cuenta.' : 'Choose a secure password for your account.'}
-          </Text>
-
-          <View style={[styles.inputBox, password ? (passOk ? { borderColor: Colors.accentSuccess } : { borderColor: Colors.accentDanger }) : null]}>
-            <Feather name="lock" size={18} color={Colors.textMuted} />
-            <TextInput
-              style={styles.input}
-              value={password}
-              onChangeText={setPassword}
-              placeholder={t ? 'Nueva contraseña' : 'New password'}
-              placeholderTextColor={Colors.textMuted}
-              secureTextEntry={!showPass}
-              autoCapitalize="none"
-              autoFocus
-            />
-            <TouchableOpacity onPress={() => setShowPass((v) => !v)} hitSlop={8}>
-              <Feather name={showPass ? 'eye-off' : 'eye'} size={18} color={Colors.textMuted} />
-            </TouchableOpacity>
-          </View>
-
-          <View style={[styles.inputBox, confirm && (confirm === password ? { borderColor: Colors.accentSuccess } : { borderColor: Colors.accentDanger })]}>
-            <Feather name="check" size={18} color={Colors.textMuted} />
-            <TextInput
-              style={styles.input}
-              value={confirm}
-              onChangeText={setConfirm}
-              placeholder={t ? 'Confirmar contraseña' : 'Confirm password'}
-              placeholderTextColor={Colors.textMuted}
-              secureTextEntry={!showPass}
-              autoCapitalize="none"
-            />
-          </View>
-
-          <Text style={styles.hint}>
-            {t
-              ? '8+ caracteres, mayúscula, número, símbolo.'
-              : '8+ chars, 1 uppercase, 1 number, 1 symbol.'}
-          </Text>
-
-          {error ? <Text style={styles.error}>{error}</Text> : null}
-
-          <TouchableOpacity
-            style={[styles.primaryBtn, loading && { opacity: 0.6 }]}
-            onPress={handleReset}
-            disabled={loading}
-            activeOpacity={0.85}
+          <Pressable
+            onPress={() => router.back()}
+            hitSlop={HitSlop.expand}
+            accessibilityRole="button"
+            accessibilityLabel={t ? 'Volver' : 'Back'}
+            style={styles.backBtn}
           >
-            {loading
-              ? <ActivityIndicator color={Colors.textInverse} />
-              : <>
-                  <Feather name="check" size={18} color={Colors.textInverse} />
-                  <Text style={styles.primaryBtnLabel}>
-                    {t ? 'Actualizar contraseña' : 'Update password'}
-                  </Text>
-                </>}
-          </TouchableOpacity>
+            <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
+          </Pressable>
         </View>
+
+        <ScrollView
+          contentContainerStyle={styles.scroll}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <FadeIn>
+            <Kicker tone="champagne">{t ? 'NUEVA CLAVE' : 'NEW SECRET'}</Kicker>
+          </FadeIn>
+          <FadeIn delay={80} style={{ marginTop: Spacing[3] }}>
+            <Display size="md">
+              {t ? 'Elige una\ncontraseña.' : 'Choose a\npassword.'}
+            </Display>
+          </FadeIn>
+          <FadeIn delay={180} style={{ marginTop: Spacing[4], maxWidth: 340 }}>
+            <Lead tone="secondary">
+              {t
+                ? 'Que sea memorable para ti y un misterio para los demás.'
+                : 'Memorable to you, a mystery to everyone else.'}
+            </Lead>
+          </FadeIn>
+
+          <View style={styles.form}>
+            <FadeIn delay={260}>
+              <Input
+                label={t ? 'Nueva contraseña' : 'New password'}
+                placeholder={t ? 'Mínimo 8 caracteres' : 'At least 8 characters'}
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry={!showPass}
+                autoCapitalize="none"
+                autoComplete="password-new"
+                autoFocus
+                accessibilityLabel={t ? 'Nueva contraseña' : 'New password'}
+                leftIcon={<Feather name="lock" size={18} color={Colors.textMuted} />}
+                rightIcon={
+                  <Feather
+                    name={showPass ? 'eye-off' : 'eye'}
+                    size={18}
+                    color={Colors.textMuted}
+                  />
+                }
+                onRightIconPress={() => setShowPass((v) => !v)}
+                rightIconLabel={
+                  showPass
+                    ? t
+                      ? 'Ocultar contraseña'
+                      : 'Hide password'
+                    : t
+                      ? 'Mostrar contraseña'
+                      : 'Show password'
+                }
+                helper={
+                  t
+                    ? '8+ caracteres, mayúscula, número y símbolo.'
+                    : '8+ chars, 1 uppercase, 1 number, 1 symbol.'
+                }
+                error={
+                  password && !passOk
+                    ? t
+                      ? 'Aún no cumple los requisitos.'
+                      : 'Does not meet requirements yet.'
+                    : undefined
+                }
+              />
+            </FadeIn>
+
+            <FadeIn delay={330}>
+              <Input
+                label={t ? 'Confirmar contraseña' : 'Confirm password'}
+                placeholder={t ? 'Repítela aquí' : 'Type it again'}
+                value={confirm}
+                onChangeText={setConfirm}
+                secureTextEntry={!showPass}
+                autoCapitalize="none"
+                autoComplete="password-new"
+                accessibilityLabel={t ? 'Confirmar contraseña' : 'Confirm password'}
+                leftIcon={<Feather name="check" size={18} color={Colors.textMuted} />}
+                error={
+                  confirm && !matchOk
+                    ? t
+                      ? 'Las contraseñas no coinciden.'
+                      : 'Passwords do not match.'
+                    : undefined
+                }
+              />
+            </FadeIn>
+
+            {error ? (
+              <FadeIn>
+                <Caption tone="danger" align="center">
+                  {error}
+                </Caption>
+              </FadeIn>
+            ) : null}
+
+            <FadeIn delay={420} style={{ marginTop: Spacing[2] }}>
+              <Button
+                label={t ? 'Actualizar contraseña' : 'Update password'}
+                onPress={handleReset}
+                loading={loading}
+                variant="primary"
+                size="lg"
+                fullWidth
+                rightIcon={<Feather name="check" size={18} color={Colors.textInverse} />}
+              />
+            </FadeIn>
+
+            <View style={styles.helperRow}>
+              <Body size="sm" tone="muted" align="center">
+                {t
+                  ? 'Después de actualizar te llevaremos a iniciar sesión.'
+                  : "We'll send you to sign in after updating."}
+              </Body>
+            </View>
+          </View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -132,39 +225,25 @@ export default function NewPassword() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
-  header: { paddingHorizontal: 20, paddingVertical: 8 },
+  header: { paddingHorizontal: EditorialSpacing.pageGutter, paddingTop: Spacing[2] },
   backBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: Colors.bgCard,
-    borderWidth: 1, borderColor: Colors.border,
-    alignItems: 'center', justifyContent: 'center',
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: -Spacing[2],
   },
-  content: { flex: 1, paddingHorizontal: 24, paddingTop: 20, gap: 14 },
-  iconCircle: {
-    alignSelf: 'center',
-    width: 64, height: 64, borderRadius: 32,
-    backgroundColor: 'rgba(244, 163, 64, 0.15)',
-    alignItems: 'center', justifyContent: 'center',
-    marginBottom: 8,
+  scroll: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[8],
+    paddingBottom: Spacing[10],
   },
-  title: { color: Colors.textPrimary, fontSize: 24, fontWeight: '800', textAlign: 'center' },
-  subtitle: { color: Colors.textSecondary, fontSize: 14, textAlign: 'center', marginBottom: 8 },
-  inputBox: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    height: 52, paddingHorizontal: 16,
-    backgroundColor: Colors.bgCard,
-    borderRadius: Radius.button,
-    borderWidth: 1, borderColor: Colors.border,
+  form: {
+    marginTop: Spacing[8],
+    gap: Spacing[4],
   },
-  input: { flex: 1, color: Colors.textPrimary, fontSize: 15, padding: 0 },
-  hint: { color: Colors.textMuted, fontSize: 11, paddingHorizontal: 2 },
-  error: { color: Colors.accentDanger, fontSize: 12, textAlign: 'center' },
-  primaryBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-    height: 52,
-    backgroundColor: Colors.accentPrimary,
-    borderRadius: Radius.button,
-    marginTop: 6,
+  helperRow: {
+    marginTop: Spacing[4],
+    alignItems: 'center',
   },
-  primaryBtnLabel: { color: Colors.textInverse, fontSize: 16, fontWeight: '700' },
 });

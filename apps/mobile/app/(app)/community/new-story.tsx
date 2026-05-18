@@ -1,37 +1,47 @@
+// ─────────────────────────────────────────────
+//  New Story — Editorial Premium
+//
+//  Vertical 9:16 capture/pick with editorial chrome.
+//   · Header: close + Kicker overline + Primary Button "Publicar"
+//   · Canvas: full-bleed 9:16 photo OR empty editorial frame with hint
+//   · Caption bar pinned above bottom action row
+//   · Bottom action row: Cámara + Galería (hairline buttons)
+// ─────────────────────────────────────────────
 import {
-  View,
-  Text,
-  StyleSheet,
-  TextInput,
-  ActivityIndicator,
-  Alert,
   Image,
-  Pressable,
   KeyboardAvoidingView,
   Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from 'react-native';
 import { useState } from 'react';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+
 import { communityApi } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { useAppStore } from '@/stores/app.store';
-import { Colors } from '@/constants/tokens';
+import { Colors, EditorialSpacing, Radius, Spacing, TypePresets } from '@/constants/tokens';
+import { HitSlop, Roles } from '@/constants/a11y';
+import {
+  Button,
+  Caption,
+  Display,
+  Hairline,
+  Kicker,
+  Pressy,
+} from '@/components/ui';
 import { toast } from '@/components/Toast';
 import { uploadImage, UploadError } from '@/utils/uploadImage';
 import { useFeedback } from '@/hooks/useFeedback';
 import { useMentionAutocomplete } from '@/hooks/useMentionAutocomplete';
 import { MentionSuggestions } from '@/components/MentionSuggestions';
 import { PhotoTagger, type PhotoTag } from '@/components/PhotoTagger';
-
-// ─────────────────────────────────────────────
-//  New Story — IG-style composer (aligned w/ new-post)
-//  · Vertical 9:16 capture/pick
-//  · Caption overlay (optional, 200 chars)
-//  · Same header/button visual system as new-post
-// ─────────────────────────────────────────────
 
 const MAX_CAPTION = 200;
 
@@ -52,10 +62,7 @@ export default function NewStory() {
   async function pickFromCamera() {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert(
-        t ? 'Permiso requerido' : 'Permission required',
-        t ? 'Necesitamos acceso a la cámara.' : 'We need camera access.',
-      );
+      toast(t ? 'Necesitamos acceso a la cámara.' : 'We need camera access.', 'warning');
       return;
     }
     setPicking(true);
@@ -77,10 +84,7 @@ export default function NewStory() {
   async function pickFromGallery() {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert(
-        t ? 'Permiso requerido' : 'Permission required',
-        t ? 'Necesitamos acceso a tu galería.' : 'We need photo library access.',
-      );
+      toast(t ? 'Necesitamos acceso a tu galería.' : 'We need photo library access.', 'warning');
       return;
     }
     setPicking(true);
@@ -101,7 +105,7 @@ export default function NewStory() {
 
   async function publish() {
     if (!localImage) {
-      Alert.alert(t ? 'Error' : 'Error', t ? 'Selecciona una imagen.' : 'Pick an image.');
+      toast(t ? 'Selecciona una imagen primero.' : 'Pick an image first.', 'warning');
       return;
     }
     setPublishing(true);
@@ -111,11 +115,14 @@ export default function NewStory() {
         mediaUrl = await uploadImage(localImage, { kind: 'story' });
       } catch (err) {
         const msg = err instanceof UploadError ? err.message : 'upload failed';
-        toast(t ? `No se pudo subir la imagen: ${msg}` : `Could not upload image: ${msg}`, 'danger');
+        toast(
+          t ? `No se pudo subir la imagen: ${msg}` : `Could not upload image: ${msg}`,
+          'danger',
+        );
         return;
       }
       const coordsByUserId = new Map(
-        photoTags.map((t) => [t.userId, { x: t.x, y: t.y }] as const),
+        photoTags.map((tag) => [tag.userId, { x: tag.x, y: tag.y }] as const),
       );
       const mentions = mention.buildMentions(coordsByUserId);
       for (const pt of photoTags) {
@@ -129,11 +136,11 @@ export default function NewStory() {
         mentions: mentions.length > 0 ? mentions : undefined,
       });
       fb.success();
-      toast(t ? 'Historia publicada' : 'Story published', 'success');
+      toast(t ? 'Historia publicada.' : 'Story published.', 'success');
       router.back();
     } catch (err: any) {
       fb.error();
-      Alert.alert(t ? 'Error' : 'Error', apiError(err));
+      toast(apiError(err, t ? 'No se pudo publicar.' : 'Could not publish.'), 'danger');
     } finally {
       setPublishing(false);
     }
@@ -147,59 +154,72 @@ export default function NewStory() {
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        {/* ── Header ──────────────────────────── */}
+        {/* ── Header ──────────────────────── */}
         <View style={styles.header}>
-          <Pressable
+          <Pressy
             onPress={() => router.back()}
-            style={({ pressed }) => [styles.topBtn, pressed && styles.pressed]}
-            hitSlop={10}
+            haptic="select"
+            hitSlop={HitSlop.expand}
+            accessibilityRole={Roles.button}
+            accessibilityLabel={t ? 'Cerrar' : 'Close'}
+            style={styles.iconBtn}
           >
-            <Feather name="x" size={24} color={Colors.textPrimary} />
-          </Pressable>
-          <Text style={styles.title}>{t ? 'Nueva historia' : 'New story'}</Text>
-          <Pressable
-            onPress={publish}
-            disabled={!canPublish}
-            style={({ pressed }) => [
-              styles.publishBtn,
-              !canPublish && { opacity: 0.4 },
-              pressed && styles.pressed,
-            ]}
-          >
-            {publishing ? (
-              <ActivityIndicator color={Colors.textInverse} size="small" />
-            ) : (
-              <Text style={styles.publishLabel}>{t ? 'Publicar' : 'Share'}</Text>
-            )}
-          </Pressable>
+            <Feather name="x" size={22} color={Colors.textPrimary} />
+          </Pressy>
+          <View style={{ flex: 1 }}>
+            <Kicker tone="muted" align="center">
+              {t ? 'NUEVA HISTORIA' : 'NEW STORY'}
+            </Kicker>
+          </View>
+          <View style={styles.publishSlot}>
+            <Button
+              label={t ? 'Publicar' : 'Share'}
+              onPress={publish}
+              variant="primary"
+              size="sm"
+              loading={publishing}
+              disabled={!canPublish}
+              fullWidth
+            />
+          </View>
         </View>
+        <Hairline variant="subtle" />
 
-        {/* ── Canvas ──────────────────────────── */}
+        {/* ── Canvas ──────────────────────── */}
         <View style={styles.canvas}>
           {localImage ? (
             <>
               <Image source={{ uri: localImage }} style={styles.preview} resizeMode="cover" />
-              {caption.length > 0 && (
+              {caption.length > 0 ? (
                 <View style={styles.captionOverlay} pointerEvents="none">
                   <Text style={styles.captionOverlayText}>{caption}</Text>
                 </View>
-              )}
-              <Pressable
+              ) : null}
+              <Pressy
                 onPress={() => {
                   setLocalImage(null);
                   setPhotoTags([]);
                 }}
-                style={({ pressed }) => [styles.retakeBtn, pressed && styles.pressed]}
+                haptic="tap"
+                hitSlop={HitSlop.expand}
+                accessibilityRole={Roles.button}
+                accessibilityLabel={t ? 'Cambiar foto' : 'Change photo'}
+                style={styles.canvasChip}
               >
                 <Feather name="refresh-cw" size={14} color="#fff" />
-                <Text style={styles.retakeBtnText}>{t ? 'Cambiar foto' : 'Retake'}</Text>
-              </Pressable>
-              <Pressable
+                <Text style={styles.canvasChipText}>
+                  {t ? 'Cambiar' : 'Retake'}
+                </Text>
+              </Pressy>
+              <Pressy
                 onPress={() => setTaggerOpen(true)}
-                style={({ pressed }) => [styles.tagBtnStory, pressed && styles.pressed]}
+                haptic="select"
+                accessibilityRole={Roles.button}
+                accessibilityLabel={t ? 'Etiquetar' : 'Tag'}
+                style={[styles.canvasChip, styles.canvasChipLeft]}
               >
                 <Feather name="user-plus" size={14} color="#fff" />
-                <Text style={styles.retakeBtnText}>
+                <Text style={styles.canvasChipText}>
                   {photoTags.length > 0
                     ? t
                       ? `${photoTags.length} etiquetad${photoTags.length === 1 ? 'o' : 'os'}`
@@ -208,92 +228,91 @@ export default function NewStory() {
                       ? 'Etiquetar'
                       : 'Tag'}
                 </Text>
-              </Pressable>
+              </Pressy>
             </>
           ) : (
             <View style={styles.emptyState}>
-              <View style={styles.emptyIconBox}>
-                <Feather name="image" size={32} color={Colors.textMuted} />
+              <View style={styles.emptyFrame}>
+                <Feather name="image" size={28} color={Colors.textMuted} />
               </View>
-              <Text style={styles.emptyTitle}>
-                {t ? 'Selecciona una foto' : 'Pick a photo'}
-              </Text>
-              <Text style={styles.emptySub}>
+              <Kicker tone="champagne" align="center" style={{ marginTop: Spacing[5] }}>
+                {t ? '24 HORAS' : '24 HOURS'}
+              </Kicker>
+              <Display align="center" style={{ marginTop: Spacing[2] }}>
+                {t ? 'Captura el momento' : 'Capture the moment'}
+              </Display>
+              <Caption tone="muted" align="center" style={styles.emptySub}>
                 {t
-                  ? 'Tu historia se oculta en 24 horas'
-                  : 'Your story disappears in 24 hours'}
-              </Text>
+                  ? 'Tu historia desaparece en 24 horas. Elige una foto vertical para destacar.'
+                  : 'Your story disappears in 24 hours. Pick a vertical photo to stand out.'}
+              </Caption>
             </View>
           )}
         </View>
 
-        {/* ── Caption input (bottom, above action bar) ── */}
-        {localImage && (
+        {/* ── Caption bar ─────────────────── */}
+        {localImage ? (
           <View style={styles.captionBar}>
-            {mention.activeQuery !== null && (
-              <View style={{ marginBottom: 8 }}>
+            {mention.activeQuery !== null ? (
+              <View style={{ marginBottom: Spacing[2] }}>
                 <MentionSuggestions
                   suggestions={mention.suggestions}
                   loading={mention.loading}
                   onPick={mention.pickSuggestion}
                 />
               </View>
-            )}
+            ) : null}
             <TextInput
               style={styles.captionInput}
-              placeholder={t ? 'Añade texto. Usa @ para etiquetar…' : 'Add a caption. Use @ to tag…'}
+              placeholder={
+                t
+                  ? 'Añade un texto. Usa @ para etiquetar…'
+                  : 'Add a caption. Use @ to tag…'
+              }
               placeholderTextColor={Colors.textMuted}
               value={caption}
               onChangeText={mention.onChangeText}
               onSelectionChange={mention.onSelectionChange}
               maxLength={MAX_CAPTION}
               multiline
+              accessibilityLabel={t ? 'Texto de la historia' : 'Story caption'}
             />
-            <Text style={styles.captionCount}>
+            <Caption tone="muted" align="right" style={{ marginTop: Spacing[1] }}>
               {caption.length} / {MAX_CAPTION}
-            </Text>
+            </Caption>
           </View>
-        )}
+        ) : null}
 
-        {/* ── Bottom action bar ─────────────────── */}
-        <View style={styles.actionBar}>
-          <View style={styles.actionBtnsRow}>
-            <Pressable
+        {/* ── Action bar ──────────────────── */}
+        <Hairline variant="subtle" />
+        <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.actionBar}>
+          <View style={styles.actionRow}>
+            <Pressy
               onPress={pickFromCamera}
               disabled={picking}
-              style={({ pressed }) => [
-                styles.actionBtn,
-                picking && { opacity: 0.5 },
-                pressed && styles.pressed,
-              ]}
+              haptic="select"
+              accessibilityRole={Roles.button}
+              accessibilityLabel={t ? 'Cámara' : 'Camera'}
+              style={[styles.actionBtn, picking && { opacity: 0.5 }]}
             >
-              {picking ? (
-                <ActivityIndicator color={Colors.accentPrimary} size="small" />
-              ) : (
-                <Feather name="camera" size={20} color={Colors.accentPrimary} />
-              )}
-              <Text style={styles.actionBtnLabel}>{t ? 'Cámara' : 'Camera'}</Text>
-            </Pressable>
-
-            <Pressable
+              <Feather name="camera" size={18} color={Colors.textPrimary} />
+              <Text style={styles.actionLabel}>{t ? 'Cámara' : 'Camera'}</Text>
+            </Pressy>
+            <Pressy
               onPress={pickFromGallery}
               disabled={picking}
-              style={({ pressed }) => [
-                styles.actionBtn,
-                picking && { opacity: 0.5 },
-                pressed && styles.pressed,
-              ]}
+              haptic="select"
+              accessibilityRole={Roles.button}
+              accessibilityLabel={t ? 'Galería' : 'Gallery'}
+              style={[styles.actionBtn, picking && { opacity: 0.5 }]}
             >
-              {picking ? (
-                <ActivityIndicator color={Colors.accentPrimary} size="small" />
-              ) : (
-                <Feather name="image" size={20} color={Colors.accentPrimary} />
-              )}
-              <Text style={styles.actionBtnLabel}>{t ? 'Galería' : 'Gallery'}</Text>
-            </Pressable>
+              <Feather name="image" size={18} color={Colors.textPrimary} />
+              <Text style={styles.actionLabel}>{t ? 'Galería' : 'Gallery'}</Text>
+            </Pressy>
           </View>
-        </View>
+        </ScrollView>
       </KeyboardAvoidingView>
+
       <PhotoTagger
         visible={taggerOpen}
         imageUri={localImage}
@@ -305,41 +324,26 @@ export default function NewStory() {
   );
 }
 
-// ─────────────────────────────────────────────
-//  Styles (aligned with new-post.tsx)
-// ─────────────────────────────────────────────
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
-  pressed: { opacity: 0.7 },
 
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: Colors.border,
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[2],
+    paddingBottom: Spacing[3],
+    gap: Spacing[3],
   },
-  topBtn: {
+  iconBtn: {
     width: 40,
     height: 40,
     alignItems: 'center',
     justifyContent: 'center',
+    borderRadius: Radius.full,
   },
-  title: { color: Colors.textPrimary, fontSize: 16, fontWeight: '700' },
-  publishBtn: {
-    paddingHorizontal: 14,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: Colors.accentPrimary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minWidth: 80,
-  },
-  publishLabel: { color: Colors.textInverse, fontSize: 13, fontWeight: '700' },
+  publishSlot: { minWidth: 100 },
 
-  // Canvas
   canvas: {
     flex: 1,
     backgroundColor: '#000',
@@ -348,120 +352,101 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   preview: { width: '100%', height: '100%' },
+
   captionOverlay: {
     position: 'absolute',
-    left: 20,
-    right: 20,
-    bottom: 28,
-    padding: 14,
-    borderRadius: 12,
+    left: Spacing[5],
+    right: Spacing[5],
+    bottom: Spacing[8],
+    paddingHorizontal: Spacing[4],
+    paddingVertical: Spacing[3],
+    borderRadius: Radius.md,
     backgroundColor: 'rgba(0,0,0,0.55)',
   },
   captionOverlayText: {
+    ...TypePresets.bodyEmphasis,
     color: '#fff',
-    fontSize: 15,
-    fontWeight: '600',
-    lineHeight: 21,
-  },
-  retakeBtn: {
-    position: 'absolute',
-    top: 14,
-    right: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-  },
-  retakeBtnText: { color: '#fff', fontSize: 12, fontWeight: '700' },
-  tagBtnStory: {
-    position: 'absolute',
-    top: 14,
-    left: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: 'rgba(0,0,0,0.55)',
   },
 
-  // Empty state
+  canvasChip: {
+    position: 'absolute',
+    top: Spacing[4],
+    right: Spacing[4],
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing[2],
+    paddingHorizontal: Spacing[3],
+    paddingVertical: Spacing[2],
+    borderRadius: Radius.full,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+  canvasChipLeft: {
+    right: undefined,
+    left: Spacing[4],
+  },
+  canvasChipText: {
+    ...TypePresets.label,
+    color: '#fff',
+    fontSize: 11,
+  },
+
   emptyState: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 32,
-    gap: 8,
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingVertical: Spacing[10],
   },
-  emptyIconBox: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: 'rgba(255,255,255,0.08)',
+  emptyFrame: {
+    width: 100,
+    height: 100,
+    borderRadius: Radius.full,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.borderStrong,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 8,
-  },
-  emptyTitle: {
-    color: Colors.textPrimary,
-    fontSize: 17,
-    fontWeight: '700',
-    marginTop: 4,
   },
   emptySub: {
-    color: Colors.textMuted,
-    fontSize: 13,
-    textAlign: 'center',
+    maxWidth: 320,
+    marginTop: Spacing[4],
   },
 
-  // Caption bar
   captionBar: {
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 6,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: Colors.border,
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingVertical: Spacing[3],
     backgroundColor: Colors.bgPrimary,
   },
   captionInput: {
     color: Colors.textPrimary,
-    fontSize: 14,
-    minHeight: 36,
-    maxHeight: 90,
+    ...TypePresets.body,
+    minHeight: 40,
+    maxHeight: 110,
     padding: 0,
   },
-  captionCount: {
-    color: Colors.textMuted,
-    fontSize: 11,
-    textAlign: 'right',
-    marginTop: 4,
-  },
 
-  // Bottom action bar (same as new-post)
   actionBar: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: Colors.border,
-    backgroundColor: Colors.bgPrimary,
-    paddingHorizontal: 14,
-    paddingTop: 10,
-    paddingBottom: 10,
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingVertical: Spacing[3],
   },
-  actionBtnsRow: {
+  actionRow: {
     flexDirection: 'row',
-    gap: 10,
+    gap: Spacing[3],
   },
   actionBtn: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
-    height: 44,
-    backgroundColor: Colors.bgElevated,
-    borderRadius: 10,
+    gap: Spacing[2],
+    minHeight: 44,
+    paddingHorizontal: Spacing[4],
+    backgroundColor: Colors.bgCard,
+    borderRadius: Radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+    borderTopColor: Colors.highlightTop,
   },
-  actionBtnLabel: { color: Colors.textPrimary, fontSize: 13, fontWeight: '700' },
+  actionLabel: {
+    ...TypePresets.subhead,
+    color: Colors.textPrimary,
+  },
 });

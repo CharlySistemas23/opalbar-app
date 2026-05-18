@@ -24,7 +24,8 @@ import { useAuthStore } from '@/stores/auth.store';
 import { useAppStore } from '@/stores/app.store';
 import { ReportSheet } from '@/components/ReportSheet';
 import { toast } from '@/components/Toast';
-import { Colors } from '@/constants/tokens';
+import { Colors, EditorialSpacing, Radius, Spacing, TypePresets } from '@/constants/tokens';
+import { HitSlop, Roles } from '@/constants/a11y';
 import { Heart } from '@/components/Heart';
 import { useCommunityRealtime } from '@/hooks/useCommunityRealtime';
 import { useFeedback } from '@/hooks/useFeedback';
@@ -33,6 +34,7 @@ import { ErrorState } from '@/components/ErrorState';
 import { useMentionAutocomplete } from '@/hooks/useMentionAutocomplete';
 import { MentionSuggestions } from '@/components/MentionSuggestions';
 import { MentionText } from '@/components/MentionText';
+import { Kicker, Pressy } from '@/components/ui';
 
 // ─────────────────────────────────────────────
 //  Post Detail — Instagram × Facebook hybrid
@@ -305,7 +307,7 @@ export default function PostDetail() {
         await load();
       } catch (err: any) {
         fb.error();
-        Alert.alert(t ? 'Error' : 'Error', apiError(err));
+        toast(apiError(err, t ? 'No se pudo guardar.' : 'Save failed.'), 'danger');
       } finally {
         setSending(false);
       }
@@ -327,7 +329,7 @@ export default function PostDetail() {
       await load();
     } catch (err: any) {
       fb.error();
-      Alert.alert(t ? 'Error' : 'Error', apiError(err));
+      toast(apiError(err, t ? 'No se pudo enviar.' : 'Could not send.'), 'danger');
       if (!overrideText) setComment(body);
       setReplyTo(savedReply);
     } finally {
@@ -444,7 +446,7 @@ export default function PostDetail() {
                     await communityApi.deleteComment(c.id);
                     load();
                   } catch (err) {
-                    Alert.alert('Error', apiError(err));
+                    toast(apiError(err, t ? 'No se pudo borrar.' : 'Delete failed.'), 'danger');
                   }
                 }
               }
@@ -459,9 +461,9 @@ export default function PostDetail() {
         onPress: async () => {
           try {
             await communityApi.reportComment(c.id, { reason: 'INAPPROPRIATE' });
-            Alert.alert(t ? 'Gracias' : 'Thanks', t ? 'Comentario reportado.' : 'Comment reported.');
+            toast(t ? 'Comentario reportado. Gracias.' : 'Comment reported. Thanks.', 'success');
           } catch (err) {
-            Alert.alert('Error', apiError(err));
+            toast(apiError(err, t ? 'No se pudo reportar.' : 'Report failed.'), 'danger');
           }
         },
       });
@@ -526,25 +528,35 @@ export default function PostDetail() {
         >
           {/* ── Header ──────────────────────────── */}
           <View style={styles.header}>
-            <Pressable
+            <Pressy
               onPress={() => router.back()}
-              style={({ pressed }) => [styles.topBtn, pressed && styles.pressed]}
-              hitSlop={10}
+              haptic="select"
+              hitSlop={HitSlop.expand}
+              accessibilityRole={Roles.button}
+              accessibilityLabel="Volver"
+              style={styles.topBtn}
             >
-              <Feather name="arrow-left" size={24} color={Colors.textPrimary} />
-            </Pressable>
-            <Text style={styles.title}>{t ? 'Publicación' : 'Post'}</Text>
-            <Pressable
+              <Feather name="arrow-left" size={22} color={Colors.textPrimary} />
+            </Pressy>
+            <View style={{ flex: 1 }}>
+              <Kicker tone="muted" align="center">
+                {t ? 'PUBLICACIÓN' : 'POST'}
+              </Kicker>
+            </View>
+            <Pressy
               onPress={() => author?.id && author.id !== me?.id && setShowReport(true)}
-              style={({ pressed }) => [styles.topBtn, pressed && styles.pressed]}
-              hitSlop={10}
+              haptic="select"
+              hitSlop={HitSlop.expand}
+              accessibilityRole={Roles.button}
+              accessibilityLabel={t ? 'Más opciones' : 'More options'}
+              style={styles.topBtn}
             >
               {author?.id && author.id !== me?.id ? (
-                <Feather name="more-horizontal" size={22} color={Colors.textPrimary} />
+                <Feather name="more-horizontal" size={20} color={Colors.textPrimary} />
               ) : (
                 <View style={{ width: 22 }} />
               )}
-            </Pressable>
+            </Pressy>
           </View>
 
           <FlatList
@@ -1419,17 +1431,19 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[2],
+    paddingBottom: Spacing[3],
+    gap: Spacing[3],
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: Colors.border,
+    borderBottomColor: Colors.borderSubtle,
   },
   topBtn: {
     width: 40,
     height: 40,
     alignItems: 'center',
     justifyContent: 'center',
+    borderRadius: Radius.full,
   },
   title: { color: Colors.textPrimary, fontSize: 16, fontWeight: '700' },
 
@@ -1454,7 +1468,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
   },
-  authorName: { color: Colors.textPrimary, fontSize: 15, fontWeight: '700' },
+  authorName: {
+    ...TypePresets.subhead,
+    color: Colors.textPrimary,
+  },
   timeRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1466,24 +1483,23 @@ const styles = StyleSheet.create({
 
   // Text-only post (FB status bubble)
   statusCard: {
-    marginHorizontal: 14,
-    marginBottom: 10,
-    paddingHorizontal: 16,
-    paddingVertical: 18,
-    backgroundColor: Colors.bgElevated,
-    borderRadius: 14,
+    marginHorizontal: EditorialSpacing.pageGutter,
+    marginBottom: Spacing[3],
+    paddingHorizontal: Spacing[5],
+    paddingVertical: Spacing[6],
+    backgroundColor: Colors.bgCard,
+    borderRadius: Radius.card,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: Colors.border,
+    borderTopColor: Colors.highlightTop,
   },
   statusText: {
+    ...TypePresets.bodyLg,
     color: Colors.textPrimary,
-    fontSize: 15,
-    lineHeight: 22,
   },
   statusTextLarge: {
-    fontSize: 20,
-    lineHeight: 28,
-    fontWeight: '500',
+    ...TypePresets.lead,
+    color: Colors.textPrimary,
     textAlign: 'center',
   },
 
@@ -1578,12 +1594,12 @@ const styles = StyleSheet.create({
     paddingBottom: 10,
   },
   caption: {
+    ...TypePresets.body,
     color: Colors.textPrimary,
-    fontSize: 14.5,
-    lineHeight: 21,
   },
   authorNameInline: {
-    fontWeight: '700',
+    ...TypePresets.bodyEmphasis,
+    color: Colors.textPrimary,
   },
 
   // Comments header
@@ -1597,9 +1613,8 @@ const styles = StyleSheet.create({
     borderTopColor: Colors.border,
   },
   commentsHdrTitle: {
+    ...TypePresets.headingSm,
     color: Colors.textPrimary,
-    fontSize: 14,
-    fontWeight: '700',
   },
   toggleThreadsBtn: {
     flexDirection: 'row',

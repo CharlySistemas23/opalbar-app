@@ -1,15 +1,52 @@
-import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, ActivityIndicator, Alert, KeyboardAvoidingView, Platform } from 'react-native';
-import { useEffect, useState, useRef } from 'react';
+// ─────────────────────────────────────────────
+//  Support Chat — Editorial Premium
+//
+//  · Header: back + Kicker "SOPORTE" + Heading title + status dot
+//  · Body: FlatList of message bubbles (parchment for them, amber for me)
+//  · Empty/Error via EmptyState/ErrorState primitives
+//  · Compose dock at bottom: TextInput + circular send button
+// ─────────────────────────────────────────────
+import {
+  ActivityIndicator,
+  FlatList,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  StyleSheet,
+  TextInput,
+  View,
+} from 'react-native';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+
 import { supportApi } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { useAuthStore } from '@/stores/auth.store';
 import { useAppStore } from '@/stores/app.store';
-import { Colors, Radius } from '@/constants/tokens';
+import { Colors, EditorialSpacing, Radius, Spacing, TypePresets } from '@/constants/tokens';
+import { HitSlop, Roles } from '@/constants/a11y';
+import {
+  Body,
+  Caption,
+  Hairline,
+  Heading,
+  Kicker,
+  Pressy,
+  SkeletonList,
+} from '@/components/ui';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
+import { toast } from '@/components/Toast';
+
+interface ChatMessage {
+  id: string;
+  content: string;
+  senderId?: string;
+  senderType?: string;
+  createdAt?: string;
+}
 
 export default function SupportChat() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -18,7 +55,7 @@ export default function SupportChat() {
   const { language } = useAppStore();
   const t = language === 'es';
 
-  const [messages, setMessages] = useState<any[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
@@ -29,35 +66,41 @@ export default function SupportChat() {
     setLoadError(null);
     try {
       const r = await supportApi.messages(id);
-      const msgs = r.data?.data?.data ?? r.data?.data ?? [];
+      const msgs = (r.data?.data?.data ?? r.data?.data ?? []) as ChatMessage[];
       setMessages(msgs);
     } catch (err) {
       setLoadError(apiError(err));
+    } finally {
+      setLoading(false);
     }
-    finally { setLoading(false); }
   }
 
-  useEffect(() => { load(); }, [id]);
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
 
   async function handleSend() {
-    if (!text.trim()) return;
-    setSending(true);
     const body = text.trim();
+    if (!body) return;
+    setSending(true);
     setText('');
     try {
       await supportApi.sendMessage(id, { content: body });
       await load();
       setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
     } catch (err: any) {
-      Alert.alert(
-        t ? 'Error' : 'Error',
-        err?.response?.data?.message || (t ? 'No se pudo enviar.' : 'Could not send.'),
+      toast(
+        apiError(err, t ? 'No se pudo enviar el mensaje.' : 'Could not send the message.'),
+        'danger',
       );
       setText(body);
     } finally {
       setSending(false);
     }
   }
+
+  const canSend = text.trim().length > 0 && !sending;
 
   return (
     <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
@@ -66,53 +109,71 @@ export default function SupportChat() {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={0}
       >
-        {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn} hitSlop={10}>
-            <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
-          </TouchableOpacity>
-          <View style={styles.headerMid}>
-            <View style={styles.avatar}>
-              <Feather name="headphones" size={16} color={Colors.textInverse} />
-            </View>
-            <View>
-              <Text style={styles.headerTitle}>{t ? 'Soporte OPALBAR' : 'OPALBAR Support'}</Text>
-              <Text style={styles.headerSub}>
-                <View style={styles.onlineDot} />
-                {' '}{t ? 'En línea' : 'Online'}
-              </Text>
+          <Pressy
+            onPress={() => router.back()}
+            haptic="select"
+            hitSlop={HitSlop.expand}
+            accessibilityRole={Roles.button}
+            accessibilityLabel="Volver"
+            style={styles.backBtn}
+          >
+            <Feather name="arrow-left" size={22} color={Colors.textPrimary} />
+          </Pressy>
+          <View style={{ flex: 1 }}>
+            <Kicker tone="muted">{t ? 'SOPORTE OPALBAR' : 'OPALBAR SUPPORT'}</Kicker>
+            <View style={styles.titleRow}>
+              <Heading size="sm">{t ? 'Conversación' : 'Conversation'}</Heading>
+              <View style={styles.statusDot} />
             </View>
           </View>
           <View style={{ width: 40 }} />
         </View>
 
+        <Hairline variant="subtle" />
+
         {loading ? (
-          <View style={styles.center}><ActivityIndicator color={Colors.accentPrimary} /></View>
+          <View style={{ paddingHorizontal: EditorialSpacing.pageGutter, paddingTop: Spacing[4] }}>
+            <SkeletonList count={4} itemHeight={64} />
+          </View>
         ) : loadError && messages.length === 0 ? (
           <ErrorState
             message={loadError}
             retryLabel={t ? 'Reintentar' : 'Retry'}
-            onRetry={() => { setLoading(true); load(); }}
+            onRetry={() => {
+              setLoading(true);
+              load();
+            }}
           />
         ) : (
           <FlatList
             ref={listRef}
             data={messages}
             keyExtractor={(m) => m.id}
-            contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 12, gap: 10 }}
+            contentContainerStyle={styles.list}
             renderItem={({ item }) => {
               const isMe = item.senderId === user?.id || item.senderType === 'USER';
               return (
                 <View style={[styles.msgRow, isMe ? styles.msgRowMe : styles.msgRowThem]}>
                   <View style={[styles.bubble, isMe ? styles.bubbleMe : styles.bubbleThem]}>
-                    <Text style={[styles.bubbleText, isMe && { color: Colors.textInverse }]}>
+                    <Body
+                      tone={isMe ? 'inverse' : 'primary'}
+                      style={{ lineHeight: 21 }}
+                    >
                       {item.content}
-                    </Text>
-                    <Text style={[styles.bubbleTime, isMe && { color: 'rgba(0,0,0,0.5)' }]}>
-                      {item.createdAt
-                        ? new Date(item.createdAt).toLocaleTimeString(language, { hour: '2-digit', minute: '2-digit' })
-                        : ''}
-                    </Text>
+                    </Body>
+                    {item.createdAt ? (
+                      <Caption
+                        tone={isMe ? 'inverse' : 'muted'}
+                        align="right"
+                        style={isMe ? [styles.bubbleTime, { opacity: 0.65 }] : [styles.bubbleTime]}
+                      >
+                        {new Date(item.createdAt).toLocaleTimeString(language, {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </Caption>
+                    ) : null}
                   </View>
                 </View>
               );
@@ -121,32 +182,46 @@ export default function SupportChat() {
               <EmptyState
                 icon="message-circle"
                 title={t ? 'Inicia la conversación' : 'Start the conversation'}
-                message={t ? 'Cuéntanos cómo podemos ayudarte.' : 'Tell us how we can help.'}
-              ></EmptyState>
+                message={
+                  t
+                    ? 'Cuéntanos cómo podemos ayudarte. Te respondemos cuanto antes.'
+                    : 'Tell us how we can help. We will reply as soon as possible.'
+                }
+              />
             }
           />
         )}
 
-        {/* Input */}
+        {/* ── Compose dock ─────────────────────── */}
+        <Hairline variant="subtle" />
         <View style={styles.compose}>
           <TextInput
             style={styles.composeInput}
             placeholder={t ? 'Escribe un mensaje…' : 'Type a message…'}
-            placeholderTextColor={Colors.textMuted}
+            placeholderTextColor={Colors.textDisabled}
             value={text}
             onChangeText={setText}
             multiline
+            accessibilityLabel={t ? 'Mensaje' : 'Message'}
           />
-          <TouchableOpacity
-            style={[styles.sendBtn, (!text.trim() || sending) && { opacity: 0.4 }]}
+          <Pressable
             onPress={handleSend}
-            disabled={!text.trim() || sending}
-            hitSlop={8}
+            disabled={!canSend}
+            hitSlop={HitSlop.expand}
+            accessibilityRole={Roles.button}
+            accessibilityLabel={t ? 'Enviar' : 'Send'}
+            style={({ pressed }) => [
+              styles.sendBtn,
+              !canSend && { opacity: 0.4 },
+              pressed && canSend && { opacity: 0.85 },
+            ]}
           >
-            {sending
-              ? <ActivityIndicator color={Colors.textInverse} size="small" />
-              : <Feather name="send" size={18} color={Colors.textInverse} />}
-          </TouchableOpacity>
+            {sending ? (
+              <ActivityIndicator color={Colors.textInverse} size="small" />
+            ) : (
+              <Feather name="arrow-up" size={18} color={Colors.textInverse} />
+            )}
+          </Pressable>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -155,83 +230,94 @@ export default function SupportChat() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[2],
+    paddingBottom: Spacing[4],
+    gap: Spacing[3],
   },
-  iconBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: Colors.bgCard,
-    alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1, borderColor: Colors.border,
+  backBtn: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: Radius.full,
   },
-  headerMid: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  avatar: {
-    width: 36, height: 36, borderRadius: 18,
-    backgroundColor: Colors.accentPrimary,
-    alignItems: 'center', justifyContent: 'center',
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing[2],
+    marginTop: Spacing[1],
   },
-  headerTitle: { color: Colors.textPrimary, fontSize: 14, fontWeight: '700' },
-  headerSub: { color: Colors.accentSuccess, fontSize: 11, marginTop: 2 },
-  onlineDot: {
-    width: 6, height: 6, borderRadius: 3,
+  statusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
     backgroundColor: Colors.accentSuccess,
   },
 
+  list: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingVertical: Spacing[5],
+    gap: Spacing[3],
+  },
   msgRow: { flexDirection: 'row' },
   msgRowMe: { justifyContent: 'flex-end' },
   msgRowThem: { justifyContent: 'flex-start' },
   bubble: {
-    maxWidth: '80%',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 16,
-    gap: 2,
+    maxWidth: '82%',
+    paddingHorizontal: Spacing[4],
+    paddingTop: Spacing[3],
+    paddingBottom: Spacing[2],
+    borderRadius: Radius.lg,
   },
   bubbleMe: {
     backgroundColor: Colors.accentPrimary,
-    borderBottomRightRadius: 4,
+    borderTopRightRadius: Radius.xs,
   },
   bubbleThem: {
     backgroundColor: Colors.bgCard,
-    borderBottomLeftRadius: 4,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+    borderTopColor: Colors.highlightTop,
+    borderTopLeftRadius: Radius.xs,
   },
-  bubbleText: { color: Colors.textPrimary, fontSize: 14, lineHeight: 19 },
-  bubbleTime: { color: Colors.textMuted, fontSize: 10, marginTop: 2, alignSelf: 'flex-end' },
-
-  empty: { color: Colors.textMuted, fontSize: 13, textAlign: 'center', marginTop: 40 },
+  bubbleTime: {
+    marginTop: Spacing[1],
+    fontSize: 10,
+  },
 
   compose: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    gap: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderTopWidth: 1,
-    borderTopColor: Colors.border,
+    gap: Spacing[3],
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingVertical: Spacing[3],
+    backgroundColor: Colors.bgPrimary,
   },
   composeInput: {
     flex: 1,
-    minHeight: 42,
-    maxHeight: 120,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    minHeight: 44,
+    maxHeight: 140,
+    paddingHorizontal: Spacing[4],
+    paddingVertical: Spacing[3],
     backgroundColor: Colors.bgCard,
-    borderRadius: 22,
+    borderRadius: Radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+    borderTopColor: Colors.highlightTop,
     color: Colors.textPrimary,
-    fontSize: 14,
+    ...TypePresets.body,
   },
   sendBtn: {
-    width: 42, height: 42, borderRadius: 21,
+    width: 44,
+    height: 44,
+    borderRadius: Radius.full,
     backgroundColor: Colors.accentPrimary,
-    alignItems: 'center', justifyContent: 'center',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

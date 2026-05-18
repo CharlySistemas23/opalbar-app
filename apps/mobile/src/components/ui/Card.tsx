@@ -1,21 +1,26 @@
 // ─────────────────────────────────────────────
-//  Card — premium elevated surface
+//  Card — Editorial Premium surface
 //
 //  Variants:
-//    'flat'     → bgCard, no shadow (default for nested content, backward-compatible)
-//    'elevated' → bgCard + top-edge highlight + soft drop shadow
-//    'glass'    → bgElevated with a hint of alpha, for overlay panels
+//    'flat'     → bgCard + hairline border, no shadow (default; nested content)
+//    'elevated' → bgCard + top-edge highlight + whisper drop shadow
+//    'inset'    → bgSubtle alpha over bgPrimary (for "quiet" panels inside hero blocks)
 //
-//  The top-edge highlight (borderTopColor with alpha white) simulates
-//  light from above — the subtle detail that takes dark UIs from flat
-//  to premium.
+//  Editorial: shadows are basically invisible. Depth comes from the
+//  top-edge highlight + hairline borders + the contrast between bgCard
+//  and bgPrimary.
+//
+//  When `onPress` is provided, the card wraps a <Pressy> so it gets spring
+//  press feedback + haptic + a11y role=button automatically. Pass
+//  `accessibilityLabel` so screen readers know what the card represents.
 // ─────────────────────────────────────────────
 import { ReactNode } from 'react';
 import { View, StyleSheet, ViewStyle } from 'react-native';
-import { Colors, Radius, Spacing, Shadows } from '@/constants/tokens';
+
+import { Colors, Radius, Shadows, Spacing } from '@/constants/tokens';
 import { Pressy } from './Pressy';
 
-type Variant = 'flat' | 'elevated' | 'glass';
+type Variant = 'flat' | 'elevated' | 'inset';
 
 interface Props {
   children: ReactNode;
@@ -24,17 +29,23 @@ interface Props {
   padding?: number;
   variant?: Variant;
   radius?: keyof typeof Radius;
+  accessibilityLabel?: string;
+  accessibilityHint?: string;
+  testID?: string;
 }
 
 export function Card({
   children,
   style,
   onPress,
-  padding = Spacing[4],
+  padding = Spacing[5],
   variant = 'flat',
-  radius = 'xl',
+  radius = 'card',
+  accessibilityLabel,
+  accessibilityHint,
+  testID,
 }: Props) {
-  const variantStyle = (() => {
+  const variantStyle = ((): ViewStyle => {
     switch (variant) {
       case 'elevated':
         return {
@@ -42,20 +53,20 @@ export function Card({
           borderTopWidth: StyleSheet.hairlineWidth,
           borderTopColor: Colors.highlightTop,
           ...Shadows.card,
-        } as ViewStyle;
-      case 'glass':
+        };
+      case 'inset':
         return {
-          backgroundColor: Colors.bgElevated,
+          backgroundColor: Colors.bgSubtle,
           borderWidth: StyleSheet.hairlineWidth,
           borderColor: Colors.borderSubtle,
-        } as ViewStyle;
+        };
       case 'flat':
       default:
         return {
           backgroundColor: Colors.bgCard,
           borderWidth: StyleSheet.hairlineWidth,
           borderColor: Colors.border,
-        } as ViewStyle;
+        };
     }
   })();
 
@@ -67,10 +78,20 @@ export function Card({
 
   if (onPress) {
     return (
-      <Pressy onPress={onPress} style={composed}>
+      <Pressy
+        onPress={onPress}
+        style={composed}
+        accessibilityLabel={accessibilityLabel}
+        accessibilityHint={accessibilityHint}
+        testID={testID}
+      >
         {children}
       </Pressy>
     );
   }
-  return <View style={composed}>{children}</View>;
+  return (
+    <View style={composed} testID={testID}>
+      {children}
+    </View>
+  );
 }

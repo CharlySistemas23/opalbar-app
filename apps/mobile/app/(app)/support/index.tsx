@@ -1,19 +1,52 @@
-import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity, ScrollView } from 'react-native';
+// ─────────────────────────────────────────────
+//  Support — Editorial Premium
+//
+//  Magazine layout for support hub:
+//   · Header: back + Kicker "AYUDA" + Heading "Soporte"
+//   · Hero block: Display headline + Lead subtitle
+//   · CTA row: primary "Chat" + secondary "Abrir ticket"
+//   · FAQ section: Kicker overline + ListItem rows (chevron)
+//   · Tickets section: Kicker + Card list with status Badge
+// ─────────────────────────────────────────────
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+
 import { supportApi } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { useAppStore } from '@/stores/app.store';
+import { Colors, EditorialSpacing, Radius, Spacing } from '@/constants/tokens';
+import { HitSlop, Roles } from '@/constants/a11y';
+import {
+  Badge,
+  Body,
+  Button,
+  Caption,
+  Card,
+  FadeIn,
+  Hairline,
+  Heading,
+  Kicker,
+  Lead,
+  ListItem,
+  Pressy,
+  SkeletonList,
+} from '@/components/ui';
 import { ErrorState } from '@/components/ErrorState';
-import { Colors, Radius } from '@/constants/tokens';
 
-const STATUS: Record<string, { color: string; label: { es: string; en: string } }> = {
-  OPEN:        { color: Colors.accentPrimary, label: { es: 'Abierto',    en: 'Open' } },
-  IN_PROGRESS: { color: '#60A5FA',            label: { es: 'En curso',   en: 'In progress' } },
-  RESOLVED:    { color: Colors.accentSuccess, label: { es: 'Resuelto',   en: 'Resolved' } },
-  CLOSED:      { color: Colors.textMuted,     label: { es: 'Cerrado',    en: 'Closed' } },
+type StatusKey = 'OPEN' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED';
+type BadgeVariant = 'default' | 'warning' | 'success' | 'danger' | 'info' | 'champagne' | 'accent';
+
+const STATUS: Record<
+  StatusKey,
+  { variant: BadgeVariant; label: { es: string; en: string } }
+> = {
+  OPEN: { variant: 'warning', label: { es: 'Abierto', en: 'Open' } },
+  IN_PROGRESS: { variant: 'info', label: { es: 'En curso', en: 'In progress' } },
+  RESOLVED: { variant: 'success', label: { es: 'Resuelto', en: 'Resolved' } },
+  CLOSED: { variant: 'default', label: { es: 'Cerrado', en: 'Closed' } },
 };
 
 const FAQ = {
@@ -31,12 +64,20 @@ const FAQ = {
   ],
 };
 
+interface TicketRecord {
+  id: string;
+  subject?: string;
+  title?: string;
+  status?: string;
+  updatedAt?: string;
+}
+
 export default function Support() {
   const router = useRouter();
   const { language } = useAppStore();
   const t = language === 'es';
 
-  const [tickets, setTickets] = useState<any[]>([]);
+  const [tickets, setTickets] = useState<TicketRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -49,10 +90,11 @@ export default function Support() {
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+  }, []);
 
   const openTicket = () => router.push('/(app)/support/new-ticket' as never);
-
   const openLiveChat = () => {
     if (tickets.length > 0) {
       router.push(`/(app)/support/chat/${tickets[0].id}` as never);
@@ -64,79 +106,146 @@ export default function Support() {
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn} hitSlop={10}>
-          <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
-        </TouchableOpacity>
-        <Text style={styles.title}>{t ? 'Soporte y Ayuda' : 'Support & Help'}</Text>
+        <Pressy
+          onPress={() => router.back()}
+          haptic="select"
+          hitSlop={HitSlop.expand}
+          accessibilityRole={Roles.button}
+          accessibilityLabel="Volver"
+          style={styles.backBtn}
+        >
+          <Feather name="arrow-left" size={22} color={Colors.textPrimary} />
+        </Pressy>
+        <View style={{ flex: 1 }}>
+          <Kicker tone="muted">{t ? 'AYUDA' : 'HELP'}</Kicker>
+          <Heading size="md" style={{ marginTop: Spacing[1] }}>
+            {t ? 'Soporte' : 'Support'}
+          </Heading>
+        </View>
         <View style={{ width: 40 }} />
       </View>
 
       {loading ? (
-        <View style={styles.center}><ActivityIndicator color={Colors.accentPrimary} /></View>
+        <View style={{ paddingHorizontal: EditorialSpacing.pageGutter, paddingTop: Spacing[4] }}>
+          <SkeletonList count={4} itemHeight={88} />
+        </View>
       ) : error && tickets.length === 0 ? (
         <ErrorState
           message={error}
           retryLabel={t ? 'Reintentar' : 'Retry'}
-          onRetry={() => { setLoading(true); load(); }}
+          onRetry={() => {
+            setLoading(true);
+            load();
+          }}
         />
       ) : (
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-          <View style={styles.heroCard}>
-            <Text style={styles.heroTitle}>{t ? '¿En qué podemos ayudarte?' : 'How can we help you?'}</Text>
-            <Text style={styles.heroSub}>{t ? 'Respuesta garantizada en menos de 24h' : 'Guaranteed response in less than 24h'}</Text>
-          </View>
+        <ScrollView
+          contentContainerStyle={styles.scroll}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* ── Hero ─────────────────────────── */}
+          <FadeIn>
+            <Kicker tone="champagne">
+              {t ? 'ESTAMOS AQUÍ' : 'WE ARE HERE'}
+            </Kicker>
+            <Heading size="lg" style={{ marginTop: Spacing[2] }}>
+              {t ? '¿En qué podemos ayudarte?' : 'How can we help?'}
+            </Heading>
+            <Lead style={{ marginTop: Spacing[3] }}>
+              {t
+                ? 'Respondemos en menos de 24 horas. Si es urgente, abre un chat.'
+                : 'We reply within 24 hours. If it is urgent, open a chat.'}
+            </Lead>
+          </FadeIn>
 
-          <View style={styles.quickActions}>
-            <TouchableOpacity style={styles.liveBtn} onPress={openLiveChat} activeOpacity={0.9}>
-              <Text style={styles.liveBtnText}>{t ? 'Chat en vivo' : 'Live chat'}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.ticketBtn} onPress={openTicket} activeOpacity={0.9}>
-              <Text style={styles.ticketBtnText}>{t ? 'Abrir ticket' : 'Open ticket'}</Text>
-            </TouchableOpacity>
-          </View>
+          {/* ── CTAs ─────────────────────────── */}
+          <FadeIn delay={120} style={styles.ctaRow}>
+            <View style={{ flex: 1 }}>
+              <Button
+                label={t ? 'Chat en vivo' : 'Live chat'}
+                onPress={openLiveChat}
+                variant="primary"
+                size="md"
+                leftIcon={<Feather name="message-circle" size={16} color={Colors.textInverse} />}
+              />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Button
+                label={t ? 'Abrir ticket' : 'Open ticket'}
+                onPress={openTicket}
+                variant="secondary"
+                size="md"
+                leftIcon={<Feather name="edit-3" size={16} color={Colors.textPrimary} />}
+              />
+            </View>
+          </FadeIn>
 
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>{t ? 'Preguntas frecuentes' : 'Frequently asked questions'}</Text>
-            {(t ? FAQ.es : FAQ.en).map((q) => (
-              <TouchableOpacity key={q} style={styles.faqRow} onPress={openTicket} activeOpacity={0.85}>
-                <Text style={styles.faqText}>{q}</Text>
-                <Feather name="chevron-right" size={18} color={Colors.textMuted} />
-              </TouchableOpacity>
-            ))}
-          </View>
+          {/* ── FAQ ──────────────────────────── */}
+          <FadeIn delay={200} style={styles.section}>
+            <Kicker tone="muted">{t ? 'PREGUNTAS FRECUENTES' : 'FREQUENTLY ASKED'}</Kicker>
+            <Heading size="sm" style={{ marginTop: Spacing[1], marginBottom: Spacing[4] }}>
+              {t ? 'Antes de escribirnos' : 'Before reaching out'}
+            </Heading>
+            <View style={styles.listShell}>
+              {(t ? FAQ.es : FAQ.en).map((q, idx, arr) => (
+                <View key={q}>
+                  <ListItem title={q} onPress={openTicket} showChevron />
+                  {idx < arr.length - 1 ? (
+                    <Hairline variant="subtle" marginHorizontal={Spacing[5]} />
+                  ) : null}
+                </View>
+              ))}
+            </View>
+          </FadeIn>
 
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>{t ? 'Mis tickets' : 'My tickets'}</Text>
+          {/* ── Tickets ──────────────────────── */}
+          <FadeIn delay={280} style={styles.section}>
+            <Kicker tone="muted">{t ? 'MIS TICKETS' : 'MY TICKETS'}</Kicker>
+            <Heading size="sm" style={{ marginTop: Spacing[1], marginBottom: Spacing[4] }}>
+              {t ? 'Conversaciones recientes' : 'Recent threads'}
+            </Heading>
+
             {tickets.length === 0 ? (
-              <View style={styles.emptyTicket}>
-                <Text style={styles.emptyTicketText}>{t ? 'No tienes tickets todavía.' : 'You do not have tickets yet.'}</Text>
-              </View>
+              <Card variant="flat">
+                <Body tone="secondary">
+                  {t
+                    ? 'Todavía no abriste ningún ticket. Empieza uno cuando lo necesites.'
+                    : 'No tickets yet. Start one whenever you need.'}
+                </Body>
+              </Card>
             ) : (
-              tickets.map((item) => {
-                const status = STATUS[item.status] ?? STATUS.OPEN;
-                return (
-                  <TouchableOpacity
-                    key={item.id}
-                    style={styles.ticket}
-                    onPress={() => router.push(`/(app)/support/chat/${item.id}` as never)}
-                    activeOpacity={0.9}
-                  >
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.subject} numberOfLines={1}>{item.subject || item.title}</Text>
-                      <Text style={styles.date}>
-                        {(status.label[language] || status.label.es)} · {item.updatedAt ? relTime(item.updatedAt, language) : ''}
-                      </Text>
-                    </View>
-                    <View style={[styles.statusPill, { backgroundColor: status.color + '20' }]}>
-                      <Text style={[styles.statusText, { color: status.color }]}>
-                        {status.label[language]}
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                );
-              })
+              <View style={{ gap: Spacing[3] }}>
+                {tickets.map((it) => {
+                  const statusKey = (it.status as StatusKey) || 'OPEN';
+                  const s = STATUS[statusKey] ?? STATUS.OPEN;
+                  const when = it.updatedAt ? relTime(it.updatedAt, language) : '';
+                  return (
+                    <Card
+                      key={it.id}
+                      onPress={() => router.push(`/(app)/support/chat/${it.id}` as never)}
+                      variant="flat"
+                      padding={Spacing[4]}
+                      accessibilityLabel={it.subject || it.title || 'Ticket'}
+                    >
+                      <View style={styles.ticketRow}>
+                        <View style={{ flex: 1 }}>
+                          <Body weight="semiBold" numberOfLines={1}>
+                            {it.subject || it.title || (t ? 'Ticket' : 'Ticket')}
+                          </Body>
+                          {when ? (
+                            <Caption tone="muted" style={{ marginTop: 2 }}>
+                              {when}
+                            </Caption>
+                          ) : null}
+                        </View>
+                        <Badge variant={s.variant} label={s.label[language]} />
+                      </View>
+                    </Card>
+                  );
+                })}
+              </View>
             )}
-          </View>
+          </FadeIn>
         </ScrollView>
       )}
     </SafeAreaView>
@@ -160,131 +269,50 @@ function relTime(date: string, locale: string) {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+
   header: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 8,
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[2],
+    paddingBottom: Spacing[5],
+    gap: Spacing[3],
   },
-  iconBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: Colors.bgCard,
-    alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1, borderColor: Colors.border,
-  },
-  title: { color: Colors.textPrimary, fontSize: 18, fontWeight: '700' },
-  content: {
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 28,
-    gap: 20,
-  },
-  heroCard: {
-    backgroundColor: Colors.bgCard,
-    borderRadius: Radius.card,
-    paddingHorizontal: 18,
-    paddingVertical: 18,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  heroTitle: {
-    color: Colors.textPrimary,
-    fontSize: 20,
-    fontWeight: '800',
-    lineHeight: 26,
-    letterSpacing: -0.3,
-  },
-  heroSub: {
-    color: Colors.textSecondary,
-    fontSize: 13,
-    marginTop: 4,
-  },
-  quickActions: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  liveBtn: {
-    flex: 1,
-    backgroundColor: Colors.accentPrimary,
-    borderRadius: Radius.button,
+  backBtn: {
+    width: 40,
+    height: 40,
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 52,
+    borderRadius: Radius.full,
   },
-  liveBtnText: {
-    color: Colors.textInverse,
-    fontSize: 15,
-    fontWeight: '700',
-    letterSpacing: -0.1,
-  },
-  ticketBtn: {
-    flex: 1,
-    backgroundColor: Colors.bgCard,
-    borderRadius: Radius.button,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 52,
-  },
-  ticketBtnText: {
-    color: Colors.textPrimary,
-    fontSize: 15,
-    fontWeight: '700',
-    letterSpacing: -0.1,
-  },
-  section: { gap: 8 },
-  sectionTitle: {
-    color: Colors.textPrimary,
-    fontSize: 15,
-    fontWeight: '700',
-    letterSpacing: -0.2,
-    marginBottom: 4,
-    textTransform: 'uppercase',
-    opacity: 0.8,
-  },
-  faqRow: {
-    backgroundColor: Colors.bgCard,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    paddingHorizontal: 14,
-    minHeight: 48,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  faqText: {
-    color: Colors.textPrimary,
-    fontSize: 14,
-    fontWeight: '500',
-    flex: 1,
-    marginRight: 10,
-  },
-  ticket: {
-    flexDirection: 'row',
-    gap: 12,
-    alignItems: 'center',
-    backgroundColor: Colors.bgCard,
-    borderRadius: Radius.card,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    padding: 14,
-  },
-  subject: { color: Colors.textPrimary, fontSize: 14, fontWeight: '600' },
-  date: { color: Colors.textMuted, fontSize: 12, marginTop: 2 },
 
-  statusPill: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
-  statusText: { fontSize: 11, fontWeight: '700', letterSpacing: 0.2 },
-  emptyTicket: {
-    backgroundColor: Colors.bgCard,
-    borderRadius: Radius.card,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    padding: 14,
+  scroll: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingBottom: Spacing[10],
   },
-  emptyTicketText: { color: Colors.textSecondary, fontSize: 13 },
+
+  ctaRow: {
+    flexDirection: 'row',
+    gap: Spacing[3],
+    marginTop: Spacing[6],
+  },
+
+  section: {
+    marginTop: Spacing[10],
+  },
+
+  listShell: {
+    backgroundColor: Colors.bgCard,
+    borderRadius: Radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+    borderTopColor: Colors.highlightTop,
+    overflow: 'hidden',
+  },
+
+  ticketRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing[3],
+  },
 });

@@ -1,23 +1,55 @@
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Linking, Platform, Alert, Image } from 'react-native';
+// ─────────────────────────────────────────────
+//  Venue Detail — Editorial Premium
+//
+//  Full-bleed hero 16:10. Kicker (status) + Display (venue name).
+//  Rating in serif numeric, lead description, hairline-divided info
+//  rows (address, hours, phone), then secondary action ghosts +
+//  primary CTA in a sticky footer.
+// ─────────────────────────────────────────────
 import { useCallback, useEffect, useState } from 'react';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import {
+  Alert,
+  Dimensions,
+  Image,
+  Linking,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  View,
+} from 'react-native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
-import { Button } from '@/components/ui';
-import { venueApi, reviewsApi } from '@/api/client';
+
+import {
+  Badge,
+  Body,
+  Button,
+  Caption,
+  Display,
+  FadeIn,
+  Hairline,
+  Kicker,
+  Numeric,
+  Pressy,
+  Skeleton,
+  Subhead,
+} from '@/components/ui';
+import { Colors, EditorialSpacing, Radius, Spacing } from '@/constants/tokens';
+import { HitSlop, Roles } from '@/constants/a11y';
+import { reviewsApi, venueApi } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { useAppStore } from '@/stores/app.store';
-import { Colors, Typography, Spacing, Radius } from '@/constants/tokens';
 import { ErrorState } from '@/components/ErrorState';
 
-/**
- * Open native maps for the venue. iOS prefers Apple Maps (with labeled pin);
- * falls back to Google Maps (which Android handles natively).
- *
- * We pass the venue NAME as the query + coords so the pin shows "OPALBAR" rather
- * than raw coordinates.
- */
-async function openDirections(venue: { lat?: number | string | null; lng?: number | string | null; address?: string | null; name?: string }) {
+const HERO_RATIO = 16 / 10;
+
+async function openDirections(venue: {
+  lat?: number | string | null;
+  lng?: number | string | null;
+  address?: string | null;
+  name?: string;
+}) {
   const lat = venue.lat != null ? Number(venue.lat) : null;
   const lng = venue.lng != null ? Number(venue.lng) : null;
   const name = venue.name ?? 'OPALBAR';
@@ -28,7 +60,6 @@ async function openDirections(venue: { lat?: number | string | null; lng?: numbe
     return;
   }
 
-  // iOS → Apple Maps with labeled pin
   if (Platform.OS === 'ios') {
     const appleUrl = hasCoords
       ? `http://maps.apple.com/?ll=${lat},${lng}&q=${encodeURIComponent(name)}`
@@ -37,8 +68,6 @@ async function openDirections(venue: { lat?: number | string | null; lng?: numbe
     if (canOpen) return Linking.openURL(appleUrl);
   }
 
-  // Google Maps — search by name+address+coords so pin shows the venue name.
-  // Format `query=NAME&center=LAT,LNG` or `query=LAT,LNG(NAME)` both work.
   const query = hasCoords && venue.address
     ? `${name}, ${venue.address}`
     : hasCoords
@@ -69,19 +98,33 @@ export default function VenueDetail() {
 
   const load = useCallback(() => {
     setLoadError(null);
-    Promise.all([
-      venueApi.get(id),
-      reviewsApi.venueSummary(id),
-    ]).then(([vRes, rRes]) => {
-      setVenue(vRes.data.data);
-      setSummary(rRes.data.data);
-    }).catch((err) => setLoadError(apiError(err)))
+    Promise.all([venueApi.get(id), reviewsApi.venueSummary(id)])
+      .then(([vRes, rRes]) => {
+        setVenue(vRes.data.data);
+        setSummary(rRes.data.data);
+      })
+      .catch((err) => setLoadError(apiError(err)))
       .finally(() => setLoading(false));
   }, [id]);
 
   useEffect(() => { load(); }, [load]);
 
-  if (loading) return <View style={styles.center}><ActivityIndicator color={Colors.accentPrimary} /></View>;
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.root} edges={['top']}>
+        <View style={styles.headerBar}>
+          <BackBtn onPress={() => router.back()} label={t ? 'Volver' : 'Back'} />
+        </View>
+        <View style={{ paddingHorizontal: EditorialSpacing.pageGutter, gap: Spacing[5], marginTop: Spacing[5] }}>
+          <Skeleton width="100%" height={220} radius={Radius.lg} />
+          <Skeleton width="40%" height={12} />
+          <Skeleton width="80%" height={36} />
+          <Skeleton width="100%" height={18} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   if (loadError && !venue) {
     return (
       <SafeAreaView style={styles.root} edges={['top']}>
@@ -93,206 +136,303 @@ export default function VenueDetail() {
       </SafeAreaView>
     );
   }
-  if (!venue) return <View style={styles.center}><Text style={styles.notFound}>{t ? 'Venue no encontrado' : 'Venue not found'}</Text></View>;
+
+  if (!venue) {
+    return (
+      <SafeAreaView style={[styles.root, styles.center]} edges={['top']}>
+        <Body tone="secondary">{t ? 'Venue no encontrado' : 'Venue not found'}</Body>
+      </SafeAreaView>
+    );
+  }
 
   const rating = Number(venue.ratingAvg ?? summary?.averageRating ?? 0);
   const reviewCount = Number(venue.ratingCount ?? summary?.totalReviews ?? 0);
+  const open = !!venue.isActive;
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 160 + insets.bottom }}
+        contentContainerStyle={{ paddingBottom: 180 + insets.bottom }}
       >
-        {/* Hero image / cover (or tint placeholder matching the app) */}
-        <View style={styles.hero}>
+        {/* Hero ────────────────────────── */}
+        <View style={styles.heroWrap}>
           {venue.coverUrl || venue.imageUrl ? (
-            <Image source={{ uri: venue.coverUrl || venue.imageUrl }} style={styles.heroImg} resizeMode="cover" />
+            <Image
+              source={{ uri: venue.coverUrl || venue.imageUrl }}
+              style={styles.heroImg}
+              resizeMode="cover"
+              accessibilityIgnoresInvertColors
+            />
           ) : (
-            <View style={styles.heroPlaceholder}>
-              <Feather name="image" size={32} color={Colors.textMuted} />
+            <View style={[styles.heroImg, styles.heroFallback]}>
+              <Feather name="image" size={40} color={Colors.textMuted} />
             </View>
           )}
-          <TouchableOpacity style={styles.backFloat} onPress={() => router.back()} hitSlop={10}>
-            <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
-          </TouchableOpacity>
+          <View style={styles.heroHeader}>
+            <BackBtn onPress={() => router.back()} label={t ? 'Volver' : 'Back'} overlay />
+          </View>
         </View>
 
-        <View style={styles.content}>
-          {/* Title + open badge */}
-          <View style={styles.titleRow}>
-            <Text style={styles.venueName}>{venue.name}</Text>
-            <View style={[styles.badge, venue.isActive ? styles.badgeOpen : styles.badgeClosed]}>
-              <View style={[styles.badgeDot, { backgroundColor: venue.isActive ? Colors.accentSuccess : Colors.textMuted }]} />
-              <Text style={[styles.badgeLabel, { color: venue.isActive ? Colors.accentSuccess : Colors.textMuted }]}>
-                {venue.isActive ? (t ? 'Abierto' : 'Open') : (t ? 'Cerrado' : 'Closed')}
-              </Text>
+        {/* Body ─────────────────────────── */}
+        <View style={styles.body}>
+          <FadeIn>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing[3] }}>
+              <Kicker tone="champagne">{t ? 'VENUE' : 'VENUE'}</Kicker>
+              <Badge
+                label={open ? (t ? 'ABIERTO' : 'OPEN') : t ? 'CERRADO' : 'CLOSED'}
+                variant={open ? 'success' : 'default'}
+                size="sm"
+              />
             </View>
-          </View>
+          </FadeIn>
+
+          <FadeIn delay={80} style={{ marginTop: Spacing[3] }}>
+            <Display size="md">{venue.name}</Display>
+          </FadeIn>
 
           {/* Rating row */}
           {reviewCount > 0 ? (
-            <View style={styles.ratingRow}>
-              <Feather name="star" size={14} color={Colors.accentWarning} />
-              <Text style={styles.ratingValue}>{rating.toFixed(1)}</Text>
-              <Text style={styles.ratingMeta}>({reviewCount} {t ? 'reseñas' : 'reviews'})</Text>
-            </View>
+            <FadeIn delay={160} style={styles.ratingRow}>
+              <Numeric size="sm">{rating.toFixed(1)}</Numeric>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing[1] }}>
+                <Feather name="star" size={14} color={Colors.accentWarning} />
+                <Caption tone="muted">
+                  {`${reviewCount} ${t ? 'reseñas' : 'reviews'}`}
+                </Caption>
+              </View>
+            </FadeIn>
           ) : null}
 
           {venue.description ? (
-            <Text style={styles.description}>{venue.description}</Text>
+            <FadeIn delay={240} style={{ marginTop: Spacing[5] }}>
+              <Body size="lg" tone="secondary">
+                {venue.description}
+              </Body>
+            </FadeIn>
           ) : null}
 
-          {/* Quick action tiles — consistent with app's card style */}
-          <View style={styles.actionsRow}>
-            <ActionTile icon="navigation" label={t ? 'Cómo llegar' : 'Directions'} onPress={() => openDirections(venue)} />
+          {/* Info rows ─────────────────── */}
+          <FadeIn delay={320} style={{ marginTop: Spacing[8] }}>
+            <Hairline variant="normal" />
+            {venue.address ? (
+              <>
+                <InfoRow
+                  icon="map-pin"
+                  kicker={t ? 'DIRECCIÓN' : 'ADDRESS'}
+                  value={venue.address}
+                  onPress={() => openDirections(venue)}
+                />
+                <Hairline variant="subtle" />
+              </>
+            ) : null}
+            {venue.openTime && venue.closeTime ? (
+              <>
+                <InfoRow
+                  icon="clock"
+                  kicker={t ? 'HORARIO' : 'HOURS'}
+                  value={`${venue.openTime}–${venue.closeTime}`}
+                />
+                <Hairline variant="subtle" />
+              </>
+            ) : null}
             {venue.phone ? (
-              <ActionTile icon="phone" label={t ? 'Llamar' : 'Call'} onPress={() => callVenue(venue.phone)} />
+              <>
+                <InfoRow
+                  icon="phone"
+                  kicker={t ? 'TELÉFONO' : 'PHONE'}
+                  value={venue.phone}
+                  onPress={() => callVenue(venue.phone)}
+                />
+                <Hairline variant="subtle" />
+              </>
             ) : null}
             {venue.website ? (
-              <ActionTile icon="globe" label={t ? 'Sitio' : 'Website'} onPress={() => Linking.openURL(venue.website).catch(() => {})} />
+              <>
+                <InfoRow
+                  icon="globe"
+                  kicker={t ? 'SITIO' : 'WEBSITE'}
+                  value={venue.website}
+                  onPress={() => Linking.openURL(venue.website).catch(() => {})}
+                />
+                <Hairline variant="subtle" />
+              </>
             ) : null}
-          </View>
-
-          {/* Info card (address, hours, phone) */}
-          <View style={styles.infoCard}>
-            {venue.address ? (
-              <TouchableOpacity style={styles.infoRow} onPress={() => openDirections(venue)} activeOpacity={0.7}>
-                <Feather name="map-pin" size={16} color={Colors.accentPrimary} />
-                <Text style={[styles.infoText, styles.infoLink]} numberOfLines={2}>{venue.address}</Text>
-                <Feather name="chevron-right" size={16} color={Colors.textMuted} />
-              </TouchableOpacity>
-            ) : null}
-
-            {venue.openTime && venue.closeTime ? (
-              <View style={[styles.infoRow, styles.infoRowBorder]}>
-                <Feather name="clock" size={16} color={Colors.accentPrimary} />
-                <Text style={styles.infoText}>
-                  {t ? 'Horario: ' : 'Hours: '}{venue.openTime}–{venue.closeTime}
-                </Text>
-              </View>
-            ) : null}
-
-            {venue.phone ? (
-              <TouchableOpacity style={[styles.infoRow, styles.infoRowBorder]} onPress={() => callVenue(venue.phone)} activeOpacity={0.7}>
-                <Feather name="phone" size={16} color={Colors.accentPrimary} />
-                <Text style={[styles.infoText, styles.infoLink]}>{venue.phone}</Text>
-                <Feather name="chevron-right" size={16} color={Colors.textMuted} />
-              </TouchableOpacity>
-            ) : null}
-          </View>
+            <Hairline variant="normal" />
+          </FadeIn>
         </View>
       </ScrollView>
 
-      {/* Bottom CTAs — respect home indicator */}
-      <View style={[styles.cta, { paddingBottom: 12 + insets.bottom }]}>
-        <Button label={t ? 'Hacer reservación' : 'Make reservation'} onPress={() => router.push({ pathname: '/(app)/reservations/new', params: { venueId: id } })} />
-        <TouchableOpacity onPress={() => router.push(`/(app)/venue/${id}/review`)} style={styles.reviewBtn}>
-          <Text style={styles.reviewBtnText}>{t ? 'Escribir reseña' : 'Write a review'}</Text>
-        </TouchableOpacity>
+      {/* Sticky CTA ─────────────────── */}
+      <View style={[styles.ctaWrap, { paddingBottom: Spacing[4] + insets.bottom }]}>
+        <Hairline variant="subtle" />
+        <View style={styles.ctaInner}>
+          <Button
+            label={t ? 'Hacer reservación' : 'Make reservation'}
+            onPress={() => router.push({ pathname: '/(app)/reservations/new', params: { venueId: id } })}
+            variant="primary"
+            size="lg"
+            fullWidth
+          />
+          <Pressy
+            onPress={() => router.push(`/(app)/venue/${id}/review`)}
+            accessibilityRole={Roles.button}
+            accessibilityLabel={t ? 'Escribir reseña' : 'Write a review'}
+            hitSlop={HitSlop.expand}
+            haptic="select"
+            style={styles.reviewBtn}
+          >
+            <Subhead tone="accent">{t ? 'Escribir reseña' : 'Write a review'}</Subhead>
+          </Pressy>
+        </View>
       </View>
     </SafeAreaView>
   );
 }
 
-function ActionTile({ icon, label, onPress }: { icon: React.ComponentProps<typeof Feather>['name']; label: string; onPress: () => void }) {
-  return (
-    <TouchableOpacity style={styles.actionBtn} onPress={onPress} activeOpacity={0.85}>
-      <View style={styles.actionBtnIconBox}>
-        <Feather name={icon} size={18} color={Colors.accentPrimary} />
+function InfoRow({
+  icon,
+  kicker,
+  value,
+  onPress,
+}: {
+  icon: React.ComponentProps<typeof Feather>['name'];
+  kicker: string;
+  value: string;
+  onPress?: () => void;
+}) {
+  const content = (
+    <View style={styles.infoRow}>
+      <View style={styles.infoIcon}>
+        <Feather name={icon} size={16} color={Colors.accentChampagne} />
       </View>
-      <Text style={styles.actionBtnText}>{label}</Text>
-    </TouchableOpacity>
+      <View style={{ flex: 1 }}>
+        <Kicker tone="muted">{kicker}</Kicker>
+        <Body
+          tone="primary"
+          style={{ marginTop: Spacing[1] }}
+          numberOfLines={2}
+        >
+          {value}
+        </Body>
+      </View>
+      {onPress ? (
+        <Feather name="chevron-right" size={16} color={Colors.textMuted} />
+      ) : null}
+    </View>
+  );
+
+  if (onPress) {
+    return (
+      <Pressy
+        onPress={onPress}
+        accessibilityRole={Roles.button}
+        accessibilityLabel={`${kicker}: ${value}`}
+        haptic="select"
+      >
+        {content}
+      </Pressy>
+    );
+  }
+  return content;
+}
+
+function BackBtn({
+  onPress,
+  label,
+  overlay,
+}: {
+  onPress: () => void;
+  label: string;
+  overlay?: boolean;
+}) {
+  return (
+    <Pressy
+      onPress={onPress}
+      accessibilityRole={Roles.button}
+      accessibilityLabel={label}
+      hitSlop={HitSlop.expand}
+      style={[styles.backBtn, overlay && styles.backBtnOverlay]}
+    >
+      <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
+    </Pressy>
   );
 }
 
+const screenWidth = Dimensions.get('window').width;
+const heroHeight = Math.round(screenWidth / HERO_RATIO);
+
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.bgPrimary },
-  notFound: { color: Colors.textSecondary },
+  center: { alignItems: 'center', justifyContent: 'center' },
 
-  hero: { height: 220, backgroundColor: Colors.bgCard, position: 'relative' },
-  heroImg: { width: '100%', height: '100%' },
-  heroPlaceholder: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  backFloat: {
-    position: 'absolute', top: 12, left: 16,
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    alignItems: 'center', justifyContent: 'center',
+  headerBar: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[2],
   },
 
-  content: { padding: Spacing[5], gap: Spacing[4] },
-
-  titleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: Spacing[3] },
-  venueName: { flex: 1, fontSize: Typography.fontSize['2xl'], fontWeight: Typography.fontWeight.bold, color: Colors.textPrimary },
-
-  badge: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    paddingHorizontal: 10, paddingVertical: 4,
-    borderRadius: Radius.full,
-    borderWidth: 1,
+  heroWrap: { width: '100%' },
+  heroImg: { width: '100%', height: heroHeight, backgroundColor: Colors.bgCard },
+  heroFallback: { alignItems: 'center', justifyContent: 'center' },
+  heroHeader: {
+    position: 'absolute',
+    top: Spacing[2],
+    left: EditorialSpacing.pageGutter,
   },
-  badgeOpen: { backgroundColor: 'rgba(56,199,147,0.15)', borderColor: 'rgba(56,199,147,0.4)' },
-  badgeClosed: { backgroundColor: Colors.bgElevated, borderColor: Colors.border },
-  badgeDot: { width: 6, height: 6, borderRadius: 3 },
-  badgeLabel: { fontSize: 11, fontWeight: '700' },
-
-  ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: -Spacing[2] },
-  ratingValue: { color: Colors.textPrimary, fontSize: Typography.fontSize.base, fontWeight: Typography.fontWeight.bold },
-  ratingMeta: { color: Colors.textMuted, fontSize: Typography.fontSize.xs },
-
-  description: { fontSize: Typography.fontSize.base, color: Colors.textSecondary, lineHeight: 22 },
-
-  actionsRow: {
-    flexDirection: 'row',
-    gap: Spacing[2],
-    marginTop: Spacing[2],
-  },
-  actionBtn: {
-    flex: 1,
-    backgroundColor: Colors.bgCard,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    paddingVertical: Spacing[3],
-    borderRadius: Radius.button,
+  backBtn: {
+    width: 44,
+    height: 44,
     alignItems: 'center',
-    gap: 6,
+    justifyContent: 'center',
+    marginLeft: -Spacing[2],
   },
-  actionBtnIconBox: {
-    width: 36, height: 36, borderRadius: 10,
-    backgroundColor: 'rgba(244,163,64,0.15)',
-    alignItems: 'center', justifyContent: 'center',
+  backBtnOverlay: {
+    backgroundColor: 'rgba(8,7,6,0.45)',
+    borderRadius: Radius.full,
+    width: 40,
+    height: 40,
+    marginLeft: 0,
   },
-  actionBtnText: { color: Colors.textPrimary, fontSize: Typography.fontSize.xs, fontWeight: Typography.fontWeight.semiBold },
 
-  infoCard: {
-    backgroundColor: Colors.bgCard,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: Radius.card,
-    overflow: 'hidden',
+  body: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[8],
   },
-  infoRow: {
+
+  ratingRow: {
+    marginTop: Spacing[4],
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing[3],
-    paddingHorizontal: Spacing[4],
-    paddingVertical: Spacing[3],
   },
-  infoRowBorder: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: Colors.border },
-  infoText: { fontSize: Typography.fontSize.sm, color: Colors.textPrimary, flex: 1 },
-  infoLink: { color: Colors.textPrimary },
 
-  cta: {
-    position: 'absolute',
-    left: 0, right: 0, bottom: 0,
-    backgroundColor: Colors.bgPrimary,
-    paddingHorizontal: Spacing[5],
-    paddingTop: Spacing[4],
-    borderTopWidth: 1,
-    borderTopColor: Colors.border,
-    gap: Spacing[2],
+  infoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: Spacing[4],
+    gap: Spacing[4],
   },
-  reviewBtn: { alignItems: 'center', paddingVertical: Spacing[2] },
-  reviewBtnText: { fontSize: Typography.fontSize.base, color: Colors.accentPrimary, fontWeight: Typography.fontWeight.semiBold },
+  infoIcon: {
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  ctaWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: Colors.bgPrimary,
+  },
+  ctaInner: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[4],
+    gap: Spacing[3],
+  },
+  reviewBtn: {
+    alignItems: 'center',
+    paddingVertical: Spacing[2],
+  },
 });

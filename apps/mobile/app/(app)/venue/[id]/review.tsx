@@ -1,89 +1,259 @@
-import { View, Text, StyleSheet, TextInput, Alert, TouchableOpacity } from 'react-native';
+// ─────────────────────────────────────────────
+//  Write a Review — Editorial Premium
+//
+//  Kicker + Display title, large rating stars, then an editorial
+//  multi-line input (kicker label above). Sticky primary CTA.
+// ─────────────────────────────────────────────
 import { useState } from 'react';
-import { useRouter, useLocalSearchParams } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { Button } from '@/components/ui';
+import {
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  TextInput,
+  View,
+} from 'react-native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Feather } from '@expo/vector-icons';
+
+import {
+  Body,
+  Button,
+  Caption,
+  Display,
+  FadeIn,
+  Hairline,
+  Kicker,
+  Pressy,
+} from '@/components/ui';
+import { Colors, EditorialSpacing, Radius, Spacing, TypePresets } from '@/constants/tokens';
+import { HitSlop, Roles } from '@/constants/a11y';
 import { reviewsApi } from '@/api/client';
 import { useAppStore } from '@/stores/app.store';
-import { Colors, Typography, Spacing, Radius } from '@/constants/tokens';
+import { useFeedback } from '@/hooks/useFeedback';
+
+const STAR_LABEL_ES = ['', 'Mala', 'Regular', 'Buena', 'Excelente', 'Sublime'];
+const STAR_LABEL_EN = ['', 'Poor', 'Fair', 'Good', 'Great', 'Sublime'];
 
 export default function WriteReview() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { language } = useAppStore();
   const t = language === 'es';
+  const insets = useSafeAreaInsets();
+  const fb = useFeedback();
+
   const [rating, setRating] = useState(0);
   const [comment, setComment] = useState('');
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit() {
     if (rating === 0) {
-      Alert.alert(t ? 'Error' : 'Error', t ? 'Selecciona una calificación' : 'Please select a rating');
+      Alert.alert(
+        t ? 'Error' : 'Error',
+        t ? 'Selecciona una calificación' : 'Please select a rating',
+      );
       return;
     }
     setLoading(true);
     try {
-      await reviewsApi.create({ venueId: id, rating, comment: comment.trim() || undefined });
+      await reviewsApi.create({
+        venueId: id,
+        rating,
+        comment: comment.trim() || undefined,
+      });
+      fb.success();
       router.back();
     } catch (err: any) {
-      Alert.alert(t ? 'Error' : 'Error', err.response?.data?.message ?? (t ? 'No se pudo enviar' : 'Could not submit'));
+      fb.error();
+      Alert.alert(
+        t ? 'Error' : 'Error',
+        err.response?.data?.message ?? (t ? 'No se pudo enviar' : 'Could not submit'),
+      );
     } finally {
       setLoading(false);
     }
   }
 
+  const starLabels = t ? STAR_LABEL_ES : STAR_LABEL_EN;
+
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Text style={styles.backIcon}>←</Text>
-        </TouchableOpacity>
-        <Text style={styles.title}>{t ? 'Escribir reseña' : 'Write a review'}</Text>
-        <View style={{ width: 24 }} />
-      </View>
-
-      <View style={styles.content}>
-        <Text style={styles.ratingLabel}>{t ? 'Calificación' : 'Rating'}</Text>
-        <View style={styles.stars}>
-          {[1, 2, 3, 4, 5].map((star) => (
-            <TouchableOpacity key={star} onPress={() => setRating(star)}>
-              <Text style={[styles.star, star <= rating && styles.starActive]}>★</Text>
-            </TouchableOpacity>
-          ))}
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        <View style={styles.headerRow}>
+          <Pressy
+            onPress={() => router.back()}
+            accessibilityRole={Roles.button}
+            accessibilityLabel={t ? 'Volver' : 'Back'}
+            hitSlop={HitSlop.expand}
+            style={styles.backBtn}
+          >
+            <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
+          </Pressy>
         </View>
 
-        <Text style={styles.commentLabel}>{t ? 'Comentario (opcional)' : 'Comment (optional)'}</Text>
-        <TextInput
-          style={styles.textarea}
-          placeholder={t ? 'Comparte tu experiencia...' : 'Share your experience...'}
-          placeholderTextColor={Colors.textDisabled}
-          value={comment}
-          onChangeText={setComment}
-          multiline
-          maxLength={500}
-        />
-        <Text style={styles.charCount}>{comment.length}/500</Text>
-      </View>
+        <ScrollView
+          contentContainerStyle={styles.scroll}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <FadeIn>
+            <Kicker tone="champagne">{t ? 'TU EXPERIENCIA' : 'YOUR EXPERIENCE'}</Kicker>
+          </FadeIn>
+          <FadeIn delay={80} style={{ marginTop: Spacing[3] }}>
+            <Display size="md">{t ? 'Escribe una reseña.' : 'Write a review.'}</Display>
+          </FadeIn>
+          <FadeIn delay={160} style={{ marginTop: Spacing[3] }}>
+            <Body tone="secondary" size="lg">
+              {t
+                ? 'Tu opinión ayuda a otros miembros a elegir.'
+                : 'Your review helps other members decide.'}
+            </Body>
+          </FadeIn>
 
-      <View style={styles.footer}>
-        <Button label={t ? 'Enviar reseña' : 'Submit review'} onPress={handleSubmit} loading={loading} disabled={rating === 0} />
-      </View>
+          {/* Rating ─────────────────────── */}
+          <FadeIn delay={240} style={styles.section}>
+            <Kicker tone="muted">{t ? 'CALIFICACIÓN' : 'RATING'}</Kicker>
+            <View style={styles.stars}>
+              {[1, 2, 3, 4, 5].map((star) => (
+                <Pressy
+                  key={star}
+                  onPress={() => setRating(star)}
+                  accessibilityRole={Roles.button}
+                  accessibilityLabel={`${star}`}
+                  accessibilityState={{ selected: star <= rating }}
+                  hitSlop={HitSlop.expand}
+                  haptic="select"
+                  style={styles.starBtn}
+                >
+                  <Feather
+                    name="star"
+                    size={38}
+                    color={star <= rating ? Colors.accentPrimary : Colors.borderStrong}
+                    style={star <= rating ? styles.starActive : undefined}
+                  />
+                </Pressy>
+              ))}
+            </View>
+            {rating > 0 ? (
+              <Caption tone="champagne" style={{ marginTop: Spacing[3] }}>
+                {starLabels[rating]}
+              </Caption>
+            ) : null}
+          </FadeIn>
+
+          <Hairline variant="subtle" style={{ marginTop: Spacing[6] }} />
+
+          {/* Comment ────────────────────── */}
+          <FadeIn delay={320} style={styles.section}>
+            <Kicker tone="muted">
+              {t ? 'COMENTARIO (OPCIONAL)' : 'COMMENT (OPTIONAL)'}
+            </Kicker>
+            <View style={styles.textareaBox}>
+              <TextInput
+                style={styles.textarea}
+                placeholder={t ? 'Comparte tu experiencia…' : 'Share your experience…'}
+                placeholderTextColor={Colors.textMuted}
+                value={comment}
+                onChangeText={setComment}
+                multiline
+                maxLength={500}
+                accessibilityLabel={t ? 'Comentario' : 'Comment'}
+                textAlignVertical="top"
+              />
+            </View>
+            <Caption tone="muted" align="right" style={{ marginTop: Spacing[2] }}>
+              {`${comment.length}/500`}
+            </Caption>
+          </FadeIn>
+        </ScrollView>
+
+        <View style={[styles.footer, { paddingBottom: Spacing[4] + insets.bottom }]}>
+          <Hairline variant="subtle" />
+          <View style={styles.footerInner}>
+            <Button
+              label={t ? 'Enviar reseña' : 'Submit review'}
+              onPress={handleSubmit}
+              loading={loading}
+              disabled={rating === 0}
+              variant="primary"
+              size="lg"
+              fullWidth
+              haptic="success"
+            />
+          </View>
+        </View>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: Spacing[5], paddingVertical: Spacing[4] },
-  backIcon: { fontSize: 22, color: Colors.textPrimary },
-  title: { fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.bold, color: Colors.textPrimary },
-  content: { flex: 1, paddingHorizontal: Spacing[5], gap: Spacing[3] },
-  ratingLabel: { fontSize: Typography.fontSize.sm, fontWeight: Typography.fontWeight.semiBold, color: Colors.textSecondary, textTransform: 'uppercase', letterSpacing: 1 },
-  stars: { flexDirection: 'row', gap: Spacing[2] },
-  star: { fontSize: 36, color: Colors.border },
-  starActive: { color: '#F59E0B' },
-  commentLabel: { fontSize: Typography.fontSize.sm, fontWeight: Typography.fontWeight.semiBold, color: Colors.textSecondary, textTransform: 'uppercase', letterSpacing: 1, marginTop: Spacing[2] },
-  textarea: { backgroundColor: Colors.bgCard, borderRadius: Radius.xl, borderWidth: 1, borderColor: Colors.border, padding: Spacing[4], color: Colors.textPrimary, fontSize: Typography.fontSize.base, height: 140, textAlignVertical: 'top' },
-  charCount: { alignSelf: 'flex-end', fontSize: Typography.fontSize.xs, color: Colors.textDisabled },
-  footer: { paddingHorizontal: Spacing[5], paddingVertical: Spacing[4], borderTopWidth: 1, borderTopColor: Colors.border },
+  headerRow: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[2],
+  },
+  backBtn: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: -Spacing[2],
+  },
+
+  scroll: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[6],
+    paddingBottom: 140,
+  },
+
+  section: { marginTop: Spacing[8] },
+
+  stars: {
+    marginTop: Spacing[4],
+    flexDirection: 'row',
+    gap: Spacing[3],
+  },
+  starBtn: {
+    width: 48,
+    height: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  starActive: {},
+
+  textareaBox: {
+    marginTop: Spacing[3],
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.bgCard,
+    padding: Spacing[4],
+    minHeight: 140,
+  },
+  textarea: {
+    flex: 1,
+    color: Colors.textPrimary,
+    ...TypePresets.body,
+    padding: 0,
+    minHeight: 110,
+  },
+
+  footer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: Colors.bgPrimary,
+  },
+  footerInner: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[4],
+  },
 });

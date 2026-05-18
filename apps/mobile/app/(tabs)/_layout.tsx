@@ -1,10 +1,30 @@
+// ─────────────────────────────────────────────
+//  Tabs layout — Editorial Premium
+//
+//  Tab bar choice: NOT a pill. Editorial doesn't ride on rounded pills.
+//  Instead: a flat bar with a hairline top border and a 2px underline
+//  marker that slides under the active tab. The label is small caps with
+//  letterspacing — same vocabulary as <Kicker>.
+//
+//  Motion: underline + label color cross-fade over 240ms outQuint.
+//  Active label uses textPrimary; inactive uses textMuted. No icon scale,
+//  no jump — the underline carries the active state.
+// ─────────────────────────────────────────────
+import { useEffect } from 'react';
 import { Tabs } from 'expo-router';
-import { View, Text, StyleSheet } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Animated, { useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
-import { useEffect } from 'react';
-import { Colors } from '@/constants/tokens';
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
+
+import { Colors, Spacing, TypePresets } from '@/constants/tokens';
+import { Durations } from '@/constants/motion';
+import { Roles } from '@/constants/a11y';
 import { useAppStore } from '@/stores/app.store';
 import { Pressy } from '@/components/ui/Pressy';
 
@@ -24,12 +44,12 @@ const TABS: TabDef[] = [
   { route: 'profile', icon: 'user', label: { es: 'PERFIL', en: 'PROFILE' } },
 ];
 
-function PillTabBar({ state, navigation }: any) {
+function EditorialTabBar({ state, navigation }: any) {
   const { language } = useAppStore();
 
   return (
     <SafeAreaView edges={['bottom']} style={styles.safe}>
-      <View style={styles.pill}>
+      <View style={styles.bar} accessibilityRole={Roles.tablist}>
         {state.routes.map((route: any, index: number) => {
           const def = TABS.find((t) => t.route === route.name);
           if (!def) return null;
@@ -72,36 +92,48 @@ function TabItem({
   label: string;
   onPress: () => void;
 }) {
-  // Smoothly animate the active indicator + icon size on focus change.
-  const focus = useSharedValue(focused ? 1 : 0);
-  useEffect(() => {
-    focus.value = withSpring(focused ? 1 : 0, { damping: 14, stiffness: 220 });
-  }, [focused, focus]);
+  const progress = useSharedValue(focused ? 1 : 0);
 
-  const dotStyle = useAnimatedStyle(() => ({
-    transform: [{ scaleX: 1 + focus.value * 4 }, { scaleY: 1 + focus.value * 0.4 }],
-    opacity: 0.2 + focus.value * 0.8,
-  }));
-  const iconStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: -focus.value * 2 }, { scale: 1 + focus.value * 0.08 }],
+  useEffect(() => {
+    progress.value = withTiming(focused ? 1 : 0, {
+      duration: Durations.fast,
+      easing: Easing.bezier(0.22, 1, 0.36, 1),
+    });
+  }, [focused, progress]);
+
+  const underline = useAnimatedStyle(() => ({
+    opacity: progress.value,
+    transform: [{ scaleX: progress.value }],
   }));
 
   return (
     <Pressy
       haptic={focused ? 'none' : 'select'}
-      scaleTo={0.92}
+      scaleTo={0.96}
       onPress={onPress}
+      accessibilityRole={Roles.tab}
+      accessibilityLabel={label}
+      accessibilityState={{ selected: focused }}
       style={styles.tab}
     >
-      <Animated.View style={iconStyle}>
-        <Feather
-          name={icon}
-          size={focused ? 22 : 20}
-          color={focused ? Colors.accentPrimary : Colors.textMuted}
-        />
-      </Animated.View>
-      <Text style={[styles.label, focused && styles.labelActive]}>{label}</Text>
-      <Animated.View style={[styles.dot, focused && styles.dotActive, dotStyle]} />
+      <Feather
+        name={icon}
+        size={20}
+        color={focused ? Colors.textPrimary : Colors.textMuted}
+      />
+      <Text
+        style={[
+          TypePresets.kicker,
+          {
+            color: focused ? Colors.textPrimary : Colors.textMuted,
+            marginTop: Spacing[1],
+          },
+        ]}
+        numberOfLines={1}
+      >
+        {label}
+      </Text>
+      <Animated.View style={[styles.underline, underline]} />
     </Pressy>
   );
 }
@@ -112,7 +144,7 @@ export default function TabsLayout() {
       screenOptions={{
         headerShown: false,
       }}
-      tabBar={(props) => <PillTabBar {...props} />}
+      tabBar={(props) => <EditorialTabBar {...props} />}
     >
       <Tabs.Screen name="home" />
       <Tabs.Screen name="events" />
@@ -126,46 +158,27 @@ export default function TabsLayout() {
 const styles = StyleSheet.create({
   safe: {
     backgroundColor: Colors.bgPrimary,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Colors.border,
   },
-  pill: {
+  bar: {
     flexDirection: 'row',
-    marginHorizontal: 16,
-    marginTop: 8,
-    marginBottom: 8,
-    height: 60,
-    backgroundColor: Colors.bgCard,
-    borderRadius: 28,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: Colors.border,
-    paddingHorizontal: 6,
-    alignItems: 'stretch',
+    paddingHorizontal: Spacing[2],
+    paddingTop: Spacing[2],
+    minHeight: 64,
   },
   tab: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 3,
-    paddingTop: 6,
-    paddingBottom: 4,
+    paddingVertical: Spacing[2],
+    minHeight: 56,
   },
-  label: {
-    fontSize: 9,
-    fontWeight: '600',
-    letterSpacing: 0.5,
-    color: Colors.textMuted,
-  },
-  labelActive: {
-    color: Colors.accentPrimary,
-    fontWeight: '800',
-  },
-  dot: {
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: 'transparent',
-    marginTop: 2,
-  },
-  dotActive: {
-    backgroundColor: Colors.accentPrimary,
+  underline: {
+    position: 'absolute',
+    bottom: 0,
+    height: 2,
+    width: '40%',
+    backgroundColor: Colors.textPrimary,
   },
 });

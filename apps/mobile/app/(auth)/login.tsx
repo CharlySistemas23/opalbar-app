@@ -1,13 +1,39 @@
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, ActivityIndicator, KeyboardAvoidingView, Platform, Alert, Image } from 'react-native';
+// ─────────────────────────────────────────────
+//  Login — Editorial Premium
+//
+//  Layout: kicker + Display headline, then form. No hero icon (we own
+//  identity from welcome.tsx — reentry doesn't need to re-pitch the
+//  brand). Inputs are <Input> primitives with editorial label-on-top.
+// ─────────────────────────────────────────────
 import { useState } from 'react';
+import {
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  View,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+
+import { Colors, EditorialSpacing, Spacing } from '@/constants/tokens';
+import { HitSlop } from '@/constants/a11y';
 import { useAuthStore } from '@/stores/auth.store';
 import { useAppStore } from '@/stores/app.store';
 import { apiError } from '@/api/errors';
-import { Colors, Radius } from '@/constants/tokens';
 import { useFeedback } from '@/hooks/useFeedback';
+import {
+  Body,
+  Button,
+  Caption,
+  Display,
+  FadeIn,
+  Input,
+  Kicker,
+  Pressy,
+} from '@/components/ui';
 
 export default function Login() {
   const router = useRouter();
@@ -19,8 +45,6 @@ export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [emailFocused, setEmailFocused] = useState(false);
-  const [passwordFocused, setPasswordFocused] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function handleLogin() {
@@ -39,16 +63,11 @@ export default function Login() {
       fb.success();
       router.replace('/(tabs)/home' as never);
     } catch (err: any) {
-      // Email no verificado: el backend ya reenvió el OTP, ruteamos a verify
       if (err?.code === 'EMAIL_NOT_VERIFIED') {
         const verifyEmail: string = err.identifier || mail;
         router.push({
           pathname: '/(auth)/otp-email',
-          params: {
-            email: verifyEmail,
-            password,
-            purpose: 'EMAIL_VERIFICATION',
-          },
+          params: { email: verifyEmail, password, purpose: 'EMAIL_VERIFICATION' },
         } as never);
         return;
       }
@@ -71,108 +90,124 @@ export default function Login() {
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        {/* Back */}
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} hitSlop={10}>
+          <Pressable
+            onPress={() => router.back()}
+            hitSlop={HitSlop.expand}
+            accessibilityRole="button"
+            accessibilityLabel={t ? 'Volver' : 'Back'}
+            style={styles.backBtn}
+          >
             <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
-          </TouchableOpacity>
+          </Pressable>
         </View>
 
-        {/* Hero */}
-        <View style={styles.hero}>
-          <Image
-            source={require('../../assets/icon.png')}
-            style={styles.logo}
-            resizeMode="contain"
-          />
-          <Text style={styles.brand}>OPALBAR</Text>
-          <Text style={styles.tagline}>
-            {t
-              ? 'Siempre hay algo pasando,\ny tú te enteras primero.'
-              : "Something's always happening,\nand you hear about it first."}
-          </Text>
-        </View>
+        <ScrollView
+          contentContainerStyle={styles.scroll}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <FadeIn>
+            <Kicker tone="champagne">{t ? 'BIENVENIDO DE VUELTA' : 'WELCOME BACK'}</Kicker>
+          </FadeIn>
+          <FadeIn delay={80} style={{ marginTop: Spacing[3] }}>
+            <Display size="md">{t ? 'Inicia sesión.' : 'Sign in.'}</Display>
+          </FadeIn>
 
-        <View style={styles.form}>
-          <Text style={styles.formTitle}>{t ? 'Inicia sesión' : 'Sign in'}</Text>
+          <View style={styles.form}>
+            <FadeIn delay={180}>
+              <Input
+                label={t ? 'Email' : 'Email'}
+                placeholder={t ? 'email@ejemplo.com' : 'email@example.com'}
+                value={email}
+                onChangeText={setEmail}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoComplete="email"
+                accessibilityLabel={t ? 'Correo electrónico' : 'Email'}
+                leftIcon={<Feather name="mail" size={18} color={Colors.textMuted} />}
+              />
+            </FadeIn>
 
-          {/* Email */}
-          <View style={[styles.inputBox, emailFocused && styles.inputBoxFocused]}>
-            <Feather name="mail" size={18} color={Colors.textMuted} />
-            <TextInput
-              style={styles.input}
-              value={email}
-              onChangeText={setEmail}
-              placeholder={t ? 'email@ejemplo.com' : 'email@example.com'}
-              placeholderTextColor={Colors.textMuted}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoComplete="email"
-              onFocus={() => setEmailFocused(true)}
-              onBlur={() => setEmailFocused(false)}
-            />
+            <FadeIn delay={250}>
+              <Input
+                label={t ? 'Contraseña' : 'Password'}
+                placeholder={t ? 'Tu contraseña' : 'Your password'}
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry={!showPassword}
+                autoCapitalize="none"
+                autoComplete="password"
+                accessibilityLabel={t ? 'Contraseña' : 'Password'}
+                leftIcon={<Feather name="lock" size={18} color={Colors.textMuted} />}
+                rightIcon={
+                  <Feather
+                    name={showPassword ? 'eye-off' : 'eye'}
+                    size={18}
+                    color={Colors.textMuted}
+                  />
+                }
+                onRightIconPress={() => setShowPassword((v) => !v)}
+                rightIconLabel={
+                  showPassword
+                    ? t
+                      ? 'Ocultar contraseña'
+                      : 'Hide password'
+                    : t
+                      ? 'Mostrar contraseña'
+                      : 'Show password'
+                }
+              />
+            </FadeIn>
+
+            {error ? (
+              <FadeIn>
+                <Caption tone="danger" align="center">
+                  {error}
+                </Caption>
+              </FadeIn>
+            ) : null}
+
+            <Pressy
+              onPress={() => router.push('/(auth)/forgot-password' as never)}
+              accessibilityRole="link"
+              accessibilityLabel={t ? '¿Olvidaste tu contraseña?' : 'Forgot password?'}
+              haptic="select"
+              style={styles.forgotWrap}
+            >
+              <Caption tone="accent">
+                {t ? '¿Olvidaste tu contraseña?' : 'Forgot your password?'}
+              </Caption>
+            </Pressy>
+
+            <FadeIn delay={320}>
+              <Button
+                label={t ? 'Entrar' : 'Sign in'}
+                onPress={handleLogin}
+                loading={isLoading}
+                variant="primary"
+                size="lg"
+                fullWidth
+                rightIcon={<Feather name="arrow-right" size={18} color={Colors.textInverse} />}
+              />
+            </FadeIn>
           </View>
 
-          {/* Password */}
-          <View style={[styles.inputBox, passwordFocused && styles.inputBoxFocused]}>
-            <Feather name="lock" size={18} color={Colors.textMuted} />
-            <TextInput
-              style={styles.input}
-              value={password}
-              onChangeText={setPassword}
-              placeholder={t ? 'Contraseña' : 'Password'}
-              placeholderTextColor={Colors.textMuted}
-              secureTextEntry={!showPassword}
-              autoCapitalize="none"
-              autoComplete="password"
-              onFocus={() => setPasswordFocused(true)}
-              onBlur={() => setPasswordFocused(false)}
-            />
-            <TouchableOpacity onPress={() => setShowPassword((v) => !v)} hitSlop={8}>
-              <Feather name={showPassword ? 'eye-off' : 'eye'} size={18} color={Colors.textMuted} />
-            </TouchableOpacity>
-          </View>
-
-          {error ? <Text style={styles.error}>{error}</Text> : null}
-
-          {/* Forgot password */}
-          <TouchableOpacity
-            style={styles.forgotWrap}
-            onPress={() => router.push('/(auth)/forgot-password' as never)}
-            hitSlop={8}
-          >
-            <Text style={styles.forgot}>
-              {t ? '¿Olvidaste tu contraseña?' : 'Forgot your password?'}
-            </Text>
-          </TouchableOpacity>
-
-          {/* Continue */}
-          <TouchableOpacity
-            style={[styles.primaryBtn, isLoading && styles.btnDisabled]}
-            onPress={handleLogin}
-            disabled={isLoading}
-            activeOpacity={0.85}
-          >
-            {isLoading ? (
-              <ActivityIndicator color={Colors.textInverse} />
-            ) : (
-              <>
-                <Text style={styles.primaryBtnLabel}>{t ? 'Entrar' : 'Sign in'}</Text>
-                <Feather name="arrow-right" size={18} color={Colors.textInverse} />
-              </>
-            )}
-          </TouchableOpacity>
-
-          {/* Signup link */}
           <View style={styles.signupRow}>
-            <Text style={styles.signupText}>
+            <Body size="sm" tone="secondary">
               {t ? '¿No tienes cuenta? ' : "Don't have an account? "}
-            </Text>
-            <TouchableOpacity onPress={() => router.replace('/(auth)/register' as never)} hitSlop={6}>
-              <Text style={styles.signupLink}>{t ? 'Regístrate' : 'Sign up'}</Text>
-            </TouchableOpacity>
+            </Body>
+            <Pressy
+              onPress={() => router.replace('/(auth)/register' as never)}
+              accessibilityRole="link"
+              accessibilityLabel={t ? 'Regístrate' : 'Sign up'}
+            >
+              <Body size="sm" tone="accent" weight="semiBold">
+                {t ? 'Regístrate' : 'Sign up'}
+              </Body>
+            </Pressy>
           </View>
-        </View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -180,66 +215,30 @@ export default function Login() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
-  header: { paddingHorizontal: 20, paddingVertical: 8 },
+  header: { paddingHorizontal: EditorialSpacing.pageGutter, paddingTop: Spacing[2] },
   backBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: Colors.bgCard,
-    alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1, borderColor: Colors.border,
-  },
-
-  hero: {
+    width: 44,
+    height: 44,
     alignItems: 'center',
-    paddingTop: 8,
-    paddingHorizontal: 24,
-    paddingBottom: 24,
-    gap: 8,
+    justifyContent: 'center',
+    marginLeft: -Spacing[2],
   },
-  logo: {
-    width: 96, height: 96, borderRadius: 22,
-    marginBottom: 8,
+  scroll: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[8],
+    paddingBottom: Spacing[8],
   },
-  brand: { color: Colors.textPrimary, fontSize: 24, fontWeight: '800', letterSpacing: 3 },
-  tagline: {
-    color: Colors.textSecondary, fontSize: 14, lineHeight: 20, textAlign: 'center', marginTop: 4,
+  form: {
+    marginTop: Spacing[8],
+    gap: Spacing[4],
   },
-
-  form: { paddingHorizontal: 24, gap: 14 },
-  formTitle: { color: Colors.textPrimary, fontSize: 22, fontWeight: '700', marginBottom: 4 },
-
-  inputBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    height: 52,
-    paddingHorizontal: 16,
-    backgroundColor: Colors.bgCard,
-    borderRadius: Radius.button,
-    borderWidth: 1,
-    borderColor: Colors.border,
+  forgotWrap: {
+    alignSelf: 'flex-end',
+    paddingVertical: Spacing[1],
   },
-  inputBoxFocused: { borderColor: Colors.accentPrimary },
-  input: { flex: 1, color: Colors.textPrimary, fontSize: 15, padding: 0 },
-
-  error: { fontSize: 12, color: Colors.accentDanger, textAlign: 'center' },
-
-  forgotWrap: { alignSelf: 'flex-end' },
-  forgot: { color: Colors.accentPrimary, fontSize: 13, fontWeight: '500' },
-
-  primaryBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-    height: 52,
-    backgroundColor: Colors.accentPrimary,
-    borderRadius: Radius.button,
-  },
-  primaryBtnLabel: { color: Colors.textInverse, fontSize: 16, fontWeight: '700' },
-  btnDisabled: { opacity: 0.6 },
-
   signupRow: {
     flexDirection: 'row',
     justifyContent: 'center',
-    marginTop: 16,
+    marginTop: Spacing[6],
   },
-  signupText: { color: Colors.textSecondary, fontSize: 13 },
-  signupLink: { color: Colors.accentPrimary, fontSize: 13, fontWeight: '700' },
 });

@@ -1,15 +1,35 @@
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, RefreshControl, Image } from 'react-native';
-import { useEffect, useState, useCallback } from 'react';
+// ─────────────────────────────────────────────
+//  Saved — Editorial Premium
+//
+//  Magazine layout:
+//   · Kicker + Heading header
+//   · Horizontal pill segmented row for type filter (ALL/EVENT/OFFER/POST/VENUE)
+//   · Editorial cards: thumb + type kicker + serif subhead + venue meta +
+//     bookmark unsave icon
+// ─────────────────────────────────────────────
+import { useCallback, useEffect, useState } from 'react';
+import { FlatList, Image, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+
 import { usersApi } from '@/api/client';
 import { useAppStore } from '@/stores/app.store';
 import { apiError } from '@/api/errors';
-import { toast } from '@/components/Toast';
+import { Colors, EditorialSpacing, Radius, Spacing } from '@/constants/tokens';
+import { HitSlop, Roles } from '@/constants/a11y';
+import {
+  Caption,
+  FadeIn,
+  Heading,
+  Kicker,
+  Pressy,
+  SkeletonList,
+  Subhead,
+} from '@/components/ui';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
-import { Colors, Radius } from '@/constants/tokens';
+import { toast } from '@/components/Toast';
 
 type FeatherIcon = React.ComponentProps<typeof Feather>['name'];
 type Tab = 'ALL' | 'EVENT' | 'OFFER' | 'POST' | 'VENUE';
@@ -48,10 +68,10 @@ export default function Saved() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async (tab: Tab) => {
+  const load = useCallback(async (which: Tab) => {
     try {
       setError(null);
-      const r = await usersApi.savedItems(tab === 'ALL' ? undefined : tab);
+      const r = await usersApi.savedItems(which === 'ALL' ? undefined : which);
       const rows = r.data?.data?.data ?? r.data?.data ?? [];
       setItems(rows);
     } catch (err) {
@@ -62,14 +82,20 @@ export default function Saved() {
     }
   }, []);
 
-  useEffect(() => { setLoading(true); load(tab); }, [tab, load]);
+  useEffect(() => {
+    setLoading(true);
+    load(tab);
+  }, [tab, load]);
 
   function openItem(it: SavedItem) {
     const base =
-      it.type === 'EVENT' ? '/(app)/events'
-      : it.type === 'OFFER' ? '/(app)/offers'
-      : it.type === 'POST' ? '/(app)/community/posts'
-      : '/(app)/venue';
+      it.type === 'EVENT'
+        ? '/(app)/events'
+        : it.type === 'OFFER'
+          ? '/(app)/offers'
+          : it.type === 'POST'
+            ? '/(app)/community/posts'
+            : '/(app)/venue';
     router.push(`${base}/${it.targetId}` as never);
   }
 
@@ -87,90 +113,107 @@ export default function Saved() {
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} hitSlop={10}>
+        <Pressy
+          onPress={() => router.back()}
+          haptic="select"
+          accessibilityRole={Roles.button}
+          accessibilityLabel={t ? 'Atrás' : 'Back'}
+          hitSlop={HitSlop.expand}
+          style={styles.backBtn}
+        >
           <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
-        </TouchableOpacity>
-        <Text style={styles.title}>{t ? 'Guardados' : 'Saved'}</Text>
-        <View style={styles.backBtn} />
+        </Pressy>
       </View>
 
-      <View style={styles.tabs}>
-        <FlatList
-          horizontal
-          data={TAB_META}
-          keyExtractor={(x) => x.key}
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{ paddingHorizontal: 20, gap: 8 }}
-          renderItem={({ item }) => {
-            const active = tab === item.key;
-            return (
-              <TouchableOpacity
-                style={[styles.tab, active && styles.tabActive]}
-                onPress={() => setTab(item.key)}
-                activeOpacity={0.85}
-              >
-                <Feather name={item.icon} size={14} color={active ? Colors.textInverse : Colors.textSecondary} />
-                <Text style={[styles.tabLbl, active && styles.tabLblActive]}>
-                  {t ? item.labelEs : item.labelEn}
-                </Text>
-              </TouchableOpacity>
-            );
-          }}
-        />
+      <View style={styles.titleBlock}>
+        <Kicker tone="muted">{t ? 'COLECCIÓN' : 'COLLECTION'}</Kicker>
+        <Heading size="md" style={{ marginTop: Spacing[2] }}>
+          {t ? 'Guardados' : 'Saved'}
+        </Heading>
       </View>
+
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.filters}
+      >
+        {TAB_META.map((m) => {
+          const active = tab === m.key;
+          return (
+            <Pressy
+              key={m.key}
+              onPress={() => setTab(m.key)}
+              haptic="select"
+              accessibilityRole={Roles.tab}
+              accessibilityLabel={t ? m.labelEs : m.labelEn}
+              accessibilityState={{ selected: active }}
+              style={[styles.chip, active && styles.chipActive]}
+            >
+              <Feather
+                name={m.icon}
+                size={13}
+                color={active ? Colors.textInverse : Colors.textSecondary}
+              />
+              <Caption
+                tone={active ? 'inverse' : 'secondary'}
+                style={{ fontFamily: 'Inter_600SemiBold' }}
+              >
+                {t ? m.labelEs : m.labelEn}
+              </Caption>
+            </Pressy>
+          );
+        })}
+      </ScrollView>
 
       {loading ? (
-        <View style={styles.centered}>
-          <ActivityIndicator color={Colors.accentPrimary} />
+        <View style={{ paddingHorizontal: EditorialSpacing.pageGutter, paddingTop: Spacing[5] }}>
+          <SkeletonList count={4} itemHeight={96} />
         </View>
       ) : error ? (
         <ErrorState
           message={error}
           retryLabel={t ? 'Reintentar' : 'Retry'}
-          onRetry={() => { setLoading(true); load(tab); }}
+          onRetry={() => {
+            setLoading(true);
+            load(tab);
+          }}
         />
       ) : items.length === 0 ? (
-        <EmptyState
-          icon="bookmark"
-          title={t ? 'Aún no tienes nada guardado' : 'Nothing saved yet'}
-          message={t
-            ? 'Toca el ícono de guardar en eventos, ofertas o posts para encontrarlos aquí.'
-            : 'Tap the save icon on events, offers or posts to find them here.'}
-        />
+        <View style={{ flex: 1, minHeight: 320 }}>
+          <EmptyState
+            icon="bookmark"
+            title={t ? 'Aún no tienes nada guardado' : 'Nothing saved yet'}
+            message={
+              t
+                ? 'Toca el ícono de guardar en eventos, ofertas o posts para encontrarlos aquí.'
+                : 'Tap the save icon on events, offers or posts to find them here.'
+            }
+          />
+        </View>
       ) : (
         <FlatList
           data={items}
           keyExtractor={(x) => x.id}
-          contentContainerStyle={styles.list}
+          contentContainerStyle={{
+            paddingHorizontal: EditorialSpacing.pageGutter,
+            paddingTop: Spacing[5],
+            paddingBottom: Spacing[12],
+            gap: Spacing[3],
+          }}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
-              onRefresh={() => { setRefreshing(true); load(tab); }}
-              tintColor={Colors.accentPrimary}
+              onRefresh={() => {
+                setRefreshing(true);
+                load(tab);
+              }}
+              tintColor={Colors.textMuted}
             />
           }
-          renderItem={({ item }) => (
-            <TouchableOpacity style={styles.card} activeOpacity={0.85} onPress={() => openItem(item)}>
-              {item.target?.imageUrl || item.target?.coverUrl ? (
-                <Image source={{ uri: (item.target.imageUrl ?? item.target.coverUrl)! }} style={styles.thumb} />
-              ) : (
-                <View style={[styles.thumb, styles.thumbFallback]}>
-                  <Feather name={iconFor(item.type)} size={22} color={Colors.textMuted} />
-                </View>
-              )}
-              <View style={{ flex: 1 }}>
-                <Text style={styles.typeChip}>{labelFor(item.type, t)}</Text>
-                <Text style={styles.cardTitle} numberOfLines={2}>
-                  {item.target?.title ?? item.target?.name ?? (t ? 'Elemento guardado' : 'Saved item')}
-                </Text>
-                {item.target?.venue?.name ? (
-                  <Text style={styles.cardSub} numberOfLines={1}>{item.target.venue.name}</Text>
-                ) : null}
-              </View>
-              <TouchableOpacity onPress={() => unsave(item)} hitSlop={10} style={styles.removeBtn}>
-                <Feather name="bookmark" size={18} color={Colors.accentPrimary} />
-              </TouchableOpacity>
-            </TouchableOpacity>
+          renderItem={({ item, index }) => (
+            <FadeIn delay={40 * index}>
+              <SavedCard item={item} t={t} onPress={() => openItem(item)} onUnsave={() => unsave(item)} />
+            </FadeIn>
           )}
         />
       )}
@@ -178,79 +221,146 @@ export default function Saved() {
   );
 }
 
+function SavedCard({
+  item,
+  t,
+  onPress,
+  onUnsave,
+}: {
+  item: SavedItem;
+  t: boolean;
+  onPress: () => void;
+  onUnsave: () => void;
+}) {
+  const img = item.target?.imageUrl ?? item.target?.coverUrl;
+  return (
+    <Pressy
+      onPress={onPress}
+      haptic="select"
+      accessibilityRole={Roles.button}
+      accessibilityLabel={item.target?.title ?? item.target?.name ?? (t ? 'Elemento guardado' : 'Saved item')}
+      style={styles.card}
+    >
+      {img ? (
+        <Image source={{ uri: img }} style={styles.thumb} />
+      ) : (
+        <View style={[styles.thumb, styles.thumbFallback]}>
+          <Feather name={iconFor(item.type)} size={22} color={Colors.textMuted} />
+        </View>
+      )}
+      <View style={{ flex: 1 }}>
+        <Kicker tone="champagne">{labelFor(item.type, t)}</Kicker>
+        <Subhead numberOfLines={2} style={{ marginTop: 2 }}>
+          {item.target?.title ?? item.target?.name ?? (t ? 'Elemento guardado' : 'Saved item')}
+        </Subhead>
+        {item.target?.venue?.name ? (
+          <Caption tone="muted" numberOfLines={1} style={{ marginTop: 2 }}>
+            {item.target.venue.name}
+          </Caption>
+        ) : null}
+      </View>
+      <Pressy
+        onPress={onUnsave}
+        haptic="warning"
+        accessibilityRole={Roles.button}
+        accessibilityLabel={t ? 'Quitar de guardados' : 'Remove from saved'}
+        hitSlop={HitSlop.expand}
+        style={styles.unsaveBtn}
+      >
+        <Feather name="bookmark" size={18} color={Colors.accentPrimary} />
+      </Pressy>
+    </Pressy>
+  );
+}
+
 function iconFor(type: SavedItem['type']): FeatherIcon {
-  return type === 'EVENT' ? 'calendar'
-    : type === 'OFFER' ? 'tag'
-    : type === 'POST' ? 'message-square'
-    : 'map-pin';
+  return type === 'EVENT'
+    ? 'calendar'
+    : type === 'OFFER'
+      ? 'tag'
+      : type === 'POST'
+        ? 'message-square'
+        : 'map-pin';
 }
 
 function labelFor(type: SavedItem['type'], t: boolean) {
-  return type === 'EVENT' ? (t ? 'Evento' : 'Event')
-    : type === 'OFFER' ? (t ? 'Oferta' : 'Offer')
-    : type === 'POST' ? 'Post'
-    : (t ? 'Bar' : 'Bar');
+  return type === 'EVENT'
+    ? t ? 'EVENTO' : 'EVENT'
+    : type === 'OFFER'
+      ? t ? 'OFERTA' : 'OFFER'
+      : type === 'POST'
+        ? 'POST'
+        : t ? 'BAR' : 'BAR';
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
   header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 20, paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[2],
+    paddingBottom: Spacing[3],
   },
   backBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: Colors.bgCard, borderWidth: 1, borderColor: Colors.border,
-    alignItems: 'center', justifyContent: 'center',
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  title: { color: Colors.textPrimary, fontSize: 17, fontWeight: '800' },
-
-  tabs: { paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: Colors.border },
-  tab: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    paddingHorizontal: 14, paddingVertical: 8,
-    borderRadius: 18,
+  titleBlock: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingBottom: Spacing[5],
+  },
+  filters: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    gap: Spacing[2],
+  },
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing[2],
+    paddingHorizontal: Spacing[4],
+    paddingVertical: Spacing[2],
+    borderRadius: Radius.full,
     backgroundColor: Colors.bgCard,
-    borderWidth: 1, borderColor: Colors.border,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+    minHeight: 36,
   },
-  tabActive: { backgroundColor: Colors.accentPrimary, borderColor: Colors.accentPrimary },
-  tabLbl: { color: Colors.textSecondary, fontSize: 12, fontWeight: '600' },
-  tabLblActive: { color: Colors.textInverse },
-
-  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 10 },
-  errorText: { color: Colors.textSecondary, fontSize: 13, textAlign: 'center' },
-  retryBtn: {
-    paddingHorizontal: 20, paddingVertical: 10, borderRadius: 10,
-    backgroundColor: Colors.accentPrimary, marginTop: 4,
+  chipActive: {
+    backgroundColor: Colors.accentPrimary,
+    borderColor: Colors.accentPrimary,
   },
-  retryLbl: { color: Colors.textInverse, fontSize: 13, fontWeight: '700' },
-
-  emptyIcon: {
-    width: 72, height: 72, borderRadius: 36,
-    backgroundColor: Colors.bgCard,
-    alignItems: 'center', justifyContent: 'center',
-    marginBottom: 4,
-  },
-  emptyTitle: { color: Colors.textPrimary, fontSize: 16, fontWeight: '800', textAlign: 'center' },
-  emptyMsg: { color: Colors.textSecondary, fontSize: 13, textAlign: 'center', lineHeight: 19 },
-
-  list: { padding: 16, gap: 10 },
   card: {
-    flexDirection: 'row', gap: 12, alignItems: 'center',
-    padding: 12, backgroundColor: Colors.bgCard,
-    borderRadius: Radius.button, borderWidth: 1, borderColor: Colors.border,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing[4],
+    padding: Spacing[4],
+    borderRadius: Radius.card,
+    backgroundColor: Colors.bgCard,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+    borderTopColor: Colors.highlightTop,
   },
-  thumb: { width: 64, height: 64, borderRadius: 10, backgroundColor: Colors.bgElevated },
-  thumbFallback: { alignItems: 'center', justifyContent: 'center' },
-  typeChip: {
-    color: Colors.accentPrimary, fontSize: 10, fontWeight: '800',
-    letterSpacing: 1, textTransform: 'uppercase', marginBottom: 3,
+  thumb: {
+    width: 68,
+    height: 68,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.bgElevated,
   },
-  cardTitle: { color: Colors.textPrimary, fontSize: 14, fontWeight: '700', lineHeight: 19 },
-  cardSub: { color: Colors.textMuted, fontSize: 12, marginTop: 2 },
-  removeBtn: {
-    width: 36, height: 36, borderRadius: 10,
-    backgroundColor: 'rgba(244,163,64,0.15)',
-    alignItems: 'center', justifyContent: 'center',
+  thumbFallback: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  unsaveBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: Radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.bgElevated,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
   },
 });

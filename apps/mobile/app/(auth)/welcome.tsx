@@ -1,11 +1,19 @@
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Image } from 'react-native';
+// ─────────────────────────────────────────────
+//  Welcome — Editorial Premium
+//
+//  First impression. Magazine cover energy: kicker, hero title in
+//  Fraunces, lead paragraph, then the actions. No icon-decorated buttons
+//  — the action is the action.
+// ─────────────────────────────────────────────
 import { useState } from 'react';
+import { Image, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Feather } from '@expo/vector-icons';
+
+import { Colors, EditorialSpacing, Spacing } from '@/constants/tokens';
 import { useAuthStore } from '@/stores/auth.store';
 import { useAppStore } from '@/stores/app.store';
-import { Colors, Radius } from '@/constants/tokens';
+import { Button, FadeIn, Hero, Kicker, Lead, Pressy, Body } from '@/components/ui';
 
 export default function Welcome() {
   const router = useRouter();
@@ -17,59 +25,79 @@ export default function Welcome() {
   return (
     <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
       <View style={styles.hero}>
-        <Image
-          source={require('../../assets/icon.png')}
-          style={styles.logo}
-          resizeMode="contain"
-        />
-        <Text style={styles.brand}>OPALBAR</Text>
-        <Text style={styles.tagline}>
-          {t
-            ? 'Siempre hay algo pasando,\ny tú te enteras primero.'
-            : "Something's always happening,\nand you hear about it first."}
-        </Text>
+        <FadeIn>
+          <Image
+            source={require('../../assets/icon.png')}
+            style={styles.logo}
+            resizeMode="contain"
+            accessibilityIgnoresInvertColors
+          />
+        </FadeIn>
+
+        <FadeIn delay={120} style={styles.kickerWrap}>
+          <Kicker align="center" tone="champagne">
+            {t ? 'BIENVENIDO' : 'WELCOME'}
+          </Kicker>
+        </FadeIn>
+
+        <FadeIn delay={200}>
+          <Hero align="center">opalbar</Hero>
+        </FadeIn>
+
+        <FadeIn delay={300} style={styles.leadWrap}>
+          <Lead align="center" tone="secondary">
+            {t
+              ? 'Siempre hay algo pasando,\ny tú te enteras primero.'
+              : "Something's always happening,\nand you hear about it first."}
+          </Lead>
+        </FadeIn>
       </View>
 
       <View style={styles.actions}>
-        <TouchableOpacity
-          style={styles.primaryBtn}
-          onPress={() => router.push('/(auth)/login' as never)}
-          activeOpacity={0.85}
-        >
-          <Feather name="log-in" size={18} color={Colors.textInverse} />
-          <Text style={styles.primaryBtnLabel}>
-            {t ? 'Iniciar sesión' : 'Sign in'}
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.secondaryBtn}
-          onPress={() => router.push('/(auth)/register' as never)}
-          activeOpacity={0.85}
-        >
-          <Feather name="user-plus" size={18} color={Colors.textPrimary} />
-          <Text style={styles.secondaryBtnLabel}>
-            {t ? 'Crear cuenta' : 'Create account'}
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.ghostBtn}
-          onPress={() => {
-            if (entering) return;
-            setEntering(true);
-            continueAsGuest();
-            router.replace('/(guest)/home' as never);
-          }}
-          activeOpacity={0.7}
-          disabled={entering}
-        >
-          {entering
-            ? <ActivityIndicator color={Colors.accentPrimary} size="small" />
-            : <Text style={styles.ghostBtnLabel}>
-                {t ? 'Continuar como invitado' : 'Continue as guest'}
-              </Text>}
-        </TouchableOpacity>
+        <FadeIn delay={420}>
+          <Button
+            label={t ? 'Iniciar sesión' : 'Sign in'}
+            onPress={() => router.push('/(auth)/login' as never)}
+            variant="primary"
+            size="lg"
+            fullWidth
+            accessibilityHint={t ? 'Abre la pantalla de inicio de sesión' : 'Open sign in screen'}
+          />
+        </FadeIn>
+        <FadeIn delay={490}>
+          <Button
+            label={t ? 'Crear cuenta' : 'Create account'}
+            onPress={() => router.push('/(auth)/register' as never)}
+            variant="secondary"
+            size="lg"
+            fullWidth
+            accessibilityHint={t ? 'Abre la pantalla de registro' : 'Open registration screen'}
+          />
+        </FadeIn>
+        <FadeIn delay={560}>
+          <Pressy
+            onPress={() => {
+              if (entering) return;
+              setEntering(true);
+              continueAsGuest();
+              router.replace('/(guest)/home' as never);
+            }}
+            disabled={entering}
+            accessibilityRole="button"
+            accessibilityLabel={t ? 'Continuar como invitado' : 'Continue as guest'}
+            style={styles.guestBtn}
+          >
+            <Body tone="accent" weight="semiBold">
+              {entering
+                ? t
+                  ? 'Entrando…'
+                  : 'Entering…'
+                : t
+                  ? 'Continuar como invitado'
+                  : 'Continue as guest'}
+            </Body>
+          </Pressy>
+        </FadeIn>
       </View>
     </SafeAreaView>
   );
@@ -79,58 +107,34 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: Colors.bgPrimary,
-    paddingHorizontal: 24,
+    paddingHorizontal: EditorialSpacing.pageGutter,
   },
   hero: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 10,
+    gap: Spacing[3],
   },
   logo: {
-    width: 128, height: 128, borderRadius: 28,
-    marginBottom: 12,
+    width: 112,
+    height: 112,
+    borderRadius: 24,
+    marginBottom: Spacing[5],
   },
-  brand: {
-    color: Colors.textPrimary,
-    fontSize: 28,
-    fontWeight: '800',
-    letterSpacing: 4,
+  kickerWrap: {
+    marginTop: Spacing[2],
   },
-  tagline: {
-    color: Colors.textSecondary,
-    fontSize: 14,
-    lineHeight: 20,
-    textAlign: 'center',
-    marginTop: 8,
+  leadWrap: {
+    marginTop: Spacing[3],
+    maxWidth: 320,
   },
   actions: {
-    gap: 12,
-    paddingBottom: 24,
+    gap: Spacing[3],
+    paddingBottom: Spacing[6],
   },
-  primaryBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
-    height: 54,
-    backgroundColor: Colors.accentPrimary,
-    borderRadius: Radius.button,
-  },
-  primaryBtnLabel: { color: Colors.textInverse, fontSize: 16, fontWeight: '700' },
-  secondaryBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
-    height: 54,
-    backgroundColor: Colors.bgCard,
-    borderRadius: Radius.button,
-    borderWidth: 1, borderColor: Colors.border,
-  },
-  secondaryBtnLabel: { color: Colors.textPrimary, fontSize: 15, fontWeight: '600' },
-  ghostBtn: {
-    height: 44,
+  guestBtn: {
+    minHeight: 44,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  ghostBtnLabel: {
-    color: Colors.accentPrimary,
-    fontSize: 14,
-    fontWeight: '600',
   },
 });

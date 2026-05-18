@@ -1,16 +1,39 @@
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Image, RefreshControl } from 'react-native';
-import { Pressy, FadeIn } from '@/components/ui';
+// ─────────────────────────────────────────────
+//  Offers — Lista · Editorial Premium
+//
+//  Magazine-style index: kicker + Display title, a points "stat block"
+//  rendered with editorial numerics, then the offers as full-bleed
+//  hairline cards (no chunky icon boxes). Loading → SkeletonList.
+// ─────────────────────────────────────────────
 import { useCallback, useState } from 'react';
+import { Image, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+
+import {
+  Badge,
+  Body,
+  Caption,
+  Card,
+  Display,
+  FadeIn,
+  Hairline,
+  Heading,
+  Kicker,
+  Numeric,
+  Pressy,
+  SkeletonList,
+  Subhead,
+} from '@/components/ui';
+import { Colors, EditorialSpacing, Radius, Spacing } from '@/constants/tokens';
+import { HitSlop, Roles } from '@/constants/a11y';
 import { offersApi } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { useAuthStore } from '@/stores/auth.store';
+import { useAppStore } from '@/stores/app.store';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
-import { useAppStore } from '@/stores/app.store';
-import { Colors, Radius } from '@/constants/tokens';
 
 type FeatherIcon = React.ComponentProps<typeof Feather>['name'];
 
@@ -64,192 +87,237 @@ export default function OffersList() {
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn} hitSlop={10}>
+      <View style={styles.headerRow}>
+        <Pressy
+          onPress={() => router.back()}
+          accessibilityLabel={t ? 'Volver' : 'Back'}
+          accessibilityRole={Roles.button}
+          hitSlop={HitSlop.expand}
+          style={styles.backBtn}
+        >
           <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
-        </TouchableOpacity>
-        <Text style={styles.title}>{t ? 'Ofertas' : 'Offers'}</Text>
-        <View style={{ width: 40 }} />
+        </Pressy>
       </View>
 
       <ScrollView
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={Colors.accentPrimary} />}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => { setRefreshing(true); load(); }}
+            tintColor={Colors.accentPrimary}
+          />
+        }
       >
-        <View style={styles.ptsCard}>
-          <View style={styles.ptsStarBox}>
-            <Feather name="star" size={22} color={Colors.textInverse} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.ptsLabel}>{t ? 'Tus puntos OPAL' : 'Your OPAL points'}</Text>
-            <Text style={styles.ptsValue}>{points.toLocaleString(language)} pts</Text>
-            <Text style={styles.ptsLevel}>
-              {t
-                ? `Nivel Ámbar • ${nextLevelDelta} pts para Platino`
-                : `Amber Level • ${nextLevelDelta} pts to Platinum`}
-            </Text>
-          </View>
-        </View>
+        {/* Hero ─────────────────────────────── */}
+        <FadeIn>
+          <Kicker tone="champagne">{t ? 'COLECCIÓN ACTUAL' : 'CURRENT COLLECTION'}</Kicker>
+        </FadeIn>
+        <FadeIn delay={80} style={{ marginTop: Spacing[3] }}>
+          <Display>{t ? 'Ofertas.' : 'Offers.'}</Display>
+        </FadeIn>
+        <FadeIn delay={160} style={{ marginTop: Spacing[3] }}>
+          <Body tone="secondary" size="lg">
+            {t
+              ? 'Beneficios curados para miembros. Canjea con un toque.'
+              : 'Curated benefits for members. Redeem with a tap.'}
+          </Body>
+        </FadeIn>
 
-        {loading && <ActivityIndicator color={Colors.accentPrimary} style={{ marginTop: 24 }} />}
+        {/* Points stat ─────────────────────── */}
+        <FadeIn delay={240} style={styles.statBlock}>
+          <View style={styles.statRow}>
+            <View style={{ flex: 1 }}>
+              <Kicker tone="muted">{t ? 'TUS PUNTOS OPAL' : 'YOUR OPAL POINTS'}</Kicker>
+              <View style={{ marginTop: Spacing[2] }}>
+                <Numeric size="md" tone="accent">
+                  {points.toLocaleString(language)}
+                </Numeric>
+              </View>
+              <Caption tone="muted" style={{ marginTop: Spacing[1] }}>
+                {t
+                  ? `Nivel Ámbar · ${nextLevelDelta} para Platino`
+                  : `Amber level · ${nextLevelDelta} to Platinum`}
+              </Caption>
+            </View>
+          </View>
+          <Hairline variant="subtle" style={{ marginTop: Spacing[4] }} />
+        </FadeIn>
 
+        {/* List ────────────────────────────── */}
         <View style={styles.list}>
-          {!loading && error && items.length === 0 ? (
+          {loading ? (
+            <SkeletonList count={4} itemHeight={120} />
+          ) : error && items.length === 0 ? (
             <ErrorState
               title={t ? 'No se pudieron cargar' : 'Could not load'}
               message={error}
               retryLabel={t ? 'Reintentar' : 'Retry'}
               onRetry={() => { setLoading(true); load(); }}
             />
-          ) : !loading && items.length === 0 ? (
+          ) : items.length === 0 ? (
             <EmptyState
               icon="tag"
               title={t ? 'Sin ofertas por ahora' : 'No offers yet'}
-              message={t ? 'Revisa más tarde. Las nuevas ofertas aparecerán aquí.' : 'Check back later for new offers.'}
+              message={
+                t
+                  ? 'Vuelve pronto. Las nuevas ediciones aparecerán aquí.'
+                  : 'Check back soon. New editions land here.'
+              }
             />
-          ) : items.map((offer, idx) => (
-            <FadeIn key={offer.id} delay={idx * 70} from={24}>
-              <OfferCard
-                offer={offer}
-                t={t}
-                onPress={() => router.push(`/(app)/offers/${offer.id}`)}
-              />
-            </FadeIn>
-          ))}
+          ) : (
+            items.map((offer, idx) => (
+              <FadeIn key={offer.id} delay={Math.min(idx, 6) * 70}>
+                <OfferRow
+                  offer={offer}
+                  t={t}
+                  onPress={() => router.push(`/(app)/offers/${offer.id}`)}
+                />
+              </FadeIn>
+            ))
+          )}
         </View>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-function OfferCard({
-  offer, t, onPress,
-}: { offer: OfferItem; t: boolean; onPress: () => void }) {
-  const usesLeft = offer.usesLeft ?? (
-    offer.maxRedemptions != null
+function OfferRow({
+  offer,
+  t,
+  onPress,
+}: {
+  offer: OfferItem;
+  t: boolean;
+  onPress: () => void;
+}) {
+  const usesLeft =
+    offer.usesLeft ??
+    (offer.maxRedemptions != null
       ? Math.max(0, offer.maxRedemptions - (offer.currentRedemptions ?? 0))
-      : null
-  );
+      : null);
+
   return (
-    <Pressy style={styles.card} onPress={onPress}>
-      <View style={styles.cardIconBox}>
-        {offer.imageUrl ? (
-          <Image source={{ uri: offer.imageUrl }} style={styles.cardImgPreview} resizeMode="cover" />
-        ) : (
-          <Feather
-            name={offer.icon || 'tag'}
-            size={32}
-            color={offer.iconColor || Colors.accentPrimary}
-          />
-        )}
-      </View>
-      <View style={styles.cardInfo}>
-        <View style={styles.cardTopRow}>
-          <Text style={styles.cardTitle} numberOfLines={2}>{offer.title}</Text>
-          {offer.badge && (
-            <View style={[styles.badgePill, { backgroundColor: (offer.badgeColor || Colors.accentDanger) + '20' }]}>
-              <Text style={[styles.badgePillText, { color: offer.badgeColor || Colors.accentDanger }]}>
-                {offer.badge}
-              </Text>
+    <Card
+      onPress={onPress}
+      padding={Spacing[4]}
+      accessibilityLabel={offer.title}
+      accessibilityHint={t ? 'Abrir oferta' : 'Open offer'}
+    >
+      <View style={styles.rowBody}>
+        <View style={styles.rowMedia}>
+          {offer.imageUrl ? (
+            <Image
+              source={{ uri: offer.imageUrl }}
+              style={styles.rowImg}
+              resizeMode="cover"
+              accessibilityIgnoresInvertColors
+            />
+          ) : (
+            <View style={styles.rowMediaFallback}>
+              <Feather
+                name={offer.icon || 'tag'}
+                size={26}
+                color={offer.iconColor || Colors.accentChampagne}
+              />
             </View>
           )}
         </View>
-        <Text style={styles.cardValid} numberOfLines={2}>{offer.validWhen || offer.description || ''}</Text>
-        <View style={styles.cardFooter}>
-          <Text style={styles.cardLeft}>
-            {usesLeft != null
-              ? (t ? `${usesLeft} quedan` : `${usesLeft} left`)
-              : ''}
-          </Text>
-          <View style={styles.redeemBtn}>
-            <Text style={styles.redeemBtnLabel}>{t ? 'Canjear' : 'Redeem'}</Text>
+        <View style={{ flex: 1 }}>
+          {offer.badge ? (
+            <View style={{ marginBottom: Spacing[2], alignSelf: 'flex-start' }}>
+              <Badge label={offer.badge} variant="accent" size="sm" />
+            </View>
+          ) : null}
+          <Subhead numberOfLines={2}>{offer.title}</Subhead>
+          {offer.validWhen || offer.description ? (
+            <Caption tone="muted" style={{ marginTop: Spacing[1] }} numberOfLines={2}>
+              {offer.validWhen || offer.description}
+            </Caption>
+          ) : null}
+          <View style={styles.rowFooter}>
+            {usesLeft != null ? (
+              <Caption tone="success">
+                {t ? `${usesLeft} disponibles` : `${usesLeft} left`}
+              </Caption>
+            ) : (
+              <View />
+            )}
+            <View style={styles.cta}>
+              <Body size="sm" tone="inverse" weight="semiBold">
+                {t ? 'Canjear' : 'Redeem'}
+              </Body>
+            </View>
           </View>
         </View>
       </View>
-    </Pressy>
+    </Card>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
-  scroll: { paddingBottom: 24 },
-
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  scroll: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingBottom: Spacing[10],
+    paddingTop: Spacing[6],
+  },
+  headerRow: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[2],
+  },
+  backBtn: {
+    width: 44,
+    height: 44,
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 12,
+    justifyContent: 'center',
+    marginLeft: -Spacing[2],
   },
-  iconBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  title: { color: Colors.textPrimary, fontSize: 18, fontWeight: '700' },
 
-  ptsCard: {
+  statBlock: {
+    marginTop: Spacing[8],
+  },
+  statRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    marginHorizontal: 20,
-    padding: 16,
-    borderRadius: Radius.card,
-    backgroundColor: 'rgba(244, 163, 64, 0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(244, 163, 64, 0.25)',
   },
-  ptsStarBox: {
-    width: 44, height: 44, borderRadius: 22,
-    backgroundColor: Colors.accentPrimary,
-    alignItems: 'center', justifyContent: 'center',
+
+  list: {
+    marginTop: Spacing[8],
+    gap: Spacing[3],
   },
-  ptsLabel: { color: Colors.textSecondary, fontSize: 12 },
-  ptsValue: { color: Colors.accentPrimary, fontSize: 22, fontWeight: '800', marginTop: 2 },
-  ptsLevel: { color: Colors.textMuted, fontSize: 11, marginTop: 2 },
 
-  list: { paddingHorizontal: 20, paddingTop: 16, gap: 12 },
-
-  card: {
+  rowBody: {
     flexDirection: 'row',
-    gap: 14,
-    backgroundColor: Colors.bgCard,
-    borderRadius: Radius.card,
-    padding: 16,
+    gap: Spacing[4],
   },
-  cardIconBox: {
-    width: 72, height: 72, borderRadius: 12,
-    backgroundColor: Colors.bgElevated,
-    alignItems: 'center', justifyContent: 'center',
+  rowMedia: {
+    width: 72,
+    height: 72,
+    borderRadius: Radius.md,
     overflow: 'hidden',
+    backgroundColor: Colors.bgElevated,
   },
-  cardImgPreview: {
-    width: 72, height: 72, borderRadius: 12,
-  },
-  cardInfo: { flex: 1, gap: 6 },
-  cardTopRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    gap: 8,
-  },
-  cardTitle: { flex: 1, color: Colors.textPrimary, fontSize: 14, fontWeight: '700' },
-  badgePill: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 20 },
-  badgePillText: { fontSize: 9, fontWeight: '800', letterSpacing: 0.5 },
-  cardValid: { color: Colors.textSecondary, fontSize: 12 },
-  cardFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  rowImg: { width: '100%', height: '100%' },
+  rowMediaFallback: {
+    flex: 1,
     alignItems: 'center',
-    marginTop: 4,
+    justifyContent: 'center',
   },
-  cardLeft: { color: Colors.accentSuccess, fontSize: 12, fontWeight: '600' },
-  redeemBtn: {
-    backgroundColor: Colors.accentPrimary,
-    paddingHorizontal: 16,
-    paddingVertical: 7,
+  rowFooter: {
+    marginTop: Spacing[3],
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  cta: {
+    paddingHorizontal: Spacing[4],
+    paddingVertical: Spacing[2],
     borderRadius: Radius.button,
+    backgroundColor: Colors.accentPrimary,
   },
-  redeemBtnLabel: { color: Colors.textInverse, fontSize: 12, fontWeight: '700' },
 });
+
+// Heading is exported but not used directly (kept for future).
+void Heading;

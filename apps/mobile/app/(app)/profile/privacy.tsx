@@ -1,12 +1,39 @@
-import { View, Text, StyleSheet, Switch, ScrollView, Alert, TouchableOpacity, Pressable } from 'react-native';
+// ─────────────────────────────────────────────
+//  Privacy — Editorial Premium
+//
+//  Magazine layout:
+//   · Kicker + Heading header
+//   · 4 grouped sections: VISIBILIDAD · MENSAJES · ETIQUETAS · AMISTAD
+//   · Visibility uses native Switch inside ListItem.rightSlot
+//   · Policy pickers use ListItem rows with custom radio rightSlot, the
+//     selected one carries the accent left bar via ListItem `selected`
+//   · Optimistic updates with toast rollback
+// ─────────────────────────────────────────────
 import { useEffect, useState } from 'react';
+import { ScrollView, StyleSheet, Switch, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
-import { usersApi, friendshipsApi, mentionsApi, type FriendPolicy, type MentionPolicy } from '@/api/client';
+
+import {
+  usersApi,
+  friendshipsApi,
+  mentionsApi,
+  type FriendPolicy,
+  type MentionPolicy,
+} from '@/api/client';
 import { apiError } from '@/api/errors';
 import { useAppStore } from '@/stores/app.store';
-import { Colors, Typography, Spacing, Radius } from '@/constants/tokens';
+import { Colors, EditorialSpacing, Spacing } from '@/constants/tokens';
+import { HitSlop, Roles } from '@/constants/a11y';
+import {
+  FadeIn,
+  Heading,
+  Kicker,
+  ListItem,
+  Pressy,
+} from '@/components/ui';
+import { toast } from '@/components/Toast';
 
 type DmPolicy = 'EVERYONE' | 'FOLLOWING' | 'FRIENDS_OF_FRIENDS' | 'FRIENDS_ONLY' | 'NONE';
 
@@ -14,6 +41,7 @@ export default function Privacy() {
   const router = useRouter();
   const { language } = useAppStore();
   const t = language === 'es';
+
   const [settings, setSettings] = useState({ showProfile: true, showActivity: false, allowMessages: true });
   const [dmPolicy, setDmPolicy] = useState<DmPolicy>('EVERYONE');
   const [friendPolicy, setFriendPolicy] = useState<FriendPolicy>('EVERYONE');
@@ -22,7 +50,8 @@ export default function Privacy() {
 
   useEffect(() => {
     let mounted = true;
-    usersApi.me()
+    usersApi
+      .me()
       .then((res: any) => {
         if (!mounted) return;
         const dm = res?.data?.dmPolicy as DmPolicy | undefined;
@@ -34,10 +63,11 @@ export default function Privacy() {
       })
       .catch(() => {})
       .finally(() => mounted && setLoadingPolicy(false));
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, []);
 
-  // Optimistic auto-save — toggling sends immediately, reverts on error.
   async function toggle(key: keyof typeof settings) {
     const prev = settings[key];
     const next = !prev;
@@ -46,11 +76,11 @@ export default function Privacy() {
       await usersApi.updatePrivacy({ ...settings, [key]: next });
     } catch (err: any) {
       setSettings((p) => ({ ...p, [key]: prev }));
-      Alert.alert(t ? 'Error' : 'Error', apiError(err));
+      toast(apiError(err, t ? 'No se pudo guardar.' : 'Save failed.'), 'danger');
     }
   }
 
-  async function selectPolicy(next: DmPolicy) {
+  async function selectDmPolicy(next: DmPolicy) {
     if (next === dmPolicy) return;
     const prev = dmPolicy;
     setDmPolicy(next);
@@ -58,7 +88,7 @@ export default function Privacy() {
       await usersApi.updateDmPolicy(next);
     } catch (err: any) {
       setDmPolicy(prev);
-      Alert.alert(t ? 'Error' : 'Error', apiError(err));
+      toast(apiError(err, t ? 'No se pudo guardar.' : 'Save failed.'), 'danger');
     }
   }
 
@@ -70,7 +100,7 @@ export default function Privacy() {
       await friendshipsApi.updatePolicy(next);
     } catch (err: any) {
       setFriendPolicy(prev);
-      Alert.alert(t ? 'Error' : 'Error', apiError(err));
+      toast(apiError(err, t ? 'No se pudo guardar.' : 'Save failed.'), 'danger');
     }
   }
 
@@ -82,41 +112,41 @@ export default function Privacy() {
       await mentionsApi.updatePolicy(next);
     } catch (err: any) {
       setMentionPolicy(prev);
-      Alert.alert(t ? 'Error' : 'Error', apiError(err));
+      toast(apiError(err, t ? 'No se pudo guardar.' : 'Save failed.'), 'danger');
     }
   }
 
-  const items = [
-    { key: 'showProfile' as const, label: t ? 'Perfil público' : 'Public profile', desc: t ? 'Otros usuarios pueden ver tu perfil' : 'Other users can see your profile' },
-    { key: 'showActivity' as const, label: t ? 'Mostrar actividad' : 'Show activity', desc: t ? 'Tu actividad reciente es visible' : 'Your recent activity is visible' },
-    { key: 'allowMessages' as const, label: t ? 'Recibir mensajes' : 'Receive messages', desc: t ? 'Otros pueden enviarte mensajes' : 'Others can send you messages' },
+  const visibility = [
+    { key: 'showProfile' as const, label: t ? 'Perfil público' : 'Public profile', desc: t ? 'Otros usuarios pueden ver tu perfil.' : 'Other users can see your profile.' },
+    { key: 'showActivity' as const, label: t ? 'Mostrar actividad' : 'Show activity', desc: t ? 'Tu actividad reciente es visible.' : 'Your recent activity is visible.' },
+    { key: 'allowMessages' as const, label: t ? 'Recibir mensajes' : 'Receive messages', desc: t ? 'Otros pueden enviarte mensajes.' : 'Others can send you messages.' },
   ];
 
   const dmOptions: { value: DmPolicy; label: string; desc: string }[] = [
     {
       value: 'EVERYONE',
       label: t ? 'Todos' : 'Everyone',
-      desc: t ? 'Cualquiera puede enviarte mensajes (irán a Solicitudes si no lo sigues)' : 'Anyone can message you (filtered to Requests if you don\'t follow them)',
+      desc: t ? 'Cualquiera puede escribirte (irán a Solicitudes si no lo sigues).' : "Anyone can message you (filtered to Requests if you don't follow).",
     },
     {
       value: 'FOLLOWING',
       label: t ? 'Solo a quienes sigo' : 'People I follow',
-      desc: t ? 'Solo gente que sigues puede iniciarte una conversación' : 'Only people you follow can start a conversation',
+      desc: t ? 'Solo gente que sigues puede iniciar conversación.' : 'Only people you follow can start a conversation.',
     },
     {
       value: 'FRIENDS_OF_FRIENDS',
       label: t ? 'Amigos de amigos' : 'Friends of friends',
-      desc: t ? 'Solo gente con amigos en común puede escribirte' : 'Only people with mutual friends can message you',
+      desc: t ? 'Solo gente con amigos en común puede escribirte.' : 'Only people with mutual friends can message you.',
     },
     {
       value: 'FRIENDS_ONLY',
       label: t ? 'Solo amigos' : 'Friends only',
-      desc: t ? 'Solo tus amigos confirmados pueden escribirte' : 'Only confirmed friends can message you',
+      desc: t ? 'Solo tus amigos confirmados pueden escribirte.' : 'Only confirmed friends can message you.',
     },
     {
       value: 'NONE',
       label: t ? 'Nadie' : 'No one',
-      desc: t ? 'Nadie nuevo puede enviarte mensajes' : 'No one new can message you',
+      desc: t ? 'Nadie nuevo puede enviarte mensajes.' : 'No one new can message you.',
     },
   ];
 
@@ -124,22 +154,22 @@ export default function Privacy() {
     {
       value: 'EVERYONE',
       label: t ? 'Todos' : 'Everyone',
-      desc: t ? 'Cualquiera puede etiquetarte y aparece de inmediato' : 'Anyone can tag you and it appears instantly',
+      desc: t ? 'Cualquiera puede etiquetarte y aparece de inmediato.' : 'Anyone can tag you and it appears instantly.',
     },
     {
       value: 'FRIENDS_OF_FRIENDS',
       label: t ? 'Amigos de amigos' : 'Friends of friends',
-      desc: t ? 'Amigos te etiquetan al instante; amigos de amigos requieren aprobación' : 'Friends tag instantly; friends-of-friends need approval',
+      desc: t ? 'Amigos al instante; amigos de amigos requieren aprobación.' : 'Friends tag instantly; friends-of-friends need approval.',
     },
     {
       value: 'FRIENDS_ONLY',
       label: t ? 'Solo amigos' : 'Friends only',
-      desc: t ? 'Solo tus amigos te etiquetan al instante; otros requieren aprobación' : 'Only friends tag instantly; others require approval',
+      desc: t ? 'Solo amigos al instante; otros requieren aprobación.' : 'Only friends tag instantly; others require approval.',
     },
     {
       value: 'NONE',
       label: t ? 'Nadie' : 'No one',
-      desc: t ? 'Nadie puede etiquetarte' : 'No one can tag you',
+      desc: t ? 'Nadie puede etiquetarte.' : 'No one can tag you.',
     },
   ];
 
@@ -147,169 +177,199 @@ export default function Privacy() {
     {
       value: 'EVERYONE',
       label: t ? 'Todos' : 'Everyone',
-      desc: t ? 'Cualquiera puede enviarte solicitudes de amistad' : 'Anyone can send you friend requests',
+      desc: t ? 'Cualquiera puede enviarte solicitudes.' : 'Anyone can send you friend requests.',
     },
     {
       value: 'FRIENDS_OF_FRIENDS',
       label: t ? 'Amigos de amigos' : 'Friends of friends',
-      desc: t ? 'Solo personas con amigos en común pueden enviarte solicitudes' : 'Only people with mutual friends can send requests',
+      desc: t ? 'Solo personas con amigos en común.' : 'Only people with mutual friends.',
     },
     {
       value: 'NONE',
       label: t ? 'Nadie' : 'No one',
-      desc: t ? 'Nadie puede enviarte solicitudes de amistad' : 'No one can send you friend requests',
+      desc: t ? 'Nadie puede enviarte solicitudes.' : 'No one can send you friend requests.',
     },
   ];
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} hitSlop={10}>
+        <Pressy
+          onPress={() => router.back()}
+          haptic="select"
+          accessibilityRole={Roles.button}
+          accessibilityLabel={t ? 'Atrás' : 'Back'}
+          hitSlop={HitSlop.expand}
+          style={styles.backBtn}
+        >
           <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
-        </TouchableOpacity>
-        <Text style={styles.title}>{t ? 'Privacidad' : 'Privacy'}</Text>
-        <View style={{ width: 40 }} />
+        </Pressy>
       </View>
 
-      <ScrollView contentContainerStyle={styles.content}>
-        <View style={styles.card}>
-          {items.map((item, i) => (
-            <View key={item.key} style={[styles.row, i > 0 && styles.rowBorder]}>
-              <View style={styles.rowInfo}>
-                <Text style={styles.rowLabel}>{item.label}</Text>
-                <Text style={styles.rowDesc}>{item.desc}</Text>
+      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        <FadeIn>
+          <Kicker tone="muted">{t ? 'AJUSTES' : 'SETTINGS'}</Kicker>
+          <Heading size="md" style={{ marginTop: Spacing[2] }}>
+            {t ? 'Privacidad' : 'Privacy'}
+          </Heading>
+        </FadeIn>
+
+        {/* ── Visibilidad ── */}
+        <FadeIn delay={80} style={styles.section}>
+          <Kicker tone="muted" style={{ marginBottom: Spacing[3] }}>
+            {t ? 'VISIBILIDAD' : 'VISIBILITY'}
+          </Kicker>
+          <View style={styles.listShell}>
+            {visibility.map((it, idx) => (
+              <View key={it.key}>
+                <ListItem
+                  title={it.label}
+                  subtitle={it.desc}
+                  rightSlot={
+                    <Switch
+                      value={settings[it.key]}
+                      onValueChange={() => toggle(it.key)}
+                      trackColor={{ false: Colors.border, true: Colors.accentPrimary }}
+                      thumbColor={Colors.textInverse}
+                      accessibilityLabel={it.label}
+                    />
+                  }
+                />
+                {idx < visibility.length - 1 ? <ListItem.Separator /> : null}
               </View>
-              <Switch
-                value={settings[item.key]}
-                onValueChange={() => toggle(item.key)}
-                trackColor={{ false: Colors.border, true: Colors.accentPrimary }}
-                thumbColor={Colors.textInverse}
-              />
-            </View>
-          ))}
-        </View>
+            ))}
+          </View>
+        </FadeIn>
 
-        <Text style={styles.sectionTitle}>
-          {t ? 'Quién puede enviarme mensajes' : 'Who can message me'}
-        </Text>
-        <View style={styles.card}>
-          {dmOptions.map((opt, i) => {
-            const selected = dmPolicy === opt.value;
-            return (
-              <Pressable
-                key={opt.value}
-                onPress={() => selectPolicy(opt.value)}
-                disabled={loadingPolicy}
-                style={({ pressed }) => [
-                  styles.row,
-                  i > 0 && styles.rowBorder,
-                  pressed && { opacity: 0.7 },
-                ]}
-              >
-                <View style={styles.rowInfo}>
-                  <Text style={styles.rowLabel}>{opt.label}</Text>
-                  <Text style={styles.rowDesc}>{opt.desc}</Text>
-                </View>
-                <View style={[styles.radio, selected && styles.radioOn]}>
-                  {selected && <View style={styles.radioDot} />}
-                </View>
-              </Pressable>
-            );
-          })}
-        </View>
-
-        <Text style={styles.sectionTitle}>
-          {t ? 'Quién puede etiquetarme' : 'Who can tag me'}
-        </Text>
-        <View style={styles.card}>
-          {mentionOptions.map((opt, i) => {
-            const selected = mentionPolicy === opt.value;
-            return (
-              <Pressable
-                key={opt.value}
-                onPress={() => selectMentionPolicy(opt.value)}
-                disabled={loadingPolicy}
-                style={({ pressed }) => [
-                  styles.row,
-                  i > 0 && styles.rowBorder,
-                  pressed && { opacity: 0.7 },
-                ]}
-              >
-                <View style={styles.rowInfo}>
-                  <Text style={styles.rowLabel}>{opt.label}</Text>
-                  <Text style={styles.rowDesc}>{opt.desc}</Text>
-                </View>
-                <View style={[styles.radio, selected && styles.radioOn]}>
-                  {selected && <View style={styles.radioDot} />}
-                </View>
-              </Pressable>
-            );
-          })}
-        </View>
-
-        <Text style={styles.sectionTitle}>
-          {t ? 'Quién puede enviarme solicitudes de amistad' : 'Who can send me friend requests'}
-        </Text>
-        <View style={styles.card}>
-          {friendOptions.map((opt, i) => {
-            const selected = friendPolicy === opt.value;
-            return (
-              <Pressable
-                key={opt.value}
-                onPress={() => selectFriendPolicy(opt.value)}
-                disabled={loadingPolicy}
-                style={({ pressed }) => [
-                  styles.row,
-                  i > 0 && styles.rowBorder,
-                  pressed && { opacity: 0.7 },
-                ]}
-              >
-                <View style={styles.rowInfo}>
-                  <Text style={styles.rowLabel}>{opt.label}</Text>
-                  <Text style={styles.rowDesc}>{opt.desc}</Text>
-                </View>
-                <View style={[styles.radio, selected && styles.radioOn]}>
-                  {selected && <View style={styles.radioDot} />}
-                </View>
-              </Pressable>
-            );
-          })}
-        </View>
+        <PolicyGroup
+          kicker={t ? 'QUIÉN PUEDE ESCRIBIRME' : 'WHO CAN MESSAGE ME'}
+          options={dmOptions}
+          value={dmPolicy}
+          onSelect={selectDmPolicy}
+          disabled={loadingPolicy}
+          delay={140}
+        />
+        <PolicyGroup
+          kicker={t ? 'QUIÉN PUEDE ETIQUETARME' : 'WHO CAN TAG ME'}
+          options={mentionOptions}
+          value={mentionPolicy}
+          onSelect={selectMentionPolicy}
+          disabled={loadingPolicy}
+          delay={200}
+        />
+        <PolicyGroup
+          kicker={t ? 'SOLICITUDES DE AMISTAD' : 'FRIEND REQUESTS'}
+          options={friendOptions}
+          value={friendPolicy}
+          onSelect={selectFriendPolicy}
+          disabled={loadingPolicy}
+          delay={260}
+        />
       </ScrollView>
     </SafeAreaView>
   );
 }
 
+function PolicyGroup<T extends string>({
+  kicker,
+  options,
+  value,
+  onSelect,
+  disabled,
+  delay,
+}: {
+  kicker: string;
+  options: { value: T; label: string; desc: string }[];
+  value: T;
+  onSelect: (v: T) => void;
+  disabled?: boolean;
+  delay?: number;
+}) {
+  return (
+    <FadeIn delay={delay} style={styles.section}>
+      <Kicker tone="muted" style={{ marginBottom: Spacing[3] }}>
+        {kicker}
+      </Kicker>
+      <View style={styles.listShell}>
+        {options.map((opt, idx) => {
+          const selected = value === opt.value;
+          return (
+            <View key={opt.value}>
+              <ListItem
+                title={opt.label}
+                subtitle={opt.desc}
+                selected={selected}
+                onPress={() => onSelect(opt.value)}
+                disabled={disabled}
+                rightSlot={<Radio selected={selected} />}
+              />
+              {idx < options.length - 1 ? <ListItem.Separator /> : null}
+            </View>
+          );
+        })}
+      </View>
+    </FadeIn>
+  );
+}
+
+function Radio({ selected }: { selected: boolean }) {
+  return (
+    <View
+      style={[styles.radio, selected && styles.radioOn]}
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+    >
+      {selected ? <View style={styles.radioDot} /> : null}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: Spacing[5], paddingVertical: Spacing[4] },
-  backBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: Colors.bgCard,
-    alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1, borderColor: Colors.border,
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[2],
+    paddingBottom: Spacing[4],
   },
-  title: { fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.bold, color: Colors.textPrimary },
-  content: { paddingHorizontal: Spacing[5], gap: Spacing[4], paddingVertical: Spacing[4], paddingBottom: Spacing[8] },
-  card: { backgroundColor: Colors.bgCard, borderRadius: Radius.xl, borderWidth: 1, borderColor: Colors.border, overflow: 'hidden' },
-  row: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: Spacing[4], paddingVertical: Spacing[4] },
-  rowBorder: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: Colors.border },
-  rowInfo: { flex: 1, paddingRight: Spacing[3] },
-  rowLabel: { fontSize: Typography.fontSize.base, color: Colors.textPrimary },
-  rowDesc: { fontSize: Typography.fontSize.xs, color: Colors.textSecondary, marginTop: 2 },
-  sectionTitle: {
-    fontSize: Typography.fontSize.xs,
-    color: Colors.textMuted,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-    marginTop: Spacing[2],
-    marginLeft: Spacing[2],
+  backBtn: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scroll: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingBottom: Spacing[12],
+  },
+  section: {
+    marginTop: Spacing[8],
+  },
+  listShell: {
+    backgroundColor: Colors.bgCard,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+    borderTopColor: Colors.highlightTop,
+    overflow: 'hidden',
   },
   radio: {
-    width: 22, height: 22, borderRadius: 11,
-    borderWidth: 2, borderColor: Colors.border,
-    alignItems: 'center', justifyContent: 'center',
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    borderColor: Colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  radioOn: { borderColor: Colors.accentPrimary },
-  radioDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: Colors.accentPrimary },
+  radioOn: {
+    borderColor: Colors.accentPrimary,
+  },
+  radioDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: Colors.accentPrimary,
+  },
 });

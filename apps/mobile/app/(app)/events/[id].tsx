@@ -1,19 +1,55 @@
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, ImageBackground, Linking, Platform, Modal, Image } from 'react-native';
+// ─────────────────────────────────────────────
+//  Event Detail — Editorial Premium
+//
+//  Full-bleed 16:10 hero. Kicker (category) + Display title. Meta line
+//  (date · venue) in serif body. Editorial stat strip for attendance/
+//  spots/points/price. Two CTAs at the foot: attend (secondary) + book
+//  table (primary).
+// ─────────────────────────────────────────────
 import { useEffect, useState } from 'react';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import {
+  Alert,
+  Dimensions,
+  Image,
+  Linking,
+  Modal as RNModal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  View,
+} from 'react-native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+
+import {
+  Badge,
+  Body,
+  Button,
+  Caption,
+  Display,
+  FadeIn,
+  Hairline,
+  Kicker,
+  Numeric,
+  Pressy,
+  Skeleton,
+  Subhead,
+} from '@/components/ui';
+import { Colors, EditorialSpacing, Radius, Spacing } from '@/constants/tokens';
+import { HitSlop, Roles } from '@/constants/a11y';
 import { eventsApi } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { useAuthStore } from '@/stores/auth.store';
 import { useAppStore } from '@/stores/app.store';
-import { Colors, Radius } from '@/constants/tokens';
 import { shareEvent } from '@/utils/share';
+
+const HERO_RATIO = 16 / 10;
 
 function toAbsoluteImageUrl(url?: string): string | undefined {
   if (!url) return undefined;
   if (/^https?:\/\//i.test(url) || url.startsWith('data:image/')) return url;
-
   const api = process.env['EXPO_PUBLIC_API_URL'] || 'http://localhost:3000/api/v1';
   const base = api.replace(/\/api\/v1\/?$/, '').replace(/\/$/, '');
   return `${base}${url.startsWith('/') ? '' : '/'}${url}`;
@@ -60,10 +96,14 @@ export default function EventDetail() {
               try {
                 await eventsApi.cancelAttendance(id);
                 setAttending(false);
-                setEvent((e: any) => e ? { ...e, currentCapacity: Math.max(0, (e.currentCapacity ?? 1) - 1) } : e);
+                setEvent((e: any) =>
+                  e ? { ...e, currentCapacity: Math.max(0, (e.currentCapacity ?? 1) - 1) } : e,
+                );
               } catch (err: any) {
                 Alert.alert(t ? 'Error' : 'Error', apiError(err));
-              } finally { setBusy(false); }
+              } finally {
+                setBusy(false);
+              }
             },
           },
         ],
@@ -74,7 +114,7 @@ export default function EventDetail() {
     try {
       await eventsApi.attend(id);
       setAttending(true);
-      setEvent((e: any) => e ? { ...e, currentCapacity: (e.currentCapacity ?? 0) + 1 } : e);
+      setEvent((e: any) => (e ? { ...e, currentCapacity: (e.currentCapacity ?? 0) + 1 } : e));
     } catch (err: any) {
       const msg = apiError(err);
       if (/already/i.test(err?.response?.data?.message ?? '')) {
@@ -82,7 +122,9 @@ export default function EventDetail() {
       } else {
         Alert.alert(t ? 'Error' : 'Error', msg);
       }
-    } finally { setBusy(false); }
+    } finally {
+      setBusy(false);
+    }
   }
 
   function goBookTable() {
@@ -99,7 +141,7 @@ export default function EventDetail() {
     await shareEvent({
       id: event.id,
       title: event.title,
-      description: t ? event.description : (event.descriptionEn || event.description),
+      description: t ? event.description : event.descriptionEn || event.description,
       imageUrl: event.imageUrl,
       startDate: event.startDate,
       venueName: event.venue?.name,
@@ -109,22 +151,30 @@ export default function EventDetail() {
 
   if (loading) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator color={Colors.accentPrimary} />
-      </View>
+      <SafeAreaView style={styles.root} edges={['top']}>
+        <View style={styles.headerBar}>
+          <BackBtn onPress={() => router.back()} label={t ? 'Volver' : 'Back'} />
+        </View>
+        <View style={{ paddingHorizontal: EditorialSpacing.pageGutter, marginTop: Spacing[6], gap: Spacing[5] }}>
+          <Skeleton width="100%" height={220} radius={Radius.lg} />
+          <Skeleton width="40%" height={12} />
+          <Skeleton width="80%" height={36} />
+          <Skeleton width="60%" height={16} />
+        </View>
+      </SafeAreaView>
     );
   }
   if (!event) {
     return (
-      <View style={styles.center}>
-        <Text style={styles.notFound}>{t ? 'Evento no encontrado' : 'Event not found'}</Text>
-      </View>
+      <SafeAreaView style={[styles.root, styles.center]} edges={['top']}>
+        <Body tone="secondary">{t ? 'Evento no encontrado' : 'Event not found'}</Body>
+      </SafeAreaView>
     );
   }
 
   const title = t ? event.title : event.titleEn || event.title;
   const description = t ? event.description : event.descriptionEn || event.description;
-  const categoryName = event.category?.name;
+  const categoryName: string | undefined = event.category?.name;
   const isFree = event.isFree;
   const startDate = event.startDate ? new Date(event.startDate) : null;
   const dateStr = startDate
@@ -135,324 +185,347 @@ export default function EventDetail() {
   const spots = event.maxCapacity
     ? Math.max(0, event.maxCapacity - (event.currentCapacity ?? 0))
     : null;
+  const venue = event.venue;
+  const lat = venue?.lat != null ? Number(venue.lat) : null;
+  const lng = venue?.lng != null ? Number(venue.lng) : null;
+  const hasCoords = lat != null && lng != null && !Number.isNaN(lat) && !Number.isNaN(lng);
+  const heroUri = toAbsoluteImageUrl(event.imageUrl);
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
-      <ScrollView contentContainerStyle={{ paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
-        {/* Hero image */}
-        <View style={styles.heroBox}>
-          {event.imageUrl ? (
-            <TouchableOpacity activeOpacity={0.95} style={styles.hero} onPress={() => setPreviewVisible(true)}>
-              <ImageBackground source={{ uri: toAbsoluteImageUrl(event.imageUrl) }} style={styles.hero} imageStyle={{ borderRadius: 0 }}>
-                <View style={styles.heroOverlay} />
-                <HeaderButtons onBack={() => router.back()} onShare={handleShare} />
-                <View style={styles.previewHint}>
-                  <Feather name="maximize-2" size={12} color={Colors.textPrimary} />
-                  <Text style={styles.previewHintText}>{t ? 'Toca para ampliar' : 'Tap to zoom'}</Text>
-                </View>
-              </ImageBackground>
-            </TouchableOpacity>
+      <ScrollView contentContainerStyle={{ paddingBottom: 160 }} showsVerticalScrollIndicator={false}>
+        {/* Hero ─────────────────────────────── */}
+        <View style={styles.heroWrap}>
+          {heroUri ? (
+            <Pressable
+              onPress={() => setPreviewVisible(true)}
+              accessibilityRole={Roles.imagebutton}
+              accessibilityLabel={t ? 'Ampliar imagen' : 'Zoom image'}
+            >
+              <Image
+                source={{ uri: heroUri }}
+                style={styles.heroImg}
+                resizeMode="cover"
+                accessibilityIgnoresInvertColors
+              />
+            </Pressable>
           ) : (
-            <View style={[styles.hero, { backgroundColor: Colors.bgElevated }]}>
-              <HeaderButtons onBack={() => router.back()} onShare={handleShare} />
+            <View style={[styles.heroImg, styles.heroFallback]}>
+              <Feather name="image" size={48} color={Colors.textMuted} />
             </View>
           )}
+          <View style={styles.heroHeader}>
+            <BackBtn onPress={() => router.back()} label={t ? 'Volver' : 'Back'} overlay />
+            <Pressy
+              onPress={handleShare}
+              accessibilityLabel={t ? 'Compartir' : 'Share'}
+              hitSlop={HitSlop.expand}
+              style={styles.iconOverlay}
+            >
+              <Feather name="share-2" size={18} color={Colors.textPrimary} />
+            </Pressy>
+          </View>
         </View>
 
-        <View style={styles.content}>
-          {/* Tags row */}
-          <View style={styles.tagsRow}>
-            {categoryName && (
-              <View style={[styles.tag, { backgroundColor: (event.category?.color || Colors.accentPrimary) + '20' }]}>
-                <Text style={[styles.tagText, { color: event.category?.color || Colors.accentPrimary }]}>
-                  {categoryName.toUpperCase()}
-                </Text>
-              </View>
-            )}
-            {isFree && (
-              <View style={[styles.tag, { backgroundColor: Colors.accentSuccess + '20' }]}>
-                <Text style={[styles.tagText, { color: Colors.accentSuccess }]}>
-                  {t ? 'ENTRADA LIBRE' : 'FREE ENTRY'}
-                </Text>
-              </View>
-            )}
-          </View>
-
-          {/* Title */}
-          <Text style={styles.title}>{title}</Text>
-
-          {/* Meta row */}
-          <View style={styles.metaRow}>
-            <View style={styles.metaItem}>
-              <Feather name="calendar" size={14} color={Colors.textSecondary} />
-              <Text style={styles.metaText}>{dateStr}</Text>
+        {/* Body ─────────────────────────────── */}
+        <View style={styles.body}>
+          <FadeIn>
+            <View style={styles.tagsRow}>
+              {categoryName ? (
+                <Badge label={categoryName.toUpperCase()} variant="accent" size="sm" />
+              ) : null}
+              {isFree ? (
+                <Badge label={t ? 'ENTRADA LIBRE' : 'FREE ENTRY'} variant="success" size="sm" />
+              ) : null}
             </View>
-            {event.venue?.name && (
-              <TouchableOpacity
-                style={styles.metaItem}
-                onPress={() => {
-                  const v = event.venue;
-                  const lat = v?.lat != null ? Number(v.lat) : null;
-                  const lng = v?.lng != null ? Number(v.lng) : null;
-                  const hasCoords = lat != null && lng != null && !Number.isNaN(lat) && !Number.isNaN(lng);
-                  const url = hasCoords
-                    ? (Platform.OS === 'ios'
-                        ? `http://maps.apple.com/?ll=${lat},${lng}&q=${encodeURIComponent(v.name)}`
-                        : `https://maps.google.com/?q=${lat},${lng}`)
-                    : v?.address
-                      ? `https://maps.google.com/?q=${encodeURIComponent(v.address)}`
-                      : null;
-                  if (url) Linking.openURL(url).catch(() => {});
-                }}
-                activeOpacity={0.7}
-              >
-                <Feather name="map-pin" size={14} color={Colors.accentPrimary} />
-                <Text style={[styles.metaText, { color: Colors.accentPrimary }]}>{event.venue.name}</Text>
-              </TouchableOpacity>
-            )}
-          </View>
+          </FadeIn>
+          <FadeIn delay={80} style={{ marginTop: Spacing[4] }}>
+            <Display size="md">{title}</Display>
+          </FadeIn>
 
-          {/* Description */}
+          {/* Meta line */}
+          <FadeIn delay={160} style={{ marginTop: Spacing[4] }}>
+            <View style={styles.metaRow}>
+              <View style={styles.metaItem}>
+                <Feather name="calendar" size={14} color={Colors.textMuted} />
+                <Caption tone="secondary">{dateStr}</Caption>
+              </View>
+              {venue?.name ? (
+                <Pressy
+                  onPress={() => {
+                    const url = hasCoords
+                      ? Platform.OS === 'ios'
+                        ? `http://maps.apple.com/?ll=${lat},${lng}&q=${encodeURIComponent(venue.name)}`
+                        : `https://maps.google.com/?q=${lat},${lng}`
+                      : venue?.address
+                        ? `https://maps.google.com/?q=${encodeURIComponent(venue.address)}`
+                        : null;
+                    if (url) Linking.openURL(url).catch(() => {});
+                  }}
+                  accessibilityLabel={t ? 'Abrir ubicación' : 'Open location'}
+                  hitSlop={HitSlop.expand}
+                  haptic="select"
+                  style={styles.metaItem}
+                >
+                  <Feather name="map-pin" size={14} color={Colors.accentPrimary} />
+                  <Caption tone="accent">{venue.name}</Caption>
+                </Pressy>
+              ) : null}
+            </View>
+          </FadeIn>
+
           {description ? (
-            <Text style={styles.description}>{description}</Text>
+            <FadeIn delay={240} style={{ marginTop: Spacing[5] }}>
+              <Body size="lg" tone="secondary">
+                {description}
+              </Body>
+            </FadeIn>
           ) : null}
 
-          {/* Stats */}
-          <View style={styles.statsRow}>
-            <View style={styles.statCard}>
-              <Feather name="users" size={18} color={Colors.accentPrimary} />
-              <Text style={styles.statValue}>{event.currentCapacity ?? 0}</Text>
-              <Text style={styles.statLabel}>{t ? 'Asistentes' : 'Attendees'}</Text>
-            </View>
-            {spots !== null && (
-              <View style={styles.statCard}>
-                <Feather name="check-circle" size={18} color={Colors.accentSuccess} />
-                <Text style={styles.statValue}>{spots}</Text>
-                <Text style={styles.statLabel}>{t ? 'Disponibles' : 'Available'}</Text>
-              </View>
-            )}
-            {event.pointsReward ? (
-              <View style={styles.statCard}>
-                <Feather name="star" size={18} color={Colors.accentPrimary} />
-                <Text style={styles.statValue}>+{event.pointsReward}</Text>
-                <Text style={styles.statLabel}>{t ? 'Puntos' : 'Points'}</Text>
-              </View>
+          {/* Stat strip */}
+          <FadeIn delay={320} style={styles.statStrip}>
+            <StatBlock
+              kicker={t ? 'ASISTEN' : 'ATTENDING'}
+              value={String(event.currentCapacity ?? 0)}
+            />
+            {spots !== null ? (
+              <StatBlock
+                kicker={t ? 'DISPONIBLES' : 'AVAILABLE'}
+                value={String(spots)}
+              />
             ) : null}
-          </View>
+            {event.pointsReward ? (
+              <StatBlock
+                kicker={t ? 'PUNTOS' : 'POINTS'}
+                value={`+${event.pointsReward}`}
+              />
+            ) : null}
+          </FadeIn>
 
-          {/* Price */}
+          {/* Price block */}
           {!isFree && event.price ? (
-            <View style={styles.priceBox}>
-              <Text style={styles.priceLabel}>{t ? 'Precio' : 'Price'}</Text>
-              <Text style={styles.priceValue}>
-                {event.currency || 'MXN'} ${Number(event.price).toLocaleString(language)}
-              </Text>
-            </View>
+            <FadeIn delay={400} style={{ marginTop: Spacing[8] }}>
+              <Hairline variant="normal" />
+              <View style={styles.priceRow}>
+                <Kicker tone="muted">{t ? 'PRECIO' : 'PRICE'}</Kicker>
+                <Numeric size="sm" tone="accent">
+                  {event.currency || 'MXN'} ${Number(event.price).toLocaleString(language)}
+                </Numeric>
+              </View>
+              <Hairline variant="normal" />
+            </FadeIn>
           ) : null}
         </View>
       </ScrollView>
 
-      {/* Sticky CTA */}
-      <View style={styles.cta}>
-        <View style={styles.ctaRow}>
-          <TouchableOpacity
-            style={[styles.ctaAttend, attending && styles.ctaAttending, busy && { opacity: 0.6 }]}
-            onPress={toggleAttendance}
-            disabled={busy}
-            activeOpacity={0.85}
-          >
-            {busy
-              ? <ActivityIndicator color={attending ? Colors.accentSuccess : Colors.textInverse} size="small" />
-              : <>
+      {/* Sticky CTA ─────────────────────────── */}
+      <View style={styles.ctaWrap}>
+        <Hairline variant="subtle" />
+        <View style={styles.ctaInner}>
+          <View style={styles.ctaRow}>
+            <View style={{ flex: 1 }}>
+              <Button
+                label={attending ? (t ? 'Asistiendo' : 'Attending') : t ? 'Asistir' : 'Attend'}
+                onPress={toggleAttendance}
+                loading={busy}
+                disabled={busy}
+                variant={attending ? 'secondary' : 'secondary'}
+                size="lg"
+                haptic={attending ? 'warning' : 'success'}
+                leftIcon={
                   <Feather
                     name={attending ? 'check' : 'star'}
                     size={16}
-                    color={attending ? Colors.accentSuccess : Colors.textInverse}
+                    color={attending ? Colors.accentSuccess : Colors.accentPrimary}
                   />
-                  <Text style={[styles.ctaAttendLbl, attending && { color: Colors.accentSuccess }]}>
-                    {attending ? (t ? 'Asistiendo' : 'Attending') : (t ? 'Asistiré' : 'Attend')}
-                  </Text>
-                </>}
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.ctaBook}
-            onPress={goBookTable}
-            activeOpacity={0.9}
-          >
-            <Feather name="calendar" size={16} color={Colors.textInverse} />
-            <Text style={styles.ctaLabel}>{t ? 'Reservar mesa' : 'Book a table'}</Text>
-          </TouchableOpacity>
+                }
+              />
+            </View>
+            <View style={{ flex: 1.3 }}>
+              <Button
+                label={t ? 'Reservar mesa' : 'Book a table'}
+                onPress={goBookTable}
+                variant="primary"
+                size="lg"
+              />
+            </View>
+          </View>
         </View>
       </View>
 
-      <Modal
+      <RNModal
         visible={previewVisible}
         transparent
         animationType="fade"
         onRequestClose={() => setPreviewVisible(false)}
       >
         <View style={styles.previewBackdrop}>
-          <TouchableOpacity style={styles.previewClose} onPress={() => setPreviewVisible(false)} hitSlop={10}>
+          <Pressy
+            onPress={() => setPreviewVisible(false)}
+            accessibilityLabel={t ? 'Cerrar' : 'Close'}
+            style={styles.previewClose}
+            haptic="select"
+          >
             <Feather name="x" size={20} color={Colors.textPrimary} />
-          </TouchableOpacity>
-          <Image source={{ uri: toAbsoluteImageUrl(event.imageUrl) }} style={styles.previewImage} resizeMode="contain" />
+          </Pressy>
+          {heroUri ? (
+            <Image source={{ uri: heroUri }} style={styles.previewImage} resizeMode="contain" />
+          ) : null}
         </View>
-      </Modal>
+      </RNModal>
     </SafeAreaView>
   );
 }
 
-function HeaderButtons({ onBack, onShare }: { onBack: () => void; onShare: () => void }) {
+function StatBlock({ kicker, value }: { kicker: string; value: string }) {
   return (
-    <View style={styles.heroHdr}>
-      <TouchableOpacity style={styles.iconBtn} onPress={onBack} hitSlop={10}>
-        <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
-      </TouchableOpacity>
-      <TouchableOpacity style={styles.iconBtn} onPress={onShare} hitSlop={10}>
-        <Feather name="share-2" size={18} color={Colors.textPrimary} />
-      </TouchableOpacity>
+    <View style={styles.statBlock}>
+      <Kicker tone="muted">{kicker}</Kicker>
+      <View style={{ marginTop: Spacing[2] }}>
+        <Numeric size="sm">{value}</Numeric>
+      </View>
     </View>
   );
 }
 
+function BackBtn({
+  onPress,
+  label,
+  overlay,
+}: {
+  onPress: () => void;
+  label: string;
+  overlay?: boolean;
+}) {
+  return (
+    <Pressy
+      onPress={onPress}
+      accessibilityRole={Roles.button}
+      accessibilityLabel={label}
+      hitSlop={HitSlop.expand}
+      style={[styles.backBtn, overlay && styles.backBtnOverlay]}
+    >
+      <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
+    </Pressy>
+  );
+}
+
+const screenWidth = Dimensions.get('window').width;
+const heroHeight = Math.round(screenWidth / HERO_RATIO);
+
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.bgPrimary },
-  notFound: { color: Colors.textSecondary },
+  center: { alignItems: 'center', justifyContent: 'center' },
 
-  heroBox: { height: 280 },
-  hero: { flex: 1 },
-  heroOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.25)',
+  headerBar: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[2],
   },
-  previewHint: {
+
+  heroWrap: { width: '100%' },
+  heroImg: { width: '100%', height: heroHeight },
+  heroFallback: { backgroundColor: Colors.bgCard, alignItems: 'center', justifyContent: 'center' },
+  heroHeader: {
     position: 'absolute',
-    right: 16,
-    bottom: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 20,
-  },
-  previewHintText: { color: Colors.textPrimary, fontSize: 11, fontWeight: '700' },
-  heroHdr: {
+    top: Spacing[2],
+    left: EditorialSpacing.pageGutter,
+    right: EditorialSpacing.pageGutter,
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingTop: 8,
   },
-  iconBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    alignItems: 'center', justifyContent: 'center',
-  },
-
-  content: {
-    paddingHorizontal: 20,
-    paddingTop: 18,
-    gap: 14,
-  },
-  tagsRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
-  tag: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
-  tagText: { fontSize: 10, fontWeight: '800', letterSpacing: 0.5 },
-
-  title: { color: Colors.textPrimary, fontSize: 26, fontWeight: '800', lineHeight: 32 },
-
-  metaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 16 },
-  metaItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  metaText: { color: Colors.textSecondary, fontSize: 13 },
-
-  description: { color: Colors.textSecondary, fontSize: 14, lineHeight: 21 },
-
-  statsRow: { flexDirection: 'row', gap: 10, marginTop: 6 },
-  statCard: {
-    flex: 1,
-    backgroundColor: Colors.bgCard,
-    borderRadius: Radius.card,
-    paddingVertical: 14,
+  backBtn: {
+    width: 44,
+    height: 44,
     alignItems: 'center',
-    gap: 4,
+    justifyContent: 'center',
+    marginLeft: -Spacing[2],
   },
-  statValue: { color: Colors.textPrimary, fontSize: 18, fontWeight: '800' },
-  statLabel: { color: Colors.textMuted, fontSize: 11 },
+  backBtnOverlay: {
+    backgroundColor: 'rgba(8,7,6,0.45)',
+    borderRadius: Radius.full,
+    width: 40,
+    height: 40,
+    marginLeft: 0,
+  },
+  iconOverlay: {
+    width: 40,
+    height: 40,
+    borderRadius: Radius.full,
+    backgroundColor: 'rgba(8,7,6,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
-  priceBox: {
-    backgroundColor: Colors.bgCard,
-    borderRadius: Radius.card,
-    padding: 16,
+  body: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[8],
+  },
+
+  tagsRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: Spacing[2],
   },
-  priceLabel: { color: Colors.textSecondary, fontSize: 14 },
-  priceValue: { color: Colors.accentPrimary, fontSize: 22, fontWeight: '800' },
 
-  cta: {
+  metaRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing[5],
+  },
+  metaItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing[2],
+  },
+
+  statStrip: {
+    marginTop: Spacing[8],
+    flexDirection: 'row',
+    gap: Spacing[4],
+  },
+  statBlock: { flex: 1 },
+
+  priceRow: {
+    paddingVertical: Spacing[5],
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+
+  ctaWrap: {
     position: 'absolute',
-    left: 0, right: 0, bottom: 0,
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: 24,
+    left: 0,
+    right: 0,
+    bottom: 0,
     backgroundColor: Colors.bgPrimary,
-    borderTopWidth: 1,
-    borderTopColor: Colors.border,
   },
-  ctaRow: { flexDirection: 'row', gap: 10 },
-  ctaAttend: {
+  ctaInner: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[4],
+    paddingBottom: Spacing[6],
+  },
+  ctaRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    height: 54,
-    paddingHorizontal: 16,
-    backgroundColor: Colors.bgCard,
-    borderRadius: Radius.button,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    flex: 1,
+    gap: Spacing[3],
   },
-  ctaAttending: {
-    backgroundColor: 'rgba(56,199,147,0.1)',
-    borderColor: Colors.accentSuccess,
-  },
-  ctaAttendLbl: { color: Colors.textPrimary, fontSize: 14, fontWeight: '700' },
-  ctaBook: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    height: 54,
-    backgroundColor: Colors.accentPrimary,
-    borderRadius: Radius.button,
-    flex: 1.4,
-  },
-  ctaLabel: { color: Colors.textInverse, fontSize: 15, fontWeight: '700' },
 
   previewBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.94)',
+    backgroundColor: Colors.bgOverlay,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 10,
-  },
-  previewImage: {
-    width: '100%',
-    height: '80%',
   },
   previewClose: {
     position: 'absolute',
-    top: 56,
-    right: 20,
-    zIndex: 2,
+    top: 52,
+    right: EditorialSpacing.pageGutter,
     width: 40,
     height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.15)',
+    borderRadius: Radius.full,
+    backgroundColor: 'rgba(246,241,231,0.12)',
     alignItems: 'center',
     justifyContent: 'center',
+    zIndex: 2,
   },
+  previewImage: { width: '100%', height: '80%' },
 });

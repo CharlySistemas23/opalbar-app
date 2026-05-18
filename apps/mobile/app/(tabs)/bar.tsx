@@ -1,20 +1,58 @@
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Linking, Platform, Alert, Image, RefreshControl } from 'react-native';
+// ─────────────────────────────────────────────
+//  Bar — Editorial Premium
+//
+//  The venue's editorial hub. Full-bleed hero image, kicker overline,
+//  serif Display title, restrained metadata, primary CTA. Horarios and
+//  contact info read as ListItems; upcoming events and offers sit in
+//  hairline-separated sections — no glassmorphism, no rounded pill noise.
+// ─────────────────────────────────────────────
 import { useCallback, useState } from 'react';
+import {
+  Alert,
+  Image,
+  Linking,
+  Platform,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  View,
+} from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
-import { Button } from '@/components/ui';
-import { venueApi, reviewsApi, offersApi, eventsApi } from '@/api/client';
+
+import { eventsApi, offersApi, reviewsApi, venueApi } from '@/api/client';
 import { useAppStore } from '@/stores/app.store';
-import { Colors, Typography, Spacing, Radius } from '@/constants/tokens';
+import {
+  Colors,
+  EditorialSpacing,
+  Radius,
+  Spacing,
+} from '@/constants/tokens';
+import { HitSlop, Roles } from '@/constants/a11y';
+import {
+  Body,
+  Button,
+  Caption,
+  Display,
+  FadeIn,
+  Hairline,
+  Heading,
+  Kicker,
+  ListItem,
+  Pressy,
+  Skeleton,
+  SkeletonText,
+} from '@/components/ui';
+import { ErrorState } from '@/components/ErrorState';
 
-// ─────────────────────────────────────────────
-//  Bar tab — hub for the primary venue (OPAL BAR PV)
-//  · Loads first venue from /venues
-//  · Shows hero, info, actions, reservation CTA, offers preview
-// ─────────────────────────────────────────────
-
-async function openDirections(venue: { lat?: number | string | null; lng?: number | string | null; address?: string | null; name?: string }) {
+// ── External actions ─────────────────────────
+async function openDirections(venue: {
+  lat?: number | string | null;
+  lng?: number | string | null;
+  address?: string | null;
+  name?: string;
+}) {
   const lat = venue.lat != null ? Number(venue.lat) : null;
   const lng = venue.lng != null ? Number(venue.lng) : null;
   const name = venue.name ?? 'OPAL BAR';
@@ -39,7 +77,9 @@ async function openDirections(venue: { lat?: number | string | null; lng?: numbe
       ? `${lat},${lng}(${name})`
       : `${name} ${venue.address}`;
 
-  return Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`);
+  return Linking.openURL(
+    `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`,
+  );
 }
 
 async function callVenue(phone?: string | null) {
@@ -49,6 +89,9 @@ async function callVenue(phone?: string | null) {
   if (can) Linking.openURL(url);
 }
 
+// ─────────────────────────────────────────────
+//  Bar screen
+// ─────────────────────────────────────────────
 export default function BarTab() {
   const router = useRouter();
   const { language } = useAppStore();
@@ -67,7 +110,11 @@ export default function BarTab() {
     try {
       const listRes = await venueApi.list({ limit: 1 });
       const payload = listRes.data?.data;
-      const first = Array.isArray(payload?.data) ? payload.data[0] : Array.isArray(payload) ? payload[0] : null;
+      const first = Array.isArray(payload?.data)
+        ? payload.data[0]
+        : Array.isArray(payload)
+          ? payload[0]
+          : null;
       if (!first) {
         setVenue(null);
         setError(t ? 'Aún no hay información del bar.' : 'No bar info yet.');
@@ -78,7 +125,9 @@ export default function BarTab() {
         venueApi.get(first.id),
         reviewsApi.venueSummary(first.id).catch(() => null),
         offersApi.list({ limit: 3, venueId: first.id }).catch(() => null),
-        eventsApi.list({ limit: 4, venueId: first.id, startDate: nowIso }).catch(() => null),
+        eventsApi
+          .list({ limit: 4, venueId: first.id, startDate: nowIso })
+          .catch(() => null),
       ]);
       setVenue(vRes.data?.data ?? first);
       setSummary(rRes?.data?.data ?? null);
@@ -92,390 +141,514 @@ export default function BarTab() {
     }
   }, [t]);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load]),
+  );
 
+  // ── Loading skeleton ───────────────────────
   if (loading) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator color={Colors.accentPrimary} />
-      </View>
+      <SafeAreaView style={styles.root} edges={['top']}>
+        <Skeleton width="100%" height={260} radius={0} />
+        <View style={styles.content}>
+          <Skeleton width={120} height={11} />
+          <View style={{ height: Spacing[2] }} />
+          <Skeleton width="80%" height={36} />
+          <View style={{ height: Spacing[5] }} />
+          <SkeletonText lines={3} />
+        </View>
+      </SafeAreaView>
     );
   }
 
+  // ── Error / empty venue ─────────────────────
   if (!venue) {
     return (
       <SafeAreaView style={styles.root} edges={['top']}>
-        <View style={styles.center}>
-          <Feather name="alert-circle" size={32} color={Colors.textMuted} />
-          <Text style={styles.errorText}>{error || (t ? 'Sin datos' : 'No data')}</Text>
-          <TouchableOpacity onPress={() => { setLoading(true); load(); }} style={styles.retryBtn}>
-            <Text style={styles.retryBtnText}>{t ? 'Reintentar' : 'Retry'}</Text>
-          </TouchableOpacity>
-        </View>
+        <ErrorState
+          message={error || (t ? 'Sin datos' : 'No data')}
+          retryLabel={t ? 'Reintentar' : 'Retry'}
+          onRetry={() => {
+            setLoading(true);
+            load();
+          }}
+        />
       </SafeAreaView>
     );
   }
 
   const rating = Number(venue.ratingAvg ?? summary?.averageRating ?? 0);
   const reviewCount = Number(venue.ratingCount ?? summary?.totalReviews ?? 0);
+  const heroImage = venue.coverUrl || venue.imageUrl || null;
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 32 }}
+        contentContainerStyle={styles.scroll}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            onRefresh={() => { setRefreshing(true); load(); }}
-            tintColor={Colors.accentPrimary}
+            onRefresh={() => {
+              setRefreshing(true);
+              load();
+            }}
+            tintColor={Colors.textMuted}
           />
         }
       >
-        {/* Hero */}
-        <View style={styles.hero}>
-          {venue.coverUrl || venue.imageUrl ? (
-            <Image source={{ uri: venue.coverUrl || venue.imageUrl }} style={styles.heroImg} resizeMode="cover" />
-          ) : (
-            <View style={styles.heroPlaceholder}>
-              <Feather name="image" size={32} color={Colors.textMuted} />
-            </View>
-          )}
-        </View>
-
-        <View style={styles.content}>
-          <View style={styles.titleRow}>
-            <Text style={styles.venueName} numberOfLines={2}>{venue.name}</Text>
-            <View style={[styles.badge, venue.isActive ? styles.badgeOpen : styles.badgeClosed]}>
-              <View style={[styles.badgeDot, { backgroundColor: venue.isActive ? Colors.accentSuccess : Colors.textMuted }]} />
-              <Text style={[styles.badgeLabel, { color: venue.isActive ? Colors.accentSuccess : Colors.textMuted }]}>
-                {venue.isActive ? (t ? 'Abierto' : 'Open') : (t ? 'Cerrado' : 'Closed')}
-              </Text>
-            </View>
+        {/* ── Hero image ─────────────────────── */}
+        <FadeIn>
+          <View style={styles.hero}>
+            {heroImage ? (
+              <Image source={{ uri: heroImage }} style={styles.heroImg} resizeMode="cover" />
+            ) : (
+              <View style={[styles.heroImg, styles.heroPlaceholder]}>
+                <Feather name="image" size={28} color={Colors.textMuted} />
+              </View>
+            )}
           </View>
+        </FadeIn>
+
+        {/* ── Identity block ────────────────── */}
+        <View style={styles.identity}>
+          <FadeIn delay={120}>
+            <Kicker tone="champagne">
+              {venue.isActive
+                ? t
+                  ? 'ABIERTO AHORA'
+                  : 'OPEN NOW'
+                : t
+                  ? 'CERRADO'
+                  : 'CLOSED'}
+            </Kicker>
+          </FadeIn>
+          <FadeIn delay={200} style={{ marginTop: Spacing[3] }}>
+            <Display size="md">{venue.name}</Display>
+          </FadeIn>
 
           {reviewCount > 0 ? (
-            <View style={styles.ratingRow}>
-              <Feather name="star" size={14} color={Colors.accentWarning} />
-              <Text style={styles.ratingValue}>{rating.toFixed(1)}</Text>
-              <Text style={styles.ratingMeta}>({reviewCount} {t ? 'reseñas' : 'reviews'})</Text>
-            </View>
+            <FadeIn delay={280} style={{ marginTop: Spacing[3] }}>
+              <View style={styles.ratingRow}>
+                <Feather name="star" size={14} color={Colors.accentChampagne} />
+                <Body size="sm" tone="primary" weight="semiBold">
+                  {rating.toFixed(1)}
+                </Body>
+                <Caption tone="muted">
+                  · {reviewCount} {t ? 'reseñas' : 'reviews'}
+                </Caption>
+              </View>
+            </FadeIn>
           ) : null}
 
           {venue.description ? (
-            <Text style={styles.description}>{venue.description}</Text>
+            <FadeIn delay={360} style={{ marginTop: Spacing[4] }}>
+              <Body size="md" tone="secondary">
+                {venue.description}
+              </Body>
+            </FadeIn>
           ) : null}
+        </View>
 
+        {/* ── Quick actions row ─────────────── */}
+        <FadeIn delay={430}>
           <View style={styles.actionsRow}>
-            <ActionTile icon="navigation" label={t ? 'Cómo llegar' : 'Directions'} onPress={() => openDirections(venue)} />
+            <ActionTile
+              icon="navigation"
+              label={t ? 'Cómo llegar' : 'Directions'}
+              onPress={() => openDirections(venue)}
+            />
             {venue.phone ? (
-              <ActionTile icon="phone" label={t ? 'Llamar' : 'Call'} onPress={() => callVenue(venue.phone)} />
+              <ActionTile
+                icon="phone"
+                label={t ? 'Llamar' : 'Call'}
+                onPress={() => callVenue(venue.phone)}
+              />
             ) : null}
             {venue.website ? (
-              <ActionTile icon="globe" label={t ? 'Sitio' : 'Website'} onPress={() => Linking.openURL(venue.website).catch(() => {})} />
+              <ActionTile
+                icon="globe"
+                label={t ? 'Sitio' : 'Website'}
+                onPress={() =>
+                  Linking.openURL(venue.website).catch(() => {
+                    /* noop */
+                  })
+                }
+              />
             ) : null}
           </View>
+        </FadeIn>
 
-          <View style={styles.infoCard}>
+        <Hairline style={styles.sectionDivider} />
+
+        {/* ── Info ─────────────────────────── */}
+        <Section title={t ? 'Información' : 'Information'}>
+          <View style={styles.infoList}>
             {venue.address ? (
-              <TouchableOpacity style={styles.infoRow} onPress={() => openDirections(venue)} activeOpacity={0.7}>
-                <Feather name="map-pin" size={16} color={Colors.accentPrimary} />
-                <Text style={styles.infoText} numberOfLines={2}>{venue.address}</Text>
-                <Feather name="chevron-right" size={16} color={Colors.textMuted} />
-              </TouchableOpacity>
+              <>
+                <ListItem
+                  title={venue.address}
+                  subtitle={t ? 'Dirección' : 'Address'}
+                  leftIcon={<Feather name="map-pin" size={18} color={Colors.textMuted} />}
+                  onPress={() => openDirections(venue)}
+                  accessibilityHint={t ? 'Abre en el mapa' : 'Opens in maps'}
+                />
+                <Hairline variant="subtle" />
+              </>
             ) : null}
 
             {venue.openTime && venue.closeTime ? (
-              <View style={[styles.infoRow, styles.infoRowBorder]}>
-                <Feather name="clock" size={16} color={Colors.accentPrimary} />
-                <Text style={styles.infoText}>
-                  {t ? 'Horario: ' : 'Hours: '}{venue.openTime}–{venue.closeTime}
-                </Text>
-              </View>
+              <>
+                <ListItem
+                  title={`${venue.openTime} – ${venue.closeTime}`}
+                  subtitle={t ? 'Horario' : 'Hours'}
+                  leftIcon={<Feather name="clock" size={18} color={Colors.textMuted} />}
+                />
+                <Hairline variant="subtle" />
+              </>
             ) : null}
 
             {venue.phone ? (
-              <TouchableOpacity style={[styles.infoRow, styles.infoRowBorder]} onPress={() => callVenue(venue.phone)} activeOpacity={0.7}>
-                <Feather name="phone" size={16} color={Colors.accentPrimary} />
-                <Text style={styles.infoText}>{venue.phone}</Text>
-                <Feather name="chevron-right" size={16} color={Colors.textMuted} />
-              </TouchableOpacity>
+              <ListItem
+                title={venue.phone}
+                subtitle={t ? 'Teléfono' : 'Phone'}
+                leftIcon={<Feather name="phone" size={18} color={Colors.textMuted} />}
+                onPress={() => callVenue(venue.phone)}
+                accessibilityHint={t ? 'Inicia una llamada' : 'Starts a call'}
+              />
             ) : null}
           </View>
+        </Section>
 
-          {/* Upcoming events */}
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>{t ? 'Próximos eventos' : 'Upcoming events'}</Text>
-            <TouchableOpacity onPress={() => router.push('/(tabs)/events' as never)} hitSlop={8}>
-              <Text style={styles.sectionLink}>{t ? 'Ver todos' : 'See all'}</Text>
-            </TouchableOpacity>
-          </View>
+        <Hairline style={styles.sectionDivider} />
 
+        {/* ── Upcoming events ───────────────── */}
+        <Section
+          title={t ? 'Próximos eventos' : 'Upcoming events'}
+          actionLabel={events.length > 0 ? (t ? 'Ver todos' : 'See all') : undefined}
+          onAction={() => router.push('/(tabs)/events' as never)}
+        >
           {events.length === 0 ? (
-            <View style={styles.offersEmpty}>
-              <Feather name="calendar" size={20} color={Colors.textMuted} />
-              <Text style={styles.offersEmptyText}>
-                {t ? 'Sin eventos próximos.' : 'No upcoming events.'}
-              </Text>
-            </View>
+            <Body size="sm" tone="muted">
+              {t ? 'Sin eventos próximos.' : 'No upcoming events.'}
+            </Body>
           ) : (
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ gap: 10, paddingRight: 4 }}
+              contentContainerStyle={styles.eventsRow}
             >
               {events.map((e) => {
                 const dt = e.startDate ? new Date(e.startDate) : null;
                 const dateLabel = dt
-                  ? dt.toLocaleDateString(t ? 'es-MX' : 'en-US', { weekday: 'short', day: 'numeric', month: 'short' })
+                  ? dt.toLocaleDateString(t ? 'es-MX' : 'en-US', {
+                      weekday: 'short',
+                      day: 'numeric',
+                      month: 'short',
+                    })
                   : '';
                 const timeLabel = dt
-                  ? dt.toLocaleTimeString(t ? 'es-MX' : 'en-US', { hour: '2-digit', minute: '2-digit' })
+                  ? dt.toLocaleTimeString(t ? 'es-MX' : 'en-US', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })
                   : '';
                 return (
-                  <TouchableOpacity
+                  <Pressy
                     key={e.id}
-                    style={styles.eventCard}
-                    activeOpacity={0.85}
                     onPress={() => router.push(`/(app)/events/${e.id}` as never)}
+                    accessibilityRole={Roles.button}
+                    accessibilityLabel={e.title}
+                    style={styles.eventCard}
                   >
                     {e.imageUrl ? (
-                      <Image source={{ uri: e.imageUrl }} style={styles.eventImg} resizeMode="cover" />
+                      <Image
+                        source={{ uri: e.imageUrl }}
+                        style={styles.eventImg}
+                        resizeMode="cover"
+                      />
                     ) : (
                       <View style={[styles.eventImg, styles.eventImgPlaceholder]}>
-                        <Feather name="calendar" size={22} color={Colors.accentPrimary} />
+                        <Feather name="calendar" size={22} color={Colors.textMuted} />
                       </View>
                     )}
                     <View style={styles.eventBody}>
-                      {dateLabel ? <Text style={styles.eventDate}>{dateLabel}{timeLabel ? ` · ${timeLabel}` : ''}</Text> : null}
-                      <Text style={styles.eventTitle} numberOfLines={2}>{e.title}</Text>
+                      {dateLabel ? (
+                        <Kicker tone="champagne">
+                          {dateLabel}
+                          {timeLabel ? ` · ${timeLabel}` : ''}
+                        </Kicker>
+                      ) : null}
+                      <Body
+                        size="sm"
+                        weight="semiBold"
+                        numberOfLines={2}
+                        style={styles.eventTitle}
+                      >
+                        {e.title}
+                      </Body>
                     </View>
-                  </TouchableOpacity>
+                  </Pressy>
                 );
               })}
             </ScrollView>
           )}
+        </Section>
 
-          {/* Offers preview */}
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>{t ? 'Ofertas activas' : 'Active offers'}</Text>
-            <TouchableOpacity onPress={() => router.push('/(app)/offers' as never)} hitSlop={8}>
-              <Text style={styles.sectionLink}>{t ? 'Ver todas' : 'See all'}</Text>
-            </TouchableOpacity>
-          </View>
+        <Hairline style={styles.sectionDivider} />
 
+        {/* ── Active offers ─────────────────── */}
+        <Section
+          title={t ? 'Ofertas activas' : 'Active offers'}
+          actionLabel={offers.length > 0 ? (t ? 'Ver todas' : 'See all') : undefined}
+          onAction={() => router.push('/(app)/offers' as never)}
+        >
           {offers.length === 0 ? (
-            <View style={styles.offersEmpty}>
-              <Feather name="tag" size={20} color={Colors.textMuted} />
-              <Text style={styles.offersEmptyText}>
-                {t ? 'Sin ofertas por ahora.' : 'No offers right now.'}
-              </Text>
-            </View>
+            <Body size="sm" tone="muted">
+              {t ? 'Sin ofertas por ahora.' : 'No offers right now.'}
+            </Body>
           ) : (
-            <View style={{ gap: 10 }}>
-              {offers.map((o) => (
-                <TouchableOpacity
-                  key={o.id}
-                  style={styles.offerRow}
-                  activeOpacity={0.8}
-                  onPress={() => router.push(`/(app)/offers/${o.id}` as never)}
-                >
-                  <View style={styles.offerIconBox}>
-                    {o.imageUrl ? (
-                      <Image source={{ uri: o.imageUrl }} style={styles.offerImg} resizeMode="cover" />
-                    ) : (
-                      <Feather name="tag" size={18} color={Colors.accentPrimary} />
-                    )}
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.offerTitle} numberOfLines={1}>{o.title}</Text>
-                    {o.validWhen ? (
-                      <Text style={styles.offerMeta} numberOfLines={1}>{o.validWhen}</Text>
-                    ) : null}
-                  </View>
-                  <Feather name="chevron-right" size={16} color={Colors.textMuted} />
-                </TouchableOpacity>
+            <View style={styles.offersList}>
+              {offers.map((o, idx) => (
+                <View key={o.id}>
+                  <ListItem
+                    title={o.title}
+                    subtitle={o.validWhen ?? undefined}
+                    leftIcon={
+                      o.imageUrl ? (
+                        <Image source={{ uri: o.imageUrl }} style={styles.offerImg} />
+                      ) : (
+                        <Feather name="tag" size={18} color={Colors.textMuted} />
+                      )
+                    }
+                    onPress={() => router.push(`/(app)/offers/${o.id}` as never)}
+                  />
+                  {idx < offers.length - 1 ? <Hairline variant="subtle" /> : null}
+                </View>
               ))}
             </View>
           )}
+        </Section>
 
-          {/* Actions inline — reservation primary, review secondary */}
-          <View style={styles.bottomActions}>
-            <Button
-              label={t ? 'Hacer reservación' : 'Make reservation'}
-              onPress={() => router.push({ pathname: '/(app)/reservations/new', params: { venueId: venue.id } })}
-            />
-            <TouchableOpacity
-              onPress={() => router.push(`/(app)/venue/${venue.id}/review` as never)}
-              style={styles.reviewBtn}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.reviewBtnText}>{t ? 'Escribir reseña' : 'Write a review'}</Text>
-            </TouchableOpacity>
-          </View>
+        <Hairline style={styles.sectionDivider} />
+
+        {/* ── Primary actions ───────────────── */}
+        <View style={styles.bottomActions}>
+          <Button
+            label={t ? 'Hacer reservación' : 'Make reservation'}
+            onPress={() =>
+              router.push({
+                pathname: '/(app)/reservations/new',
+                params: { venueId: venue.id },
+              })
+            }
+            variant="primary"
+            size="lg"
+            fullWidth
+            accessibilityHint={
+              t ? 'Abre el formulario de reservación' : 'Opens the reservation form'
+            }
+          />
+          <Pressy
+            onPress={() => router.push(`/(app)/venue/${venue.id}/review` as never)}
+            accessibilityRole={Roles.button}
+            accessibilityLabel={t ? 'Escribir una reseña' : 'Write a review'}
+            haptic="select"
+            style={styles.reviewBtn}
+          >
+            <Body size="sm" tone="accent" weight="semiBold">
+              {t ? 'Escribir una reseña' : 'Write a review'}
+            </Body>
+          </Pressy>
         </View>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-function ActionTile({ icon, label, onPress }: { icon: React.ComponentProps<typeof Feather>['name']; label: string; onPress: () => void }) {
+// ─────────────────────────────────────────────
+//  Section header
+// ─────────────────────────────────────────────
+function Section({
+  title,
+  actionLabel,
+  onAction,
+  children,
+}: {
+  title: string;
+  actionLabel?: string;
+  onAction?: () => void;
+  children: React.ReactNode;
+}) {
   return (
-    <TouchableOpacity style={styles.actionBtn} onPress={onPress} activeOpacity={0.85}>
-      <View style={styles.actionBtnIconBox}>
-        <Feather name={icon} size={18} color={Colors.accentPrimary} />
+    <View style={styles.section}>
+      <View style={styles.sectionHeader}>
+        <Kicker tone="muted">{title.toUpperCase()}</Kicker>
+        {actionLabel && onAction ? (
+          <Pressy
+            onPress={onAction}
+            accessibilityRole={Roles.link}
+            accessibilityLabel={actionLabel}
+            hitSlop={HitSlop.expand}
+            haptic="select"
+          >
+            <Caption tone="accent">{actionLabel}</Caption>
+          </Pressy>
+        ) : null}
       </View>
-      <Text style={styles.actionBtnText}>{label}</Text>
-    </TouchableOpacity>
+      <View style={styles.sectionBody}>{children}</View>
+    </View>
   );
 }
 
+// ─────────────────────────────────────────────
+//  ActionTile — equal-flex tile inside actionsRow
+// ─────────────────────────────────────────────
+function ActionTile({
+  icon,
+  label,
+  onPress,
+}: {
+  icon: React.ComponentProps<typeof Feather>['name'];
+  label: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressy
+      onPress={onPress}
+      accessibilityRole={Roles.button}
+      accessibilityLabel={label}
+      style={styles.actionTile}
+    >
+      <Feather name={icon} size={18} color={Colors.textPrimary} />
+      <Caption tone="primary" style={styles.actionTileLabel}>
+        {label}
+      </Caption>
+    </Pressy>
+  );
+}
+
+// ─────────────────────────────────────────────
+//  Styles
+// ─────────────────────────────────────────────
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.bgPrimary, gap: 10 },
-  errorText: { color: Colors.textSecondary, fontSize: 14 },
-  retryBtn: {
-    marginTop: 6,
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    backgroundColor: Colors.accentPrimary,
-    borderRadius: Radius.button,
-  },
-  retryBtnText: { color: Colors.textInverse, fontSize: 13, fontWeight: '700' },
+  scroll: { paddingBottom: Spacing[12] },
 
-  hero: { height: 200, backgroundColor: Colors.bgCard },
+  // Hero
+  hero: { width: '100%', height: 260, backgroundColor: Colors.bgCard },
   heroImg: { width: '100%', height: '100%' },
-  heroPlaceholder: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  heroPlaceholder: { alignItems: 'center', justifyContent: 'center' },
 
-  content: { padding: Spacing[5], gap: Spacing[4] },
-
-  titleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: Spacing[3] },
-  venueName: { flex: 1, fontSize: Typography.fontSize['2xl'], fontWeight: Typography.fontWeight.bold, color: Colors.textPrimary },
-
-  badge: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    paddingHorizontal: 10, paddingVertical: 4,
-    borderRadius: Radius.full,
-    borderWidth: 1,
+  // Loading skeleton content
+  content: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[8],
   },
-  badgeOpen: { backgroundColor: 'rgba(56,199,147,0.15)', borderColor: 'rgba(56,199,147,0.4)' },
-  badgeClosed: { backgroundColor: Colors.bgElevated, borderColor: Colors.border },
-  badgeDot: { width: 6, height: 6, borderRadius: 3 },
-  badgeLabel: { fontSize: 11, fontWeight: '700' },
 
-  ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: -Spacing[2] },
-  ratingValue: { color: Colors.textPrimary, fontSize: Typography.fontSize.base, fontWeight: Typography.fontWeight.bold },
-  ratingMeta: { color: Colors.textMuted, fontSize: Typography.fontSize.xs },
+  // Identity block
+  identity: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[8],
+  },
+  ratingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing[2],
+  },
 
-  description: { fontSize: Typography.fontSize.base, color: Colors.textSecondary, lineHeight: 22 },
-
+  // Actions row
   actionsRow: {
     flexDirection: 'row',
-    gap: Spacing[2],
-    marginTop: Spacing[2],
-  },
-  actionBtn: {
-    flex: 1,
-    backgroundColor: Colors.bgCard,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    paddingVertical: Spacing[3],
-    borderRadius: Radius.button,
-    alignItems: 'center',
-    gap: 6,
-  },
-  actionBtnIconBox: {
-    width: 36, height: 36, borderRadius: 10,
-    backgroundColor: 'rgba(244,163,64,0.15)',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  actionBtnText: { color: Colors.textPrimary, fontSize: Typography.fontSize.xs, fontWeight: Typography.fontWeight.semiBold },
-
-  infoCard: {
-    backgroundColor: Colors.bgCard,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: Radius.card,
-    overflow: 'hidden',
-  },
-  infoRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
     gap: Spacing[3],
-    paddingHorizontal: Spacing[4],
-    paddingVertical: Spacing[3],
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    marginTop: Spacing[6],
   },
-  infoRowBorder: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: Colors.border },
-  infoText: { fontSize: Typography.fontSize.sm, color: Colors.textPrimary, flex: 1 },
+  actionTile: {
+    flex: 1,
+    minHeight: 56,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+    borderRadius: Radius.md,
+    paddingVertical: Spacing[3],
+    paddingHorizontal: Spacing[2],
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing[1],
+  },
+  actionTileLabel: {
+    textAlign: 'center',
+  },
 
+  // Sections
+  sectionDivider: {
+    marginVertical: Spacing[8],
+  },
+  section: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+  },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: Spacing[3],
+    marginBottom: Spacing[4],
   },
-  sectionTitle: { color: Colors.textPrimary, fontSize: 16, fontWeight: '800' },
-  sectionLink: { color: Colors.accentPrimary, fontSize: 13, fontWeight: '700' },
+  sectionBody: {
+    // child content
+  },
 
-  offersEmpty: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    padding: 14,
-    borderRadius: Radius.card,
-    backgroundColor: Colors.bgCard,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: Colors.border,
+  // Info list
+  infoList: {
+    marginHorizontal: -EditorialSpacing.pageGutter,
   },
-  offersEmptyText: { color: Colors.textMuted, fontSize: 13 },
 
-  offerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    padding: 12,
-    borderRadius: Radius.card,
-    backgroundColor: Colors.bgCard,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: Colors.border,
+  // Events horizontal row
+  eventsRow: {
+    gap: Spacing[3],
+    paddingRight: Spacing[4],
   },
-  offerIconBox: {
-    width: 44, height: 44, borderRadius: 10,
-    backgroundColor: 'rgba(244,163,64,0.12)',
-    alignItems: 'center', justifyContent: 'center',
-    overflow: 'hidden',
-  },
-  offerImg: { width: 44, height: 44 },
-  offerTitle: { color: Colors.textPrimary, fontSize: 14, fontWeight: '700' },
-  offerMeta: { color: Colors.textMuted, fontSize: 12, marginTop: 2 },
-
   eventCard: {
     width: 220,
-    borderRadius: Radius.card,
-    backgroundColor: Colors.bgCard,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: Colors.border,
-    overflow: 'hidden',
+    backgroundColor: Colors.bgPrimary,
   },
-  eventImg: { width: '100%', height: 110 },
+  eventImg: {
+    width: '100%',
+    height: 130,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.bgElevated,
+  },
   eventImgPlaceholder: {
-    alignItems: 'center', justifyContent: 'center',
-    backgroundColor: 'rgba(244,163,64,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  eventBody: { padding: 12, gap: 4 },
-  eventDate: {
-    color: Colors.accentPrimary,
-    fontSize: 11,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.3,
+  eventBody: {
+    paddingTop: Spacing[3],
+    gap: Spacing[1],
   },
-  eventTitle: { color: Colors.textPrimary, fontSize: 14, fontWeight: '700', lineHeight: 18 },
+  eventTitle: {
+    marginTop: Spacing[1],
+  },
 
-  bottomActions: {
-    marginTop: Spacing[4],
-    gap: Spacing[2],
+  // Offers list
+  offersList: {
+    marginHorizontal: -EditorialSpacing.pageGutter,
   },
-  reviewBtn: { alignItems: 'center', paddingVertical: Spacing[2] },
-  reviewBtnText: { fontSize: Typography.fontSize.sm, color: Colors.accentPrimary, fontWeight: Typography.fontWeight.semiBold },
+  offerImg: {
+    width: 28,
+    height: 28,
+    borderRadius: Radius.sm,
+  },
+
+  // Bottom actions
+  bottomActions: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    gap: Spacing[3],
+  },
+  reviewBtn: {
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });

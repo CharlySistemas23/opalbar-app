@@ -1,6 +1,16 @@
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+// ─────────────────────────────────────────────
+//  ErrorState — Editorial Premium
+//
+//  Same calm shape as <EmptyState> but with danger-tinted icon and an
+//  explicit retry CTA. Never auto-retries.
+// ─────────────────────────────────────────────
+import { View, StyleSheet } from 'react-native';
 import { Feather } from '@expo/vector-icons';
-import { Colors } from '@/constants/tokens';
+
+import { Colors, EditorialSpacing, Radius, Spacing } from '@/constants/tokens';
+import { Body, Heading } from '@/components/ui/Typography';
+import { Button } from '@/components/ui/Button';
+import { FadeIn } from '@/components/ui/FadeIn';
 
 type FeatherIcon = React.ComponentProps<typeof Feather>['name'];
 
@@ -10,53 +20,81 @@ interface Props {
   retryLabel?: string;
   onRetry?: () => void;
   icon?: FeatherIcon;
+  testID?: string;
 }
 
 export function ErrorState({
   message,
-  title,
+  title = 'Algo no salió bien',
   retryLabel = 'Reintentar',
   onRetry,
   icon = 'alert-circle',
+  testID,
 }: Props) {
   return (
-    <View style={styles.root}>
-      <View style={styles.iconBox}>
-        <Feather name={icon} size={32} color={Colors.accentDanger} />
-      </View>
-      {title ? <Text style={styles.title}>{title}</Text> : null}
-      <Text style={styles.msg}>{message}</Text>
+    <View style={styles.root} testID={testID} accessibilityLiveRegion="polite">
+      <FadeIn>
+        <View style={styles.iconWrap}>
+          <View style={styles.iconFrame} />
+          <Feather name={icon} size={28} color={Colors.accentDanger} />
+        </View>
+      </FadeIn>
+      <FadeIn delay={70}>
+        <Heading size="sm" align="center" tone="primary" style={styles.title}>
+          {title}
+        </Heading>
+      </FadeIn>
+      <FadeIn delay={140}>
+        <Body align="center" tone="secondary" style={styles.msg}>
+          {message}
+        </Body>
+      </FadeIn>
       {onRetry ? (
-        <TouchableOpacity style={styles.btn} onPress={onRetry} activeOpacity={0.85}>
-          <Feather name="refresh-cw" size={14} color={Colors.textInverse} />
-          <Text style={styles.btnLbl}>{retryLabel}</Text>
-        </TouchableOpacity>
+        <FadeIn delay={210} style={styles.action}>
+          <Button
+            label={retryLabel}
+            onPress={onRetry}
+            variant="primary"
+            size="md"
+            fullWidth={false}
+            leftIcon={<Feather name="refresh-cw" size={14} color={Colors.textInverse} />}
+          />
+        </FadeIn>
       ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 10 },
-  iconBox: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+  root: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: Colors.accentDanger + '15',
+    padding: EditorialSpacing.heroPadding,
+    gap: Spacing[3],
   },
-  title: { color: Colors.textPrimary, fontSize: 16, fontWeight: '800', textAlign: 'center', marginTop: 4 },
-  msg: { color: Colors.textSecondary, fontSize: 13, textAlign: 'center', lineHeight: 19, maxWidth: 280 },
-  btn: {
-    marginTop: 8,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 10,
-    backgroundColor: Colors.accentPrimary,
-    flexDirection: 'row',
+  iconWrap: {
+    width: 80,
+    height: 80,
     alignItems: 'center',
-    gap: 6,
+    justifyContent: 'center',
+    marginBottom: Spacing[2],
   },
-  btnLbl: { color: Colors.textInverse, fontSize: 13, fontWeight: '700' },
+  iconFrame: {
+    position: 'absolute',
+    width: 80,
+    height: 80,
+    borderRadius: Radius.full,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(217,106,106,0.30)',
+  },
+  title: {
+    marginTop: Spacing[1],
+  },
+  msg: {
+    maxWidth: 280,
+  },
+  action: {
+    marginTop: Spacing[3],
+  },
 });

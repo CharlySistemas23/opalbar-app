@@ -1,35 +1,41 @@
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  FlatList,
-  ActivityIndicator,
-  Image,
-  Pressable,
-  Alert,
-} from 'react-native';
-import { useEffect, useState, useCallback } from 'react';
+// ─────────────────────────────────────────────
+//  Friend Requests — Editorial Premium
+//
+//  Magazine layout:
+//   · Kicker + Heading header
+//   · <Tabs> (underline) toggle Principales / Filtradas with count meta
+//   · FlatList of editorial request rows: avatar + name + mutual line +
+//     two inline editorial buttons (Confirm primary / Delete secondary)
+//   · Optimistic accept/decline. Errors → toast.
+// ─────────────────────────────────────────────
+import { useCallback, useEffect, useState } from 'react';
+import { FlatList, Image, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+
 import { friendshipsApi } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { useAppStore } from '@/stores/app.store';
 import { useFeedback } from '@/hooks/useFeedback';
-import { toast } from '@/components/Toast';
+import { Colors, EditorialSpacing, Radius, Spacing } from '@/constants/tokens';
+import { HitSlop, Roles } from '@/constants/a11y';
+import {
+  Button,
+  Caption,
+  FadeIn,
+  Heading,
+  Kicker,
+  Pressy,
+  SkeletonList,
+  Subhead,
+  Tabs,
+} from '@/components/ui';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
-import { Colors, Spacing, Typography, Radius } from '@/constants/tokens';
+import { toast } from '@/components/Toast';
 
-// ─────────────────────────────────────────────
-//  Friend Requests Inbox — IG/FB hybrid
-//  · Tab "Principales" (main): high-trust requests, push-notified
-//  · Tab "Filtradas" (filtered): low-trust requests, silent badge
-//  · Per-row: Confirmar / Eliminar with optimistic update
-// ─────────────────────────────────────────────
-
-const AVATAR_COLORS = ['#F4A340', '#60A5FA', '#A855F7', '#38C793', '#E45858', '#EC4899'];
+const AVATAR_COLORS = ['#E89F4A', '#85ADCE', '#A8966F', '#7BB594', '#D96A6A', '#D7BE94'];
 
 function colorFor(id: string) {
   const idx = Math.abs([...id].reduce((a, c) => a + c.charCodeAt(0), 0)) % AVATAR_COLORS.length;
@@ -64,8 +70,8 @@ export default function FriendRequests() {
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
 
   const load = useCallback(
-    (which: Tab = tab, opts: { silent?: boolean } = {}) => {
-      if (!opts.silent) setLoading(true);
+    (which: Tab) => {
+      setLoading(true);
       setError(null);
       Promise.all([friendshipsApi.requests(which, 50), friendshipsApi.requestsCounts()])
         .then(([list, counts]) => {
@@ -75,7 +81,7 @@ export default function FriendRequests() {
         .catch((err) => setError(apiError(err)))
         .finally(() => setLoading(false));
     },
-    [tab],
+    [],
   );
 
   useEffect(() => {
@@ -93,14 +99,12 @@ export default function FriendRequests() {
 
   async function accept(row: RequestRow) {
     setBusy(row.friendshipId, true);
-    // Optimistic remove from list — counts will refresh after.
     const prevItems = items;
     setItems((p) => p.filter((r) => r.friendshipId !== row.friendshipId));
     try {
       await friendshipsApi.accept(row.friendshipId);
       fb.success();
       toast(t ? 'Ahora son amigos.' : "You're now friends.", 'success');
-      // Refresh badge counts in the background.
       friendshipsApi
         .requestsCounts()
         .then((r) => setCounts(r.data?.data ?? { main: 0, filtered: 0 }))
@@ -108,7 +112,7 @@ export default function FriendRequests() {
     } catch (err: any) {
       setItems(prevItems);
       fb.error();
-      Alert.alert(t ? 'Error' : 'Error', apiError(err));
+      toast(apiError(err, t ? 'No se pudo aceptar.' : "Couldn't accept."), 'danger');
     } finally {
       setBusy(row.friendshipId, false);
     }
@@ -128,41 +132,56 @@ export default function FriendRequests() {
     } catch (err: any) {
       setItems(prevItems);
       fb.error();
-      Alert.alert(t ? 'Error' : 'Error', apiError(err));
+      toast(apiError(err, t ? 'No se pudo rechazar.' : "Couldn't decline."), 'danger');
     } finally {
       setBusy(row.friendshipId, false);
     }
   }
 
+  const tabOptions = [
+    {
+      value: 'main' as const,
+      label: counts.main > 0
+        ? `${t ? 'Principales' : 'Main'} · ${counts.main > 99 ? '99+' : counts.main}`
+        : (t ? 'Principales' : 'Main'),
+    },
+    {
+      value: 'filtered' as const,
+      label: counts.filtered > 0
+        ? `${t ? 'Filtradas' : 'Filtered'} · ${counts.filtered > 99 ? '99+' : counts.filtered}`
+        : (t ? 'Filtradas' : 'Filtered'),
+    },
+  ];
+
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} hitSlop={10}>
+        <Pressy
+          onPress={() => router.back()}
+          haptic="select"
+          accessibilityRole={Roles.button}
+          accessibilityLabel={t ? 'Atrás' : 'Back'}
+          hitSlop={HitSlop.expand}
+          style={styles.backBtn}
+        >
           <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
-        </TouchableOpacity>
-        <Text style={styles.title}>{t ? 'Solicitudes' : 'Requests'}</Text>
-        <View style={{ width: 40 }} />
+        </Pressy>
       </View>
 
-      <View style={styles.tabBar}>
-        <TabButton
-          label={t ? 'Principales' : 'Main'}
-          count={counts.main}
-          active={tab === 'main'}
-          onPress={() => setTab('main')}
-        />
-        <TabButton
-          label={t ? 'Filtradas' : 'Filtered'}
-          count={counts.filtered}
-          active={tab === 'filtered'}
-          onPress={() => setTab('filtered')}
-          muted
-        />
+      <View style={styles.titleBlock}>
+        <Kicker tone="muted">{t ? 'AMISTAD' : 'FRIENDSHIP'}</Kicker>
+        <Heading size="md" style={{ marginTop: Spacing[2] }}>
+          {t ? 'Solicitudes' : 'Requests'}
+        </Heading>
+      </View>
+
+      <View style={styles.tabsWrap}>
+        <Tabs value={tab} onChange={(v) => setTab(v)} options={tabOptions} />
       </View>
 
       {loading ? (
-        <View style={styles.center}>
-          <ActivityIndicator color={Colors.accentPrimary} />
+        <View style={{ paddingHorizontal: EditorialSpacing.pageGutter, marginTop: Spacing[5] }}>
+          <SkeletonList count={5} itemHeight={112} />
         </View>
       ) : error && items.length === 0 ? (
         <ErrorState
@@ -174,82 +193,48 @@ export default function FriendRequests() {
         <FlatList
           data={items}
           keyExtractor={(x) => x.friendshipId}
-          contentContainerStyle={{ paddingHorizontal: Spacing[4], paddingVertical: Spacing[3], paddingBottom: 32 }}
-          renderItem={({ item }) => (
-            <RequestRowItem
-              row={item}
-              t={t}
-              busy={busyIds.has(item.friendshipId)}
-              onPress={() => router.push(`/(app)/users/${item.user.id}` as never)}
-              onAccept={() => accept(item)}
-              onDecline={() => decline(item)}
-            />
+          contentContainerStyle={{
+            paddingHorizontal: EditorialSpacing.pageGutter,
+            paddingTop: Spacing[4],
+            paddingBottom: Spacing[12],
+            gap: Spacing[5],
+          }}
+          renderItem={({ item, index }) => (
+            <FadeIn delay={50 * index}>
+              <RequestRowItem
+                row={item}
+                t={t}
+                busy={busyIds.has(item.friendshipId)}
+                onPress={() => router.push(`/(app)/users/${item.user.id}` as never)}
+                onAccept={() => accept(item)}
+                onDecline={() => decline(item)}
+              />
+            </FadeIn>
           )}
           ListEmptyComponent={
-            <EmptyState
-              icon={tab === 'filtered' ? 'filter' : 'user-plus'}
-              title={
-                tab === 'filtered'
-                  ? t
-                    ? 'Sin solicitudes filtradas'
-                    : 'No filtered requests'
-                  : t
-                    ? 'Sin solicitudes nuevas'
-                    : 'No new requests'
-              }
-              message={
-                tab === 'filtered'
-                  ? t
-                    ? 'Las solicitudes con baja confianza aparecerán aquí.'
-                    : 'Low-trust requests will appear here.'
-                  : t
-                    ? 'Cuando alguien te envíe una solicitud, aparecerá aquí.'
-                    : 'When someone sends you a request, it will appear here.'
-              }
-            />
+            <View style={{ minHeight: 320 }}>
+              <EmptyState
+                icon={tab === 'filtered' ? 'filter' : 'user-plus'}
+                title={
+                  tab === 'filtered'
+                    ? t ? 'Sin solicitudes filtradas' : 'No filtered requests'
+                    : t ? 'Sin solicitudes nuevas' : 'No new requests'
+                }
+                message={
+                  tab === 'filtered'
+                    ? t
+                      ? 'Las solicitudes con baja confianza aparecerán aquí.'
+                      : 'Low-trust requests will appear here.'
+                    : t
+                      ? 'Cuando alguien te envíe una solicitud, aparecerá aquí.'
+                      : 'When someone sends you a request, it will appear here.'
+                }
+              />
+            </View>
           }
         />
       )}
     </SafeAreaView>
-  );
-}
-
-function TabButton({
-  label,
-  count,
-  active,
-  onPress,
-  muted,
-}: {
-  label: string;
-  count: number;
-  active: boolean;
-  onPress: () => void;
-  muted?: boolean;
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [styles.tab, pressed && { opacity: 0.7 }]}
-    >
-      <View style={styles.tabInner}>
-        <Text
-          style={[
-            styles.tabLabel,
-            active && styles.tabLabelActive,
-            muted && !active && { color: Colors.textMuted },
-          ]}
-        >
-          {label}
-        </Text>
-        {count > 0 && (
-          <View style={[styles.tabBadge, muted && !active && styles.tabBadgeMuted]}>
-            <Text style={styles.tabBadgeText}>{count > 99 ? '99+' : count}</Text>
-          </View>
-        )}
-      </View>
-      {active && <View style={styles.tabUnderline} />}
-    </Pressable>
   );
 }
 
@@ -271,183 +256,116 @@ function RequestRowItem({
   const u = row.user;
   const first = u.profile?.firstName ?? '';
   const last = u.profile?.lastName ?? '';
-  const name = `${first} ${last}`.trim() || 'Usuario';
+  const name = `${first} ${last}`.trim() || (t ? 'Usuario' : 'User');
   const initials = ((first[0] || '') + (last[0] || '')).toUpperCase() || 'U';
 
   return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [styles.requestRow, pressed && { opacity: 0.85 }]}
-    >
-      {u.profile?.avatarUrl ? (
-        <Image source={{ uri: u.profile.avatarUrl }} style={styles.rowAvatar} />
-      ) : (
-        <View style={[styles.rowAvatar, { backgroundColor: colorFor(u.id) }]}>
-          <Text style={styles.rowAvatarText}>{initials}</Text>
+    <View style={styles.requestRow}>
+      <Pressy
+        onPress={onPress}
+        haptic="select"
+        accessibilityRole={Roles.button}
+        accessibilityLabel={name}
+        style={styles.requestRowHead}
+      >
+        {u.profile?.avatarUrl ? (
+          <Image source={{ uri: u.profile.avatarUrl }} style={styles.rowAvatar} />
+        ) : (
+          <View style={[styles.rowAvatar, { backgroundColor: colorFor(u.id) }]}>
+            <Subhead tone="inverse">{initials}</Subhead>
+          </View>
+        )}
+        <View style={{ flex: 1 }}>
+          <Subhead numberOfLines={1}>{name}</Subhead>
+          {row.mutualCount > 0 ? (
+            <Caption tone="muted" style={{ marginTop: 2 }}>
+              {row.mutualCount}{' '}
+              {t
+                ? row.mutualCount === 1 ? 'amigo en común' : 'amigos en común'
+                : row.mutualCount === 1 ? 'mutual friend' : 'mutual friends'}
+            </Caption>
+          ) : u.profile?.bio ? (
+            <Caption tone="muted" numberOfLines={1} style={{ marginTop: 2 }}>
+              {u.profile.bio}
+            </Caption>
+          ) : null}
         </View>
-      )}
-      <View style={styles.rowBody}>
-        <Text style={styles.rowName} numberOfLines={1}>
-          {name}
-        </Text>
-        {row.mutualCount > 0 ? (
-          <Text style={styles.rowMeta} numberOfLines={1}>
-            {row.mutualCount}{' '}
-            {t
-              ? row.mutualCount === 1
-                ? 'amigo en común'
-                : 'amigos en común'
-              : row.mutualCount === 1
-                ? 'mutual friend'
-                : 'mutual friends'}
-          </Text>
-        ) : u.profile?.bio ? (
-          <Text style={styles.rowMeta} numberOfLines={1}>
-            {u.profile.bio}
-          </Text>
-        ) : null}
-        <View style={styles.rowActions}>
-          <Pressable
+      </Pressy>
+
+      <View style={styles.rowActions}>
+        <View style={{ flex: 1 }}>
+          <Button
+            label={busy ? '' : (t ? 'Confirmar' : 'Confirm')}
             onPress={onAccept}
+            variant="primary"
+            size="sm"
             disabled={busy}
-            style={({ pressed }) => [
-              styles.confirmBtn,
-              (busy || pressed) && { opacity: 0.85 },
-            ]}
-          >
-            {busy ? (
-              <ActivityIndicator size="small" color={Colors.textInverse} />
-            ) : (
-              <Text style={styles.confirmLabel}>{t ? 'Confirmar' : 'Confirm'}</Text>
-            )}
-          </Pressable>
-          <Pressable
+            loading={busy}
+            fullWidth
+            haptic="success"
+          />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Button
+            label={t ? 'Eliminar' : 'Delete'}
             onPress={onDecline}
+            variant="secondary"
+            size="sm"
             disabled={busy}
-            style={({ pressed }) => [
-              styles.declineBtn,
-              (busy || pressed) && { opacity: 0.85 },
-            ]}
-          >
-            <Text style={styles.declineLabel}>{t ? 'Eliminar' : 'Delete'}</Text>
-          </Pressable>
+            fullWidth
+            haptic="select"
+          />
         </View>
       </View>
-    </Pressable>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   header: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: Spacing[5],
-    paddingVertical: Spacing[4],
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[2],
+    paddingBottom: Spacing[3],
   },
   backBtn: {
     width: 40,
     height: 40,
-    borderRadius: 20,
-    backgroundColor: Colors.bgCard,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  title: { fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.bold, color: Colors.textPrimary },
-
-  tabBar: {
-    flexDirection: 'row',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: Colors.border,
-  },
-  tab: {
-    flex: 1,
-    height: 44,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  tabInner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+  titleBlock: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingBottom: Spacing[5],
   },
-  tabLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: Colors.textSecondary,
+  tabsWrap: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
   },
-  tabLabelActive: {
-    color: Colors.textPrimary,
-    fontWeight: '700',
-  },
-  tabBadge: {
-    minWidth: 20,
-    height: 20,
-    paddingHorizontal: 6,
-    borderRadius: 10,
-    backgroundColor: Colors.accentDanger,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  tabBadgeMuted: {
-    backgroundColor: Colors.bgElevated,
-  },
-  tabBadgeText: {
-    color: Colors.textInverse,
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  tabUnderline: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 2,
-    backgroundColor: Colors.accentPrimary,
-  },
-
   requestRow: {
+    gap: Spacing[4],
+    padding: Spacing[5],
+    backgroundColor: Colors.bgCard,
+    borderRadius: Radius.card,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+    borderTopColor: Colors.highlightTop,
+  },
+  requestRowHead: {
     flexDirection: 'row',
-    gap: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 4,
+    alignItems: 'center',
+    gap: Spacing[4],
   },
   rowAvatar: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
+    width: 56,
+    height: 56,
+    borderRadius: Radius.full,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  rowAvatarText: { color: Colors.textInverse, fontSize: 18, fontWeight: '800' },
-  rowBody: { flex: 1, gap: 6, justifyContent: 'center' },
-  rowName: { color: Colors.textPrimary, fontSize: 15, fontWeight: '700' },
-  rowMeta: { color: Colors.textMuted, fontSize: 12 },
   rowActions: {
     flexDirection: 'row',
-    gap: 8,
-    marginTop: 6,
+    gap: Spacing[3],
   },
-  confirmBtn: {
-    flex: 1,
-    height: 36,
-    backgroundColor: Colors.accentPrimary,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  confirmLabel: { color: Colors.textInverse, fontSize: 13, fontWeight: '700' },
-  declineBtn: {
-    flex: 1,
-    height: 36,
-    backgroundColor: Colors.bgElevated,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  declineLabel: { color: Colors.textPrimary, fontSize: 13, fontWeight: '700' },
 });

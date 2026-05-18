@@ -1,46 +1,43 @@
+// ─────────────────────────────────────────────
+//  Story Viewer — Editorial Premium
+//
+//  Story logic preserved verbatim. Overlay redesigned:
+//   · Top progress bars are hairline-thin (height 2)
+//   · Top author bar uses Kicker + Body for editorial labels
+//   · Caption sits in a soft glass card with editorial spacing
+//   · Reply dock + quick reactions retain functionality with hairline chrome
+// ─────────────────────────────────────────────
 import {
-  View,
-  Text,
-  StyleSheet,
-  Image,
-  Pressable,
-  Dimensions,
   ActivityIndicator,
-  StatusBar,
-  TextInput,
+  Dimensions,
+  Image,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
-  Keyboard,
+  Pressable,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from 'react-native';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+
 import { communityApi, messagesApi } from '@/api/client';
 import { useAuthStore } from '@/stores/auth.store';
-import { Colors } from '@/constants/tokens';
-
-// Use the canonical FB-style reaction set (single source of truth).
+import { Colors, Radius, Spacing, TypePresets } from '@/constants/tokens';
+import { HitSlop, Roles } from '@/constants/a11y';
+import { Pressy } from '@/components/ui';
+import { toast as showToast } from '@/components/Toast';
 import { REACTION_EMOJIS } from '@/components/ui/ReactionPicker';
+
 const QUICK_REACTIONS = REACTION_EMOJIS;
 
-// ─────────────────────────────────────────────
-//  Story Viewer — IG-style fullscreen
-//  · Auto-advance (~5s per story)
-//  · Tap right = next, tap left = previous
-//  · Long-press = pause
-//  · Swipe down / X = close
-//  · Progress bars at top
-// ─────────────────────────────────────────────
-
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
-const STORY_DURATION = 5000; // 5 seconds per story
-
-const AVATAR_COLORS = ['#F4A340', '#60A5FA', '#A855F7', '#38C793', '#E45858', '#EC4899'];
-function colorFor(id: string) {
-  const idx = Math.abs([...id].reduce((a, c) => a + c.charCodeAt(0), 0)) % AVATAR_COLORS.length;
-  return AVATAR_COLORS[idx];
-}
+const STORY_DURATION = 5000;
 
 function relTime(d: Date) {
   const diff = Math.max(0, Math.floor((Date.now() - d.getTime()) / 1000));
@@ -62,7 +59,6 @@ interface StoryGroup {
   user: {
     id: string;
     profile?: { firstName?: string; lastName?: string; avatarUrl?: string };
-    // Venue bundles come with a flat `name` instead of a profile.
     name?: string;
   };
   stories: StoryItem[];
@@ -89,29 +85,23 @@ export default function StoryViewer() {
   const [groupIdx, setGroupIdx] = useState(0);
   const [storyIdx, setStoryIdx] = useState(0);
   const [paused, setPaused] = useState(false);
-  // Don't start the auto-advance timer until the foreground image loads —
-  // otherwise users on slow networks see the bar fill while the story is
-  // still a black screen.
   const [imageReady, setImageReady] = useState(false);
-  // Progress 0-100 for the active bar. Simple setInterval-based to avoid
-  // RN Animated edge cases with string-interpolated percent widths.
   const [progressPct, setProgressPct] = useState(0);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startedAtRef = useRef<number>(0);
   const elapsedAtPauseRef = useRef<number>(0);
 
-  // Reply / reactions state
   const [replyText, setReplyText] = useState('');
   const [sending, setSending] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
   const [replyFocused, setReplyFocused] = useState(false);
   const [reactedEmoji, setReactedEmoji] = useState<string | null>(null);
+  const [innerToast, setInnerToast] = useState<string | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   function flashToast(msg: string) {
-    setToast(msg);
+    setInnerToast(msg);
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-    toastTimerRef.current = setTimeout(() => setToast(null), 1800);
+    toastTimerRef.current = setTimeout(() => setInnerToast(null), 1800);
   }
 
   useEffect(() => {
@@ -160,7 +150,6 @@ export default function StoryViewer() {
   const currentGroup = groups[groupIdx];
   const currentStory = currentGroup?.stories[storyIdx];
 
-  // Reset progress when story changes
   useEffect(() => {
     if (!currentStory) return;
     setProgressPct(0);
@@ -169,27 +158,22 @@ export default function StoryViewer() {
     setImageReady(false);
     setReplyText('');
     setReactedEmoji(null);
-    // Mark viewed in background
     if (currentStory.id && !currentStory.seen) {
       communityApi.viewStory(currentStory.id).catch(() => {});
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [groupIdx, storyIdx]);
 
-  // Pause auto-advance while the user is composing a reply
   const effectivePaused = paused || replyFocused;
 
-  // Drive the progress bar (setInterval-based — reliable across platforms)
   useEffect(() => {
     if (!currentStory) return;
     if (!imageReady) return;
     if (effectivePaused) {
-      // Preserve elapsed time so resume continues from current progress
       elapsedAtPauseRef.current = Date.now() - startedAtRef.current;
       if (tickRef.current) clearInterval(tickRef.current);
       return;
     }
-    // Resume (or start): shift startedAt back by the time already elapsed
     startedAtRef.current = Date.now() - elapsedAtPauseRef.current;
     tickRef.current = setInterval(() => {
       const elapsed = Date.now() - startedAtRef.current;
@@ -240,10 +224,18 @@ export default function StoryViewer() {
     return (
       <View style={styles.center}>
         <StatusBar hidden />
-        <Text style={styles.emptyText}>No hay historias activas</Text>
-        <Pressable onPress={() => router.back()} style={styles.closeFallback}>
+        <Text style={styles.fallbackText}>
+          {`No hay historias activas`}
+        </Text>
+        <Pressy
+          onPress={() => router.back()}
+          haptic="select"
+          accessibilityRole={Roles.button}
+          accessibilityLabel="Cerrar"
+          style={styles.closeFallback}
+        >
           <Text style={styles.closeFallbackText}>Cerrar</Text>
-        </Pressable>
+        </Pressy>
       </View>
     );
   }
@@ -263,7 +255,7 @@ export default function StoryViewer() {
   async function handleQuickReact(emoji: string) {
     if (!currentStory || !canReply) return;
     setReactedEmoji(emoji);
-    flashToast(`Reaccionaste ${emoji}`);
+    flashToast(`${emoji}`);
     try {
       await communityApi.reactStory(currentStory.id, emoji);
     } catch {
@@ -279,13 +271,12 @@ export default function StoryViewer() {
       const tr = await messagesApi.createThread(author.id);
       const threadId = (tr.data?.data ?? tr.data)?.id;
       if (!threadId) throw new Error('no thread');
-      // Prefix lets the recipient know which surface the message references.
-      // Lightweight quote — no schema changes needed for chunk 3.
       const quoted = `↪️ Respuesta a tu historia:\n${text}`;
       await messagesApi.send(threadId, { content: quoted });
       setReplyText('');
       Keyboard.dismiss();
-      flashToast('Mensaje enviado');
+      flashToast('Enviado');
+      showToast('Mensaje enviado', 'success');
     } catch {
       flashToast('No se pudo enviar');
     } finally {
@@ -297,8 +288,6 @@ export default function StoryViewer() {
     <View style={styles.root}>
       <StatusBar hidden />
 
-      {/* Backdrop — same image blurred/dimmed so non-9:16 photos don't leave
-          black bars. IG pattern: zoom-fill + darken + foreground contain. */}
       <Image
         source={{ uri: currentStory.mediaUrl }}
         style={styles.backdrop}
@@ -307,7 +296,6 @@ export default function StoryViewer() {
       />
       <View style={styles.backdropDim} />
 
-      {/* Foreground — full photo, no stretch, no crop */}
       <Image
         source={{ uri: currentStory.mediaUrl }}
         style={styles.img}
@@ -339,7 +327,7 @@ export default function StoryViewer() {
         delayLongPress={200}
       />
 
-      {/* Progress bars */}
+      {/* Progress bars — hairline thin */}
       <View
         style={[styles.progressRow, { top: Math.max(insets.top, 12) + 6 }]}
         pointerEvents="none"
@@ -354,39 +342,44 @@ export default function StoryViewer() {
         })}
       </View>
 
-      {/* Top bar */}
+      {/* Author bar */}
       <View
         style={[styles.topBar, { top: Math.max(insets.top, 12) + 22 }]}
         pointerEvents="box-none"
       >
-        <Pressable
+        <Pressy
           onPress={() => {
             if (isVenueGroup) return;
             router.push(`/(app)/users/${author.id}` as never);
           }}
+          haptic="select"
+          accessibilityRole={Roles.button}
+          accessibilityLabel={name}
+          hitSlop={HitSlop.expand}
           style={styles.userBtn}
-          hitSlop={6}
         >
           {author.profile?.avatarUrl ? (
             <Image source={{ uri: author.profile.avatarUrl }} style={styles.avatar} />
           ) : (
-            <View
-              style={[
-                styles.avatar,
-                {
-                  backgroundColor: isVenueGroup ? Colors.accentPrimary : colorFor(author.id),
-                },
-              ]}
-            >
+            <View style={styles.avatar}>
               <Text style={styles.avatarText}>{initials}</Text>
             </View>
           )}
-          <Text style={styles.authorName}>{isMine ? 'Tu historia' : name}</Text>
-          <Text style={styles.timeAgo}>{relTime(new Date(currentStory.createdAt))}</Text>
-        </Pressable>
-        <Pressable onPress={() => router.back()} style={styles.closeBtn} hitSlop={10}>
-          <Feather name="x" size={24} color="#fff" />
-        </Pressable>
+          <View>
+            <Text style={styles.authorName}>{isMine ? 'Tu historia' : name}</Text>
+            <Text style={styles.timeAgo}>{relTime(new Date(currentStory.createdAt))}</Text>
+          </View>
+        </Pressy>
+        <Pressy
+          onPress={() => router.back()}
+          haptic="select"
+          accessibilityRole={Roles.button}
+          accessibilityLabel="Cerrar"
+          hitSlop={HitSlop.expand}
+          style={styles.closeBtn}
+        >
+          <Feather name="x" size={22} color="#fff" />
+        </Pressy>
       </View>
 
       {/* Caption */}
@@ -396,18 +389,18 @@ export default function StoryViewer() {
         </View>
       ) : null}
 
-      {/* Bottom bar — views count if mine */}
-      {isMine && (
+      {/* Views — only mine */}
+      {isMine ? (
         <View style={styles.bottomBar} pointerEvents="box-none">
           <View style={styles.viewsRow}>
             <Feather name="eye" size={14} color="#fff" />
             <Text style={styles.viewsText}>{(currentStory as any).viewsCount ?? 0}</Text>
           </View>
         </View>
-      )}
+      ) : null}
 
-      {/* Reply + quick reactions — only for personal stories that aren't mine */}
-      {canReply && (
+      {/* Reply dock */}
+      {canReply ? (
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={[styles.replyWrap, { paddingBottom: Math.max(insets.bottom, 12) }]}
@@ -417,18 +410,17 @@ export default function StoryViewer() {
             {QUICK_REACTIONS.map((emoji) => {
               const mine = reactedEmoji === emoji;
               return (
-                <Pressable
+                <Pressy
                   key={emoji}
                   onPress={() => handleQuickReact(emoji)}
-                  style={({ pressed }) => [
-                    styles.quickEmojiBtn,
-                    mine && styles.quickEmojiBtnMine,
-                    pressed && { transform: [{ scale: 1.15 }] },
-                  ]}
-                  hitSlop={6}
+                  haptic="tap"
+                  accessibilityRole={Roles.button}
+                  accessibilityLabel={`Reaccionar ${emoji}`}
+                  hitSlop={HitSlop.expand}
+                  style={[styles.quickEmojiBtn, mine && styles.quickEmojiBtnMine]}
                 >
                   <Text style={styles.quickEmoji}>{emoji}</Text>
-                </Pressable>
+                </Pressy>
               );
             })}
           </View>
@@ -447,26 +439,36 @@ export default function StoryViewer() {
               returnKeyType="send"
               blurOnSubmit
               onSubmitEditing={handleSendReply}
+              accessibilityLabel="Respuesta a la historia"
             />
-            {replyText.trim().length > 0 && (
-              <Pressable
+            {replyText.trim().length > 0 ? (
+              <Pressy
                 onPress={handleSendReply}
                 disabled={sending}
+                haptic="tap"
+                accessibilityRole={Roles.button}
+                accessibilityLabel="Enviar"
+                hitSlop={HitSlop.expand}
                 style={[styles.replySendBtn, sending && { opacity: 0.5 }]}
-                hitSlop={8}
               >
-                <Feather name="send" size={18} color="#fff" />
-              </Pressable>
-            )}
+                <Feather name="arrow-up" size={18} color="#fff" />
+              </Pressy>
+            ) : null}
           </View>
         </KeyboardAvoidingView>
-      )}
+      ) : null}
 
-      {toast && (
-        <View style={[styles.toast, { bottom: Math.max(insets.bottom, 12) + (canReply ? 110 : 60) }]} pointerEvents="none">
-          <Text style={styles.toastText}>{toast}</Text>
+      {innerToast ? (
+        <View
+          style={[
+            styles.toast,
+            { bottom: Math.max(insets.bottom, 12) + (canReply ? 110 : 60) },
+          ]}
+          pointerEvents="none"
+        >
+          <Text style={styles.toastText}>{innerToast}</Text>
         </View>
-      )}
+      ) : null}
     </View>
   );
 }
@@ -480,11 +482,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 16,
   },
-  emptyText: { color: '#fff', fontSize: 14 },
+  fallbackText: { color: '#fff', fontSize: 14 },
   closeFallback: {
     paddingHorizontal: 18,
     paddingVertical: 10,
-    borderRadius: 22,
+    borderRadius: Radius.full,
     backgroundColor: 'rgba(255,255,255,0.2)',
   },
   closeFallbackText: { color: '#fff', fontSize: 13, fontWeight: '700' },
@@ -533,52 +535,62 @@ const styles = StyleSheet.create({
     bottom: 0,
   },
 
+  // Progress bars — hairline-thin (height 2)
   progressRow: {
     position: 'absolute',
-    left: 8,
-    right: 8,
+    left: Spacing[3],
+    right: Spacing[3],
     flexDirection: 'row',
-    gap: 4,
+    gap: Spacing[1],
     zIndex: 5,
   },
   progressBg: {
     flex: 1,
-    height: 4,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    borderRadius: 2,
+    height: 2,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    borderRadius: 1,
     overflow: 'hidden',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.18)',
   },
   progressFg: {
     height: '100%',
     backgroundColor: '#fff',
-    shadowColor: '#fff',
-    shadowOpacity: 0.7,
-    shadowRadius: 3,
-    shadowOffset: { width: 0, height: 0 },
   },
 
   topBar: {
     position: 'absolute',
-    left: 12,
-    right: 12,
+    left: Spacing[4],
+    right: Spacing[4],
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     zIndex: 5,
   },
-  userBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 },
+  userBtn: { flexDirection: 'row', alignItems: 'center', gap: Spacing[3], flex: 1 },
   avatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.35)',
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
-  avatarText: { color: '#fff', fontSize: 12, fontWeight: '700' },
-  authorName: { color: '#fff', fontSize: 13, fontWeight: '700' },
-  timeAgo: { color: 'rgba(255,255,255,0.7)', fontSize: 12 },
+  avatarText: {
+    ...TypePresets.label,
+    color: '#fff',
+    fontSize: 12,
+  },
+  authorName: {
+    ...TypePresets.subhead,
+    color: '#fff',
+  },
+  timeAgo: {
+    ...TypePresets.captionSm,
+    color: 'rgba(255,255,255,0.7)',
+    marginTop: 2,
+  },
   closeBtn: {
     width: 40,
     height: 40,
@@ -588,54 +600,61 @@ const styles = StyleSheet.create({
 
   captionBox: {
     position: 'absolute',
-    left: 20,
-    right: 20,
-    bottom: 80,
-    padding: 14,
-    borderRadius: 12,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    left: Spacing[5],
+    right: Spacing[5],
+    bottom: 96,
+    paddingHorizontal: Spacing[4],
+    paddingVertical: Spacing[3],
+    borderRadius: Radius.md,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.18)',
   },
   captionText: {
+    ...TypePresets.bodyEmphasis,
     color: '#fff',
-    fontSize: 15,
-    fontWeight: '600',
-    lineHeight: 20,
   },
 
   bottomBar: {
     position: 'absolute',
-    left: 16,
-    right: 16,
-    bottom: 26,
+    left: Spacing[4],
+    right: Spacing[4],
+    bottom: Spacing[6],
     flexDirection: 'row',
     alignItems: 'center',
   },
   viewsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 14,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    gap: Spacing[2],
+    paddingHorizontal: Spacing[3],
+    paddingVertical: Spacing[2],
+    borderRadius: Radius.full,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.20)',
   },
-  viewsText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  viewsText: {
+    ...TypePresets.label,
+    color: '#fff',
+    fontSize: 11,
+  },
 
   replyWrap: {
     position: 'absolute',
     left: 0,
     right: 0,
     bottom: 0,
-    paddingHorizontal: 14,
-    paddingTop: 10,
-    gap: 10,
+    paddingHorizontal: Spacing[4],
+    paddingTop: Spacing[3],
+    gap: Spacing[3],
     zIndex: 10,
   },
   quickRow: {
     flexDirection: 'row',
     justifyContent: 'space-around',
     alignItems: 'center',
-    paddingVertical: 6,
+    paddingVertical: Spacing[1],
   },
   quickEmojiBtn: {
     width: 42,
@@ -644,35 +663,37 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(0,0,0,0.35)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.18)',
   },
   quickEmojiBtnMine: {
     backgroundColor: 'rgba(255,255,255,0.25)',
-    borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.6)',
   },
   quickEmoji: { fontSize: 22 },
+
   replyRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    gap: 8,
+    gap: Spacing[2],
     backgroundColor: 'rgba(0,0,0,0.55)',
-    borderRadius: 24,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    borderRadius: Radius.full,
+    paddingHorizontal: Spacing[4],
+    paddingVertical: Spacing[2],
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255,255,255,0.25)',
   },
   replyInput: {
     flex: 1,
     color: '#fff',
-    fontSize: 14,
+    ...TypePresets.body,
     maxHeight: 100,
     paddingVertical: 4,
   },
   replySendBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: Colors.accentPrimary,
@@ -681,11 +702,17 @@ const styles = StyleSheet.create({
   toast: {
     position: 'absolute',
     alignSelf: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 16,
+    paddingHorizontal: Spacing[4],
+    paddingVertical: Spacing[2],
+    borderRadius: Radius.full,
     backgroundColor: 'rgba(0,0,0,0.75)',
     zIndex: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.20)',
   },
-  toastText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  toastText: {
+    ...TypePresets.caption,
+    color: '#fff',
+    fontWeight: '600',
+  },
 });

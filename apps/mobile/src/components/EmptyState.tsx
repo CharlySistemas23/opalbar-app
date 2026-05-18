@@ -1,16 +1,19 @@
-import { useEffect } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+// ─────────────────────────────────────────────
+//  EmptyState — Editorial Premium
+//
+//  Calmer than the previous version: NO floating icon, NO pulsing ring.
+//  Editorial empty states sit quietly:
+//   · a hairline-outlined circle frame with the icon at low contrast
+//   · serif Heading title, body subtitle
+//   · optional CTA button (Button primitive)
+//   · whole block fades in once via FadeIn (no infinite motion)
+// ─────────────────────────────────────────────
+import { View, StyleSheet } from 'react-native';
 import { Feather } from '@expo/vector-icons';
-import Animated, {
-  Easing,
-  useAnimatedStyle,
-  useSharedValue,
-  withRepeat,
-  withSequence,
-  withTiming,
-} from 'react-native-reanimated';
-import { Colors } from '@/constants/tokens';
-import { Pressy } from '@/components/ui/Pressy';
+
+import { Colors, EditorialSpacing, Radius, Spacing } from '@/constants/tokens';
+import { Body, Heading } from '@/components/ui/Typography';
+import { Button } from '@/components/ui/Button';
 import { FadeIn } from '@/components/ui/FadeIn';
 
 type FeatherIcon = React.ComponentProps<typeof Feather>['name'];
@@ -21,7 +24,11 @@ interface Props {
   message?: string;
   actionLabel?: string;
   onAction?: () => void;
+  /** Color of the icon glyph. Defaults to textMuted. */
   tint?: string;
+  /** Replace the default circle frame with no frame (just the icon). */
+  bareIcon?: boolean;
+  testID?: string;
 }
 
 export function EmptyState({
@@ -31,74 +38,32 @@ export function EmptyState({
   actionLabel,
   onAction,
   tint = Colors.textMuted,
+  bareIcon = false,
+  testID,
 }: Props) {
-  const float = useSharedValue(0);
-  const pulse = useSharedValue(0);
-
-  useEffect(() => {
-    float.value = withRepeat(
-      withSequence(
-        withTiming(1, { duration: 1800, easing: Easing.inOut(Easing.sin) }),
-        withTiming(0, { duration: 1800, easing: Easing.inOut(Easing.sin) }),
-      ),
-      -1,
-      false,
-    );
-    pulse.value = withRepeat(
-      withSequence(
-        withTiming(1, { duration: 1400, easing: Easing.out(Easing.cubic) }),
-        withTiming(0, { duration: 0 }),
-      ),
-      -1,
-      false,
-    );
-  }, [float, pulse]);
-
-  const iconStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: -float.value * 6 }],
-  }));
-
-  const pulseStyle = useAnimatedStyle(() => ({
-    opacity: 0.45 - pulse.value * 0.45,
-    transform: [{ scale: 0.9 + pulse.value * 0.7 }],
-  }));
-
   return (
-    <View style={styles.root}>
-      <FadeIn from={12} duration={420}>
+    <View style={styles.root} testID={testID}>
+      <FadeIn>
         <View style={styles.iconWrap}>
-          <Animated.View
-            style={[
-              styles.iconPulse,
-              { backgroundColor: tint + '20', borderColor: tint + '40' },
-              pulseStyle,
-            ]}
-          />
-          <Animated.View
-            style={[styles.iconBox, { backgroundColor: tint + '18' }, iconStyle]}
-          >
-            <Feather name={icon} size={32} color={tint} />
-          </Animated.View>
+          {!bareIcon ? <View style={styles.iconFrame} /> : null}
+          <Feather name={icon} size={28} color={tint} />
         </View>
       </FadeIn>
-      <FadeIn delay={120} from={10}>
-        <Text style={styles.title}>{title}</Text>
+      <FadeIn delay={70}>
+        <Heading size="sm" align="center" style={styles.title}>
+          {title}
+        </Heading>
       </FadeIn>
       {message ? (
-        <FadeIn delay={200} from={10}>
-          <Text style={styles.msg}>{message}</Text>
+        <FadeIn delay={140}>
+          <Body align="center" tone="secondary" style={styles.msg}>
+            {message}
+          </Body>
         </FadeIn>
       ) : null}
       {actionLabel && onAction ? (
-        <FadeIn delay={300} from={10}>
-          <Pressy
-            haptic="select"
-            scaleTo={0.95}
-            onPress={onAction}
-            style={[styles.btn, { backgroundColor: Colors.accentPrimary }]}
-          >
-            <Text style={styles.btnLbl}>{actionLabel}</Text>
-          </Pressy>
+        <FadeIn delay={210} style={styles.action}>
+          <Button label={actionLabel} onPress={onAction} variant="primary" size="md" fullWidth={false} />
         </FadeIn>
       ) : null}
     </View>
@@ -106,46 +71,35 @@ export function EmptyState({
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 10 },
-  iconWrap: {
-    width: 110,
-    height: 110,
+  root: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    padding: EditorialSpacing.heroPadding,
+    gap: Spacing[3],
   },
-  iconPulse: {
-    position: 'absolute',
-    width: 110,
-    height: 110,
-    borderRadius: 55,
-    borderWidth: 1,
-  },
-  iconBox: {
+  iconWrap: {
     width: 80,
     height: 80,
-    borderRadius: 40,
     alignItems: 'center',
     justifyContent: 'center',
+    marginBottom: Spacing[2],
+  },
+  iconFrame: {
+    position: 'absolute',
+    width: 80,
+    height: 80,
+    borderRadius: Radius.full,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.borderStrong,
   },
   title: {
-    color: Colors.textPrimary,
-    fontSize: 16,
-    fontWeight: '800',
-    textAlign: 'center',
-    marginTop: 4,
+    marginTop: Spacing[1],
   },
   msg: {
-    color: Colors.textSecondary,
-    fontSize: 13,
-    textAlign: 'center',
-    lineHeight: 19,
     maxWidth: 280,
   },
-  btn: {
-    marginTop: 8,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 10,
+  action: {
+    marginTop: Spacing[3],
   },
-  btnLbl: { color: Colors.textInverse, fontSize: 13, fontWeight: '700' },
 });
