@@ -1,17 +1,15 @@
 // ─────────────────────────────────────────────
-//  Home — Editorial Premium
+//  Home — OPALBAR · Club Privado Exclusivo
 //
-//  Magazine layout:
-//   · Top bar: brand wordmark (left), notifications glyph (right)
-//   · Section 1 — ESTA NOCHE (hero event). Full-bleed 16:10 image
-//     followed by a kicker + display title beneath. No overlay text on
-//     the image; the headline lives on bg, like a real magazine.
-//   · Section 2 — PRÓXIMOS (upcoming events). Vertical stack of cards,
-//     each with image (16:10), kicker (categoria · fecha), heading (title).
-//   · Section 3 — OFERTAS (current offers). Editorial ListItem-style.
+//  Brief del usuario (2026-05-18):
+//   · Hero superior 90% del viewport visual — solo OPALBAR + TIER + name
+//   · NO mostrar perks primero — la EXPERIENCIA vale más que los beneficios
+//   · Orden: Greeting → MembershipCard (flippable) → Tonight at OPALBAR
+//     (foto grande) → Your privileges → Upcoming experiences → Community
+//     highlights
 //
-//  Loading: SkeletonList. Empty: EmptyState. Error: ErrorState.
-//  Pull-to-refresh enabled. Each section enters with stagger.
+//  Filosofía: "Estoy entrando a un club privado de lujo", no "Estoy
+//  revisando una app de recompensas".
 // ─────────────────────────────────────────────
 import { useCallback, useState } from 'react';
 import {
@@ -29,22 +27,21 @@ import { Colors, EditorialSpacing, Radius, Spacing } from '@/constants/tokens';
 import { HitSlop, Roles } from '@/constants/a11y';
 import { eventsApi, offersApi } from '@/api/client';
 import { useAppStore } from '@/stores/app.store';
+import { useAuthStore } from '@/stores/auth.store';
 import {
   Body,
-  Card,
   Caption,
   FadeIn,
   Hairline,
-  Heading,
   Kicker,
   Pressy,
   Skeleton,
-  SkeletonList,
+  Subhead,
 } from '@/components/ui';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
-
-type FeatherIcon = React.ComponentProps<typeof Feather>['name'];
+import { MembershipCard } from '@/components/membership';
+import { resolveTier } from '@/constants/tiers';
 
 interface EventItem {
   id: string;
@@ -60,12 +57,7 @@ interface OfferItem {
   id: string;
   title: string;
   description?: string;
-  imageUrl?: string;
-  maxRedemptions?: number;
-  currentRedemptions?: number;
   validWhen?: string;
-  usesLeft?: number;
-  icon?: FeatherIcon;
 }
 
 function toAbsoluteImageUrl(url?: string): string | undefined {
@@ -76,24 +68,55 @@ function toAbsoluteImageUrl(url?: string): string | undefined {
   return `${base}${url.startsWith('/') ? '' : '/'}${url}`;
 }
 
-function formatLongDate(d: string | undefined, language: string): string {
+function formatShortDate(d: string | undefined, language: string): string {
   if (!d) return '';
   try {
     return new Date(d).toLocaleDateString(language, {
       weekday: 'short',
       day: 'numeric',
       month: 'short',
+    });
+  } catch {
+    return '';
+  }
+}
+
+function formatTime(d: string | undefined, language: string): string {
+  if (!d) return '';
+  try {
+    return new Date(d).toLocaleTimeString(language, {
       hour: '2-digit',
       minute: '2-digit',
     });
   } catch {
-    return d;
+    return '';
   }
+}
+
+function formatValidThrough(createdAt?: string): string | undefined {
+  if (!createdAt) return undefined;
+  try {
+    const created = new Date(createdAt);
+    const expires = new Date(created.getFullYear() + 1, created.getMonth(), created.getDate());
+    const mm = String(expires.getMonth() + 1).padStart(2, '0');
+    const yy = String(expires.getFullYear()).slice(-2);
+    return `${mm}/${yy}`;
+  } catch {
+    return undefined;
+  }
+}
+
+function getGreeting(t: boolean): string {
+  const h = new Date().getHours();
+  if (h < 12) return t ? 'Buenos días' : 'Good morning';
+  if (h < 19) return t ? 'Buenas tardes' : 'Good afternoon';
+  return t ? 'Buenas noches' : 'Good evening';
 }
 
 export default function Home() {
   const router = useRouter();
   const { language } = useAppStore();
+  const { user } = useAuthStore();
   const t = language === 'es';
 
   const [events, setEvents] = useState<EventItem[]>([]);
@@ -106,7 +129,7 @@ export default function Home() {
     setErrored(false);
     try {
       const [er, or] = await Promise.all([
-        eventsApi.list({ limit: 4 }).catch(() => null),
+        eventsApi.list({ limit: 5 }).catch(() => null),
         offersApi.list({ limit: 3 }).catch(() => null),
       ]);
       const evs = er?.data?.data?.data ?? [];
@@ -128,8 +151,16 @@ export default function Home() {
     }, [load]),
   );
 
-  const hero = events[0];
-  const upcoming = (hero ? events.slice(1) : events).slice(0, 3);
+  // Membership data
+  const firstName = user?.profile?.firstName ?? '';
+  const lastName = user?.profile?.lastName ?? '';
+  const fullName =
+    `${firstName} ${lastName}`.trim() || (user?.email?.split('@')[0] ?? 'Miembro');
+  const tierName = user?.profile?.loyaltyLevel?.name;
+  const tier = resolveTier(tierName);
+  const points = user?.points ?? 0;
+  const memberNumber = user?.id ? user.id.slice(-4) : undefined;
+  const validThrough = formatValidThrough(user?.createdAt);
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
@@ -147,91 +178,161 @@ export default function Home() {
           />
         }
       >
-        <Header onBellPress={() => router.push('/(app)/profile/notifications' as never)} />
+        {/* ── Greeting ── */}
+        <FadeIn style={styles.greetingWrap}>
+          <View style={styles.greetingRow}>
+            <View style={{ flex: 1 }}>
+              <Kicker tone="muted">OPALBAR</Kicker>
+              <Body size="sm" tone="secondary" style={{ marginTop: 2 }}>
+                {getGreeting(t)}, {firstName || 'Miembro'}
+              </Body>
+            </View>
+            <Pressy
+              onPress={() => router.push('/(app)/profile/notifications' as never)}
+              haptic="select"
+              accessibilityRole={Roles.button}
+              accessibilityLabel={t ? 'Notificaciones' : 'Notifications'}
+              hitSlop={HitSlop.expand}
+              style={styles.bellBtn}
+            >
+              <Feather name="bell" size={20} color={Colors.textPrimary} />
+            </Pressy>
+          </View>
+        </FadeIn>
+
+        {/* ── Membership Card (flippable) ── */}
+        <FadeIn delay={80} style={styles.heroWrap}>
+          <MembershipCard
+            fullName={fullName}
+            memberNumber={memberNumber}
+            tierName={tierName}
+            points={points}
+            validThrough={validThrough}
+            size="hero"
+            flippable
+          />
+        </FadeIn>
 
         {errored && !loading ? (
-          <View style={{ minHeight: 280 }}>
+          <View style={{ minHeight: 220, paddingHorizontal: EditorialSpacing.pageGutter }}>
             <ErrorState
               message={
                 t
-                  ? 'No pudimos cargar los eventos y ofertas. Inténtalo de nuevo.'
-                  : "We couldn't load events and offers. Try again."
+                  ? 'No pudimos cargar la información del club.'
+                  : "We couldn't load the club's information."
               }
               onRetry={load}
             />
           </View>
         ) : (
           <>
-            <HeroBlock
-              event={hero}
-              loading={loading}
-              t={t}
-              language={language}
-              onPress={(id) => router.push(`/(app)/events/${id}` as never)}
-            />
-
+            {/* ── Tonight at OPALBAR ── */}
             <Section
-              kicker={t ? 'PRÓXIMOS' : 'COMING UP'}
-              title={t ? 'Próximos eventos' : 'Upcoming events'}
-              ctaLabel={t ? 'Ver todos' : 'See all'}
-              onCtaPress={() => router.push('/(tabs)/events' as never)}
-              delay={140}
+              kicker={t ? 'ESTA NOCHE EN OPALBAR' : 'TONIGHT AT OPALBAR'}
+              delay={160}
             >
-              {loading && upcoming.length === 0 ? (
-                <SkeletonList count={2} itemHeight={200} />
-              ) : upcoming.length === 0 ? (
-                <View style={{ minHeight: 220 }}>
+              {loading && events.length === 0 ? (
+                <Skeleton height={220} radius={Radius.md} />
+              ) : events.length === 0 ? (
+                <View style={{ minHeight: 180 }}>
                   <EmptyState
-                    icon="calendar"
-                    title={t ? 'Sin próximos eventos' : 'No upcoming events'}
+                    icon="moon"
+                    title={t ? 'Sin programa esta noche' : 'No program tonight'}
                     message={
                       t
-                        ? 'Estamos preparando algo. Vuelve pronto.'
-                        : 'Something is in the works. Come back soon.'
+                        ? 'El club siempre tiene algo para ti pronto.'
+                        : 'The club always has something coming up.'
                     }
                   />
                 </View>
               ) : (
-                upcoming.map((ev, idx) => (
-                  <FadeIn key={ev.id ?? idx} delay={70 * idx}>
-                    <UpcomingCard
-                      event={ev}
-                      onPress={() => ev.id && router.push(`/(app)/events/${ev.id}` as never)}
-                      t={t}
-                      language={language}
+                <TonightHero
+                  event={events[0]}
+                  onPress={() =>
+                    events[0]?.id && router.push(`/(app)/events/${events[0].id}` as never)
+                  }
+                  t={t}
+                  language={language}
+                />
+              )}
+            </Section>
+
+            {/* ── Your privileges (cortesías) ── */}
+            <Section
+              kicker={t ? 'TUS PRIVILEGIOS' : 'YOUR PRIVILEGES'}
+              ctaLabel={t ? 'Ver todos' : 'See all'}
+              onCtaPress={() => router.push('/(app)/offers' as never)}
+              delay={240}
+            >
+              {loading && offers.length === 0 ? (
+                <View style={{ gap: Spacing[2] }}>
+                  {[0, 1].map((i) => (
+                    <Skeleton key={i} height={56} radius={Radius.sm} />
+                  ))}
+                </View>
+              ) : offers.length === 0 ? (
+                <Body tone="muted" style={{ paddingVertical: Spacing[3] }}>
+                  {t
+                    ? 'Pronto habrá nuevas cortesías para ti.'
+                    : 'New privileges will be available soon.'}
+                </Body>
+              ) : (
+                offers.slice(0, 3).map((off, idx) => (
+                  <FadeIn key={off.id ?? idx} delay={50 * idx}>
+                    <PrivilegeRow
+                      offer={off}
+                      tierAccent={tier.base}
+                      onPress={() => off.id && router.push(`/(app)/offers/${off.id}` as never)}
                     />
                   </FadeIn>
                 ))
               )}
             </Section>
 
-            <Section
-              kicker={t ? 'OFERTAS' : 'OFFERS'}
-              title={t ? 'Ofertas vigentes' : 'Current offers'}
-              ctaLabel={t ? 'Ver todas' : 'See all'}
-              onCtaPress={() => router.push('/(app)/offers' as never)}
-              delay={220}
-            >
-              {loading && offers.length === 0 ? (
-                <SkeletonList count={2} itemHeight={88} />
-              ) : offers.length === 0 ? (
-                <View style={{ minHeight: 200 }}>
-                  <EmptyState
-                    icon="tag"
-                    title={t ? 'Sin ofertas vigentes' : 'No current offers'}
-                  />
-                </View>
-              ) : (
-                offers.map((off, idx) => (
-                  <FadeIn key={off.id ?? idx} delay={70 * idx}>
-                    <OfferRow
-                      offer={off}
-                      onPress={() => off.id && router.push(`/(app)/offers/${off.id}` as never)}
-                      t={t}
+            {/* ── Upcoming experiences ── */}
+            {events.length > 1 ? (
+              <Section
+                kicker={t ? 'PRÓXIMAS EXPERIENCIAS' : 'UPCOMING EXPERIENCES'}
+                ctaLabel={t ? 'Ver todas' : 'See all'}
+                onCtaPress={() => router.push('/(tabs)/events' as never)}
+                delay={320}
+              >
+                {events.slice(1, 4).map((ev, idx) => (
+                  <FadeIn key={ev.id ?? idx} delay={50 * idx}>
+                    <ExperienceRow
+                      event={ev}
+                      onPress={() => ev.id && router.push(`/(app)/events/${ev.id}` as never)}
+                      language={language}
                     />
                   </FadeIn>
-                ))
-              )}
+                ))}
+              </Section>
+            ) : null}
+
+            {/* ── Community highlights ── */}
+            <Section
+              kicker={t ? 'DEL CLUB' : 'FROM THE CLUB'}
+              ctaLabel={t ? 'Ver más' : 'See more'}
+              onCtaPress={() => router.push('/(tabs)/community' as never)}
+              delay={400}
+            >
+              <Pressy
+                onPress={() => router.push('/(tabs)/community' as never)}
+                haptic="select"
+                accessibilityRole={Roles.button}
+                accessibilityLabel={t ? 'Ir a comunidad' : 'Go to community'}
+                style={styles.communityCard}
+              >
+                <View style={{ flex: 1 }}>
+                  <Subhead>{t ? 'Nuevos miembros esta semana' : 'New members this week'}</Subhead>
+                  <Caption tone="muted" style={{ marginTop: 2 }}>
+                    {t
+                      ? 'Conoce a quienes se unieron al club'
+                      : 'Meet who joined the club'}
+                  </Caption>
+                </View>
+                <Feather name="chevron-right" size={18} color={Colors.textMuted} />
+              </Pressy>
             </Section>
           </>
         )}
@@ -240,127 +341,17 @@ export default function Home() {
   );
 }
 
-// ── Header ───────────────────────────────────
-function Header({ onBellPress }: { onBellPress: () => void }) {
-  return (
-    <View style={styles.header}>
-      <View>
-        <Kicker tone="muted">OPALBAR</Kicker>
-      </View>
-      <Pressy
-        onPress={onBellPress}
-        haptic="select"
-        accessibilityRole={Roles.button}
-        accessibilityLabel="Notificaciones"
-        hitSlop={HitSlop.expand}
-        style={styles.bellBtn}
-      >
-        <Feather name="bell" size={20} color={Colors.textPrimary} />
-      </Pressy>
-    </View>
-  );
-}
-
-// ── Hero block ───────────────────────────────
-function HeroBlock({
-  event,
-  loading,
-  t,
-  language,
-  onPress,
-}: {
-  event?: EventItem;
-  loading: boolean;
-  t: boolean;
-  language: string;
-  onPress: (id: string) => void;
-}) {
-  if (loading && !event) {
-    return (
-      <FadeIn style={styles.heroWrap}>
-        <Skeleton height={240} radius={Radius.card} />
-        <View style={{ marginTop: Spacing[5] }}>
-          <Skeleton height={14} width={120} />
-          <View style={{ height: Spacing[3] }} />
-          <Skeleton height={36} width="80%" />
-        </View>
-      </FadeIn>
-    );
-  }
-
-  if (!event) {
-    return (
-      <View style={[styles.heroWrap, { minHeight: 280 }]}>
-        <EmptyState
-          icon="calendar"
-          title={t ? 'Sin eventos esta noche' : 'No events tonight'}
-          message={
-            t
-              ? 'Vuelve mañana — siempre hay algo nuevo.'
-              : 'Come back tomorrow — there is always something new.'
-          }
-        />
-      </View>
-    );
-  }
-
-  const title = event.title || event.name || (t ? 'Sin título' : 'Untitled');
-  const dateLabel = formatLongDate(event.startDate, language).toUpperCase();
-  const venueLabel = event.category?.name?.toUpperCase();
-  const overline = [t ? 'ESTA NOCHE' : 'TONIGHT', dateLabel, venueLabel]
-    .filter(Boolean)
-    .join(' · ');
-
-  return (
-    <FadeIn style={styles.heroWrap}>
-      <Pressy
-        onPress={() => onPress(event.id)}
-        haptic="select"
-        accessibilityRole={Roles.button}
-        accessibilityLabel={`${title}. ${dateLabel}.`}
-        style={styles.heroPress}
-      >
-        <View style={styles.heroImageWrap}>
-          {event.imageUrl ? (
-            <Image
-              source={{ uri: toAbsoluteImageUrl(event.imageUrl) }}
-              style={styles.heroImage}
-              resizeMode="cover"
-              accessibilityIgnoresInvertColors
-            />
-          ) : (
-            <View style={[styles.heroImage, styles.heroImagePlaceholder]} />
-          )}
-        </View>
-        <View style={styles.heroText}>
-          <Kicker tone="champagne">{overline}</Kicker>
-          <Heading size="lg" style={{ marginTop: Spacing[2] }}>
-            {title}
-          </Heading>
-          {event.spotsLeft != null ? (
-            <Caption tone="muted" style={{ marginTop: Spacing[2] }}>
-              {t ? `${event.spotsLeft} plazas disponibles` : `${event.spotsLeft} spots available`}
-            </Caption>
-          ) : null}
-        </View>
-      </Pressy>
-    </FadeIn>
-  );
-}
-
-// ── Section header ───────────────────────────
+// ── Section ──────────────────────────────────
 function Section({
   kicker,
-  title,
   ctaLabel,
   onCtaPress,
   delay,
   children,
 }: {
   kicker: string;
-  title: string;
-  ctaLabel: string;
-  onCtaPress: () => void;
+  ctaLabel?: string;
+  onCtaPress?: () => void;
   delay?: number;
   children: React.ReactNode;
 }) {
@@ -368,33 +359,28 @@ function Section({
     <View style={styles.section}>
       <FadeIn delay={delay}>
         <View style={styles.sectionHeader}>
-          <View style={{ flex: 1 }}>
-            <Kicker tone="muted">{kicker}</Kicker>
-            <Heading size="sm" style={{ marginTop: Spacing[1] }}>
-              {title}
-            </Heading>
-          </View>
-          <Pressy
-            onPress={onCtaPress}
-            haptic="select"
-            accessibilityRole={Roles.link}
-            accessibilityLabel={ctaLabel}
-            hitSlop={HitSlop.expand}
-          >
-            <Body size="sm" tone="accent" weight="semiBold">
-              {ctaLabel}
-            </Body>
-          </Pressy>
+          <Kicker tone="muted">{kicker}</Kicker>
+          {ctaLabel && onCtaPress ? (
+            <Pressy
+              onPress={onCtaPress}
+              haptic="select"
+              accessibilityRole={Roles.link}
+              accessibilityLabel={ctaLabel}
+              hitSlop={HitSlop.expand}
+            >
+              <Caption tone="accent">{ctaLabel}</Caption>
+            </Pressy>
+          ) : null}
         </View>
-        <Hairline variant="subtle" style={{ marginTop: Spacing[4], marginBottom: Spacing[4] }} />
+        <Hairline variant="subtle" style={{ marginTop: Spacing[2], marginBottom: Spacing[3] }} />
       </FadeIn>
       <View style={styles.sectionBody}>{children}</View>
     </View>
   );
 }
 
-// ── Upcoming card ────────────────────────────
-function UpcomingCard({
+// ── Tonight hero (experiential) ──────────────
+function TonightHero({
   event,
   onPress,
   t,
@@ -406,101 +392,131 @@ function UpcomingCard({
   language: string;
 }) {
   const title = event.title || event.name || (t ? 'Sin título' : 'Untitled');
-  const date = formatLongDate(event.startDate, language).toUpperCase();
-  const cat = event.category?.name?.toUpperCase();
-  const overline = [cat, date].filter(Boolean).join(' · ');
+  const time = formatTime(event.startDate, language);
+  const cat = event.category?.name;
 
   return (
-    <Card
+    <Pressy
       onPress={onPress}
-      padding={0}
-      variant="flat"
-      radius="card"
-      accessibilityLabel={`${title}. ${date}.`}
+      haptic="select"
+      accessibilityRole={Roles.button}
+      accessibilityLabel={`${title} ${time}`}
+      style={styles.tonightCard}
     >
-      <View>
-        <View style={styles.upcomingImageWrap}>
-          {event.imageUrl ? (
-            <Image
-              source={{ uri: toAbsoluteImageUrl(event.imageUrl) }}
-              style={styles.upcomingImage}
-              resizeMode="cover"
-              accessibilityIgnoresInvertColors
-            />
-          ) : (
-            <View style={[styles.upcomingImage, styles.heroImagePlaceholder]} />
-          )}
-        </View>
-        <View style={styles.upcomingText}>
-          {overline ? <Kicker tone="champagne">{overline}</Kicker> : null}
-          <Heading size="sm" style={{ marginTop: Spacing[2] }}>
-            {title}
-          </Heading>
-        </View>
+      <View style={styles.tonightImageWrap}>
+        {event.imageUrl ? (
+          <Image
+            source={{ uri: toAbsoluteImageUrl(event.imageUrl) }}
+            style={styles.tonightImage}
+            resizeMode="cover"
+            accessibilityIgnoresInvertColors
+          />
+        ) : (
+          <View style={[styles.tonightImage, { backgroundColor: Colors.bgElevated }]} />
+        )}
       </View>
-    </Card>
+      <View style={styles.tonightText}>
+        <Kicker tone="champagne">
+          {[time, cat].filter(Boolean).join(' · ').toUpperCase()}
+        </Kicker>
+        <Subhead style={{ marginTop: Spacing[1] }} numberOfLines={2}>
+          {title}
+        </Subhead>
+        {event.spotsLeft != null ? (
+          <Caption tone="muted" style={{ marginTop: 2 }}>
+            {t ? `${event.spotsLeft} plazas disponibles` : `${event.spotsLeft} spots available`}
+          </Caption>
+        ) : null}
+      </View>
+    </Pressy>
   );
 }
 
-// ── Offer row ────────────────────────────────
-function OfferRow({
+// ── Privilege row (cortesía) ─────────────────
+function PrivilegeRow({
   offer,
+  tierAccent,
   onPress,
-  t,
 }: {
   offer: OfferItem;
+  tierAccent: string;
   onPress: () => void;
-  t: boolean;
 }) {
-  const usesLeft =
-    offer.usesLeft ??
-    (offer.maxRedemptions != null
-      ? Math.max(0, offer.maxRedemptions - (offer.currentRedemptions ?? 0))
-      : null);
-
   return (
-    <Card onPress={onPress} variant="flat" padding={Spacing[4]} accessibilityLabel={offer.title}>
-      <View style={styles.offerRow}>
-        <View style={styles.offerIconBox}>
-          {offer.imageUrl ? (
-            <Image source={{ uri: offer.imageUrl }} style={styles.offerIconImg} resizeMode="cover" />
-          ) : (
-            <Feather name={offer.icon || 'tag'} size={20} color={Colors.accentChampagne} />
-          )}
-        </View>
-        <View style={styles.offerInfo}>
-          <Heading size="sm" numberOfLines={2}>
-            {offer.title}
-          </Heading>
-          {offer.validWhen || offer.description ? (
-            <Caption tone="muted" style={{ marginTop: 2 }} numberOfLines={2}>
-              {offer.validWhen || offer.description}
-            </Caption>
-          ) : null}
-          {usesLeft != null ? (
-            <Caption tone="champagne" style={{ marginTop: Spacing[1] }}>
-              {t ? `${usesLeft} usos restantes` : `${usesLeft} uses left`}
-            </Caption>
-          ) : null}
-        </View>
-        <Feather name="chevron-right" size={20} color={Colors.textMuted} />
+    <Pressy
+      onPress={onPress}
+      haptic="select"
+      accessibilityRole={Roles.button}
+      accessibilityLabel={offer.title}
+      style={styles.privilegeRow}
+    >
+      <View style={[styles.privilegeDot, { backgroundColor: tierAccent }]} />
+      <View style={{ flex: 1 }}>
+        <Subhead numberOfLines={1}>{offer.title}</Subhead>
+        {offer.validWhen || offer.description ? (
+          <Caption tone="muted" numberOfLines={1} style={{ marginTop: 2 }}>
+            {offer.validWhen || offer.description}
+          </Caption>
+        ) : null}
       </View>
-    </Card>
+      <Feather name="chevron-right" size={18} color={Colors.textMuted} />
+    </Pressy>
   );
 }
 
+// ── Experience row (compact event) ───────────
+function ExperienceRow({
+  event,
+  onPress,
+  language,
+}: {
+  event: EventItem;
+  onPress: () => void;
+  language: string;
+}) {
+  const title = event.title || event.name || '—';
+  const date = formatShortDate(event.startDate, language);
+  const time = formatTime(event.startDate, language);
+  return (
+    <Pressy
+      onPress={onPress}
+      haptic="select"
+      accessibilityRole={Roles.button}
+      accessibilityLabel={`${title} ${date} ${time}`}
+      style={styles.experienceRow}
+    >
+      <View style={styles.experienceDateCol}>
+        <Kicker tone="champagne">{date.split(' ')[0]?.toUpperCase()}</Kicker>
+        <Subhead style={{ marginTop: 2 }}>{date.split(' ')[1] ?? ''}</Subhead>
+      </View>
+      <View style={{ flex: 1 }}>
+        <Subhead numberOfLines={1}>{title}</Subhead>
+        {time ? (
+          <Caption tone="muted" style={{ marginTop: 2 }}>
+            {time}
+            {event.category?.name ? ` · ${event.category.name}` : ''}
+          </Caption>
+        ) : null}
+      </View>
+      <Feather name="chevron-right" size={18} color={Colors.textMuted} />
+    </Pressy>
+  );
+}
+
+// ── Styles ───────────────────────────────────
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
   scroll: { paddingBottom: Spacing[10] },
 
-  // Header
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+  greetingWrap: {
     paddingHorizontal: EditorialSpacing.pageGutter,
     paddingTop: Spacing[2],
-    paddingBottom: Spacing[6],
+    paddingBottom: Spacing[4],
+  },
+  greetingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   bellBtn: {
     width: 40,
@@ -510,80 +526,78 @@ const styles = StyleSheet.create({
     borderRadius: Radius.full,
   },
 
-  // Hero block
   heroWrap: {
     paddingHorizontal: EditorialSpacing.pageGutter,
   },
-  heroPress: {
-    gap: 0,
-  },
-  heroImageWrap: {
-    width: '100%',
-    aspectRatio: 16 / 10,
-    borderRadius: Radius.card,
-    overflow: 'hidden',
-    backgroundColor: Colors.bgElevated,
-  },
-  heroImage: {
-    width: '100%',
-    height: '100%',
-  },
-  heroImagePlaceholder: {
-    backgroundColor: Colors.bgElevated,
-  },
-  heroText: {
-    marginTop: Spacing[5],
-  },
 
-  // Sections
   section: {
     paddingHorizontal: EditorialSpacing.pageGutter,
     marginTop: Spacing[8],
   },
   sectionHeader: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    gap: Spacing[3],
   },
   sectionBody: {
-    gap: Spacing[3],
+    gap: Spacing[2],
   },
 
-  // Upcoming
-  upcomingImageWrap: {
+  tonightCard: {
+    overflow: 'hidden',
+    borderRadius: Radius.md,
+  },
+  tonightImageWrap: {
     width: '100%',
     aspectRatio: 16 / 10,
     backgroundColor: Colors.bgElevated,
   },
-  upcomingImage: {
+  tonightImage: {
     width: '100%',
     height: '100%',
   },
-  upcomingText: {
-    padding: Spacing[5],
+  tonightText: {
+    paddingTop: Spacing[3],
   },
 
-  // Offer
-  offerRow: {
+  privilegeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing[3],
+    paddingVertical: Spacing[3],
+    paddingHorizontal: Spacing[4],
+    backgroundColor: Colors.bgCard,
+    borderRadius: Radius.sm,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+  },
+  privilegeDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+
+  experienceRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing[4],
+    paddingVertical: Spacing[3],
+    paddingHorizontal: Spacing[3],
   },
-  offerIconBox: {
-    width: 56,
-    height: 56,
-    borderRadius: Radius.md,
-    backgroundColor: Colors.bgElevated,
+  experienceDateCol: {
+    width: 44,
+    alignItems: 'flex-start',
+  },
+
+  communityCard: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-  },
-  offerIconImg: {
-    width: 56,
-    height: 56,
-  },
-  offerInfo: {
-    flex: 1,
+    gap: Spacing[3],
+    paddingVertical: Spacing[4],
+    paddingHorizontal: Spacing[4],
+    backgroundColor: Colors.bgCard,
+    borderRadius: Radius.sm,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
   },
 });

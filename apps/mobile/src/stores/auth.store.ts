@@ -4,7 +4,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { Platform } from 'react-native';
-import { authApi, tokenStore, onAuthFailed, onTokensRefreshed } from '../api/client';
+import { apiClient, authApi, tokenStore, onAuthFailed, onTokensRefreshed } from '../api/client';
 import { closeSocket, updateSocketToken } from '../api/socket';
 import { closeRtSocket, getRtSocket, updateRtToken } from '../api/rt-socket';
 
@@ -137,6 +137,20 @@ export const useAuthStore = create<AuthState>()(
 
       logout: async () => {
         set({ isLoading: true });
+        // Unregister push token BEFORE clearing auth state so the API call
+        // is still authenticated. Audit ref: P1 #5 (logout cleanup), 2026-05-18.
+        try {
+          const { pushTokenStore } = await import('../api/push-token-store');
+          const token = await pushTokenStore.get();
+          if (token) {
+            await apiClient.delete('/push/unregister', { data: { token } }).catch(() => {
+              /* best-effort — backend has a DeviceNotRegistered sweep anyway */
+            });
+            await pushTokenStore.clear();
+          }
+        } catch {
+          /* ignore */
+        }
         try {
           await authApi.logout();
         } catch {

@@ -27,7 +27,6 @@ import { useAppStore } from '@/stores/app.store';
 import { usersApi } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { useFeedback } from '@/hooks/useFeedback';
-import { StoryRing } from '@/components/StoryRing';
 import {
   Body,
   Button,
@@ -35,7 +34,6 @@ import {
   ConfirmDialog,
   FadeIn,
   Hairline,
-  Heading,
   Input,
   Kicker,
   ListItem,
@@ -43,6 +41,7 @@ import {
   Pressy,
 } from '@/components/ui';
 import { toast } from '@/components/Toast';
+import { MembershipCard } from '@/components/membership';
 
 type FeatherIcon = React.ComponentProps<typeof Feather>['name'];
 
@@ -142,53 +141,61 @@ export default function Profile() {
     }
   }
 
+  // Membership card data
+  const tierName = user?.profile?.loyaltyLevel?.name;
+  const memberNumber = user?.id ? user.id.slice(-4) : undefined;
+  const validThrough = (() => {
+    if (!user?.createdAt) return undefined;
+    try {
+      const created = new Date(user.createdAt);
+      const expires = new Date(created.getFullYear() + 1, created.getMonth(), created.getDate());
+      const mm = String(expires.getMonth() + 1).padStart(2, '0');
+      const yy = String(expires.getFullYear()).slice(-2);
+      return `${mm}/${yy}`;
+    } catch {
+      return undefined;
+    }
+  })();
+
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        {/* ── Identity ── */}
-        <FadeIn style={styles.identityBlock}>
-          <StoryRing
-            userId={user?.id}
-            avatarUrl={user?.profile?.avatarUrl ?? null}
-            initials={initials.toUpperCase()}
-            fallbackColor={Colors.accentPrimary}
-            size="lg"
-            showIdleRing
-            isSelf
-            onPressNoStories={() => router.push('/(app)/community/new-story' as never)}
-          />
-          <FadeIn delay={80}>
-            <Heading size="lg" align="center" style={{ marginTop: Spacing[4] }}>
-              {fullName}
-            </Heading>
-          </FadeIn>
-          <FadeIn delay={140}>
-            <Caption tone="muted" align="center" style={{ marginTop: Spacing[1] }}>
-              @{handle}
-            </Caption>
-          </FadeIn>
-          <FadeIn delay={200}>
-            <Kicker tone="champagne" align="center" style={{ marginTop: Spacing[3] }}>
-              {t ? `MIEMBRO DESDE ${memberYear}` : `MEMBER SINCE ${memberYear}`}
-            </Kicker>
-          </FadeIn>
+        {/* ── Header ── */}
+        <FadeIn style={styles.profileHeader}>
+          <Kicker tone="muted">{t ? 'PERFIL' : 'PROFILE'}</Kicker>
+          <Caption tone="muted" style={{ marginTop: 2 }}>
+            @{handle} · {t ? `Miembro desde ${memberYear}` : `Member since ${memberYear}`}
+          </Caption>
         </FadeIn>
 
-        {/* ── Stats ── */}
-        <FadeIn delay={260}>
-          <Hairline variant="subtle" />
+        {/* ── Membership Card (flippable) ── */}
+        <FadeIn delay={80} style={styles.cardWrap}>
+          <MembershipCard
+            fullName={fullName}
+            memberNumber={memberNumber}
+            tierName={tierName}
+            points={points}
+            validThrough={validThrough}
+            size="md"
+            flippable
+          />
+        </FadeIn>
+
+        {/* ── Stats (bookings + redemptions) ── */}
+        <FadeIn delay={140}>
+          <Hairline variant="subtle" style={{ marginTop: Spacing[6] }} />
           <View style={styles.stats}>
-            <StatCell value={points.toLocaleString(language)} label={t ? 'PUNTOS' : 'POINTS'} />
-            <View style={styles.statsDivider} />
             <StatCell value={String(bookings)} label={t ? 'RESERVAS' : 'BOOKINGS'} />
             <View style={styles.statsDivider} />
             <StatCell value={String(redemptions)} label={t ? 'CANJES' : 'REDEEMED'} />
+            <View style={styles.statsDivider} />
+            <StatCell value={String(memberYear)} label={t ? 'DESDE' : 'SINCE'} />
           </View>
           <Hairline variant="subtle" />
         </FadeIn>
 
         {/* ── Mi muro ── */}
-        <FadeIn delay={320} style={styles.wallBlock}>
+        <FadeIn delay={200} style={styles.wallBlock}>
           <Kicker tone="muted" style={{ marginBottom: Spacing[3] }}>
             {t ? 'MI MURO' : 'MY WALL'}
           </Kicker>
@@ -403,11 +410,13 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
   scroll: { paddingBottom: Spacing[10] },
 
-  identityBlock: {
-    alignItems: 'center',
+  profileHeader: {
     paddingHorizontal: EditorialSpacing.pageGutter,
-    paddingTop: Spacing[6],
-    paddingBottom: Spacing[8],
+    paddingTop: Spacing[2],
+    paddingBottom: Spacing[4],
+  },
+  cardWrap: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
   },
 
   stats: {

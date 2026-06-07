@@ -44,9 +44,16 @@ export class PushService {
     });
   }
 
-  async unregister(token: string) {
+  async unregister(token: string, userId?: string) {
+    // When userId is provided, only delete the token if it belongs to that
+    // user. Prevents a malicious authenticated user from unregistering
+    // another user's device token. Audit ref: backend audit P0 #5, 2026-05-18.
     try {
-      await this.prisma.pushToken.delete({ where: { token } });
+      if (userId) {
+        await this.prisma.pushToken.deleteMany({ where: { token, userId } });
+      } else {
+        await this.prisma.pushToken.delete({ where: { token } });
+      }
     } catch {}
     return { ok: true };
   }

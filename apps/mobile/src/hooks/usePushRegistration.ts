@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 import Constants, { ExecutionEnvironment } from 'expo-constants';
 import * as Device from 'expo-device';
 import { apiClient } from '../api/client';
+import { pushTokenStore } from '../api/push-token-store';
 import { useAuthStore } from '../stores/auth.store';
 import { toast } from '../components/Toast';
 
@@ -86,6 +87,10 @@ export function usePushRegistration() {
           token: result.token,
           platform: Platform.OS === 'ios' ? 'ios' : Platform.OS === 'android' ? 'android' : 'web',
         });
+        // Cache the token so logout can unregister it server-side. Without
+        // this, the token stays in pushToken table until Expo reports
+        // DeviceNotRegistered (can take days). Audit ref: P1 #5, 2026-05-18.
+        await pushTokenStore.set(result.token);
       } catch (err: any) {
         toast(`Push register API error: ${err?.message ?? 'unknown'}`, 'danger');
       }

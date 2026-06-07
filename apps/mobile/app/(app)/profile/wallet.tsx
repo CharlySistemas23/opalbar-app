@@ -1,13 +1,12 @@
 // ─────────────────────────────────────────────
-//  Wallet — Editorial Premium
+//  Wallet — OPALBAR · Premium Members Balance
 //
-//  Magazine layout:
-//   · Hero block: kicker (TUS PUNTOS) + huge serif Numeric balance +
-//     level meta + progress hairline rule
-//   · Two ghost CTAs as bordered tiles: REDIMIR · NIVELES
-//   · Section HISTORIAL — editorial list of transactions with +/- amount
-//     in serif Numeric and date as Caption
-//   · Loading: SkeletonList. Empty: EmptyState. Error: ErrorState.
+//  Brief (2026-05-18):
+//   · Balance hero gigante Fraunces (no fintech feel)
+//   · Progress to next tier — barra elegante, tier-colored
+//   · Timeline (NO tabla) — formato "+200 / Reservation / May 18"
+//
+//  Tier color propagates to progress bar and +/- accents.
 // ─────────────────────────────────────────────
 import { useCallback, useEffect, useState } from 'react';
 import { FlatList, StyleSheet, View } from 'react-native';
@@ -19,21 +18,21 @@ import { walletApi } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { useAuthStore } from '@/stores/auth.store';
 import { useAppStore } from '@/stores/app.store';
-import { Colors, EditorialSpacing, Radius, Spacing } from '@/constants/tokens';
+import { Colors, EditorialSpacing, Radius, Spacing, TypePresets } from '@/constants/tokens';
 import { HitSlop, Roles } from '@/constants/a11y';
 import {
   Body,
   Caption,
   FadeIn,
   Hairline,
-  Heading,
   Kicker,
-  Numeric,
   Pressy,
   SkeletonList,
 } from '@/components/ui';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
+import { resolveTier } from '@/constants/tiers';
+import { Text } from 'react-native';
 
 interface Tx {
   id: string;
@@ -70,10 +69,14 @@ export default function Wallet() {
   }, [load]);
 
   const points = wallet?.points ?? user?.points ?? 0;
-  const levelName = wallet?.currentLevel?.name || user?.profile?.loyaltyLevel?.name || (t ? 'Ámbar' : 'Amber');
+  const tierName = wallet?.currentLevel?.name || user?.profile?.loyaltyLevel?.name;
+  const tier = resolveTier(tierName);
   const nextLevel = wallet?.nextLevel;
   const delta = nextLevel ? Math.max(0, (nextLevel.minPoints ?? 0) - points) : 0;
   const progress = nextLevel ? Math.min(1, points / (nextLevel.minPoints || 1)) : 1;
+
+  // Group transactions by month for timeline-style display
+  const grouped = groupByMonth(txs, language);
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
@@ -92,8 +95,8 @@ export default function Wallet() {
 
       {loading ? (
         <View style={{ paddingHorizontal: EditorialSpacing.pageGutter, gap: Spacing[6] }}>
-          <SkeletonList count={1} itemHeight={200} />
-          <SkeletonList count={5} itemHeight={64} />
+          <SkeletonList count={1} itemHeight={180} />
+          <SkeletonList count={4} itemHeight={56} />
         </View>
       ) : error && !wallet ? (
         <ErrorState
@@ -106,35 +109,51 @@ export default function Wallet() {
         />
       ) : (
         <FlatList
-          data={txs}
-          keyExtractor={(tx) => tx.id}
+          data={grouped}
+          keyExtractor={(g) => g.month}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{ paddingBottom: Spacing[12] }}
           ListHeaderComponent={
             <View>
               {/* ── Hero balance ── */}
               <FadeIn style={styles.hero}>
-                <Kicker tone="muted">{t ? 'TUS PUNTOS' : 'YOUR POINTS'}</Kicker>
-                <Numeric size="lg" style={{ marginTop: Spacing[3] }}>
+                <Kicker tone="muted">{t ? 'BALANCE DISPONIBLE' : 'AVAILABLE BALANCE'}</Kicker>
+                <Text
+                  style={[
+                    TypePresets.hero,
+                    { color: tier.text, marginTop: Spacing[3] },
+                  ]}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                >
                   {points.toLocaleString(language)}
-                </Numeric>
-                <Caption tone="champagne" style={{ marginTop: Spacing[2] }}>
-                  {t ? `NIVEL ${levelName.toUpperCase()}` : `${levelName.toUpperCase()} TIER`}
-                  {nextLevel
-                    ? t
-                      ? ` · ${delta} pts para ${nextLevel.name}`
-                      : ` · ${delta} pts to ${nextLevel.name}`
-                    : ''}
+                </Text>
+                <Caption style={{ color: tier.base, marginTop: Spacing[2], letterSpacing: 1.4 }}>
+                  {(tier.labelEn ?? '').toUpperCase()} {t ? 'PTS' : 'PTS'}
                 </Caption>
+
                 {nextLevel ? (
-                  <View style={styles.progressTrack}>
-                    <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
+                  <View style={styles.progressBlock}>
+                    <View style={styles.progressRow}>
+                      <Caption tone="muted">
+                        {t ? `${delta} pts para ${nextLevel.name}` : `${delta} pts to ${nextLevel.name}`}
+                      </Caption>
+                      <Caption tone="muted">{Math.round(progress * 100)}%</Caption>
+                    </View>
+                    <View style={styles.progressTrack}>
+                      <View
+                        style={[
+                          styles.progressFill,
+                          { width: `${progress * 100}%`, backgroundColor: tier.base },
+                        ]}
+                      />
+                    </View>
                   </View>
                 ) : null}
               </FadeIn>
 
               {/* ── Actions ── */}
-              <FadeIn delay={120} style={styles.actions}>
+              <FadeIn delay={100} style={styles.actions}>
                 <ActionTile
                   icon="gift"
                   label={t ? 'Canjear' : 'Redeem'}
@@ -142,36 +161,32 @@ export default function Wallet() {
                 />
                 <ActionTile
                   icon="award"
-                  label={t ? 'Niveles' : 'Levels'}
+                  label={t ? 'Niveles' : 'Tiers'}
                   onPress={() => router.push('/(app)/profile/loyalty-levels' as never)}
                 />
               </FadeIn>
 
-              {/* ── History header ── */}
-              <FadeIn delay={180} style={styles.historyHeader}>
-                <Kicker tone="muted">{t ? 'HISTORIAL' : 'HISTORY'}</Kicker>
-                <Heading size="sm" style={{ marginTop: Spacing[1] }}>
-                  {t ? 'Movimientos' : 'Activity'}
-                </Heading>
-                <Hairline variant="subtle" style={{ marginTop: Spacing[4] }} />
+              {/* ── Timeline header ── */}
+              <FadeIn delay={160} style={styles.historyHeader}>
+                <Kicker tone="muted">{t ? 'MOVIMIENTOS' : 'ACTIVITY'}</Kicker>
+                <Hairline variant="subtle" style={{ marginTop: Spacing[2] }} />
               </FadeIn>
             </View>
           }
-          renderItem={({ item }) => <TxRow tx={item} lang={language} t={t} />}
-          ItemSeparatorComponent={() => (
-            <View style={{ paddingHorizontal: EditorialSpacing.pageGutter }}>
-              <Hairline variant="subtle" />
-            </View>
+          renderItem={({ item, index }) => (
+            <FadeIn delay={50 * Math.min(index, 4)}>
+              <MonthGroup group={item} tierAccent={tier.base} lang={language} t={t} />
+            </FadeIn>
           )}
           ListEmptyComponent={
             <View style={{ minHeight: 240 }}>
               <EmptyState
                 icon="clock"
-                title={t ? 'Aún no hay movimientos' : 'No transactions yet'}
+                title={t ? 'Sin movimientos aún' : 'No activity yet'}
                 message={
                   t
                     ? 'Tus puntos ganados y canjeados aparecerán aquí.'
-                    : 'Your earned and spent points will appear here.'
+                    : 'Earned and spent points will appear here.'
                 }
               />
             </View>
@@ -182,6 +197,7 @@ export default function Wallet() {
   );
 }
 
+// ── Action tile ──────────────────────────────
 function ActionTile({
   icon,
   label,
@@ -207,29 +223,98 @@ function ActionTile({
   );
 }
 
-function TxRow({ tx, lang, t }: { tx: Tx; lang: 'es' | 'en'; t: boolean }) {
-  const amount = tx.amount ?? tx.points ?? 0;
-  const isPositive = amount > 0;
+// ── Month group (timeline) ───────────────────
+function MonthGroup({
+  group,
+  tierAccent,
+  lang,
+  t,
+}: {
+  group: MonthGrouped;
+  tierAccent: string;
+  lang: string;
+  t: boolean;
+}) {
   return (
-    <View style={styles.txRow}>
-      <View style={{ flex: 1 }}>
-        <Body weight="semiBold" numberOfLines={1}>
-          {tx.description || tx.reason || (t ? 'Transacción' : 'Transaction')}
-        </Body>
-        <Caption tone="muted" style={{ marginTop: 2 }}>
-          {tx.createdAt ? new Date(tx.createdAt).toLocaleDateString(lang) : ''}
-        </Caption>
-      </View>
-      <Numeric
-        size="sm"
-        tone={isPositive ? 'success' : 'danger'}
-        style={{ marginLeft: Spacing[3] }}
+    <View style={styles.monthGroup}>
+      <Text
+        style={[
+          TypePresets.label,
+          { color: Colors.textMuted, paddingHorizontal: EditorialSpacing.pageGutter },
+        ]}
       >
-        {isPositive ? '+' : ''}
-        {amount}
-      </Numeric>
+        {group.month.toUpperCase()}
+      </Text>
+      <View style={{ marginTop: Spacing[2] }}>
+        {group.txs.map((tx) => (
+          <TxRow key={tx.id} tx={tx} tierAccent={tierAccent} lang={lang} t={t} />
+        ))}
+      </View>
     </View>
   );
+}
+
+// ── Tx row (timeline item) ───────────────────
+function TxRow({
+  tx,
+  tierAccent,
+  lang,
+  t,
+}: {
+  tx: Tx;
+  tierAccent: string;
+  lang: string;
+  t: boolean;
+}) {
+  const amount = tx.amount ?? tx.points ?? 0;
+  const isPositive = amount > 0;
+  const dateStr = tx.createdAt
+    ? new Date(tx.createdAt).toLocaleDateString(lang, { day: 'numeric', month: 'short' })
+    : '';
+  const amountColor = isPositive ? tierAccent : Colors.accentDanger;
+  const sign = isPositive ? '+' : '';
+
+  return (
+    <View style={styles.txRow}>
+      <View style={styles.txDot} />
+      <View style={{ flex: 1 }}>
+        <Body size="sm" weight="medium" numberOfLines={1}>
+          {tx.description || tx.reason || (t ? 'Movimiento' : 'Activity')}
+        </Body>
+        <Caption tone="muted" style={{ marginTop: 1 }}>
+          {dateStr}
+        </Caption>
+      </View>
+      <Text
+        style={[
+          TypePresets.headingSm,
+          { color: amountColor, fontVariant: ['tabular-nums'] },
+        ]}
+      >
+        {sign}
+        {amount}
+      </Text>
+    </View>
+  );
+}
+
+// ── Helpers ──────────────────────────────────
+interface MonthGrouped {
+  month: string;
+  txs: Tx[];
+}
+
+function groupByMonth(txs: Tx[], lang: string): MonthGrouped[] {
+  const map = new Map<string, Tx[]>();
+  for (const tx of txs) {
+    if (!tx.createdAt) continue;
+    const d = new Date(tx.createdAt);
+    const key = d.toLocaleDateString(lang, { month: 'long', year: 'numeric' });
+    const arr = map.get(key) ?? [];
+    arr.push(tx);
+    map.set(key, arr);
+  }
+  return Array.from(map.entries()).map(([month, txs]) => ({ month, txs }));
 }
 
 const styles = StyleSheet.create({
@@ -239,7 +324,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: EditorialSpacing.pageGutter,
     paddingTop: Spacing[2],
-    paddingBottom: Spacing[4],
+    paddingBottom: Spacing[2],
   },
   backBtn: {
     width: 40,
@@ -251,15 +336,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: EditorialSpacing.pageGutter,
     paddingBottom: Spacing[6],
   },
+  progressBlock: {
+    marginTop: Spacing[6],
+  },
+  progressRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: Spacing[2],
+  },
   progressTrack: {
     height: 2,
     backgroundColor: Colors.border,
-    marginTop: Spacing[5],
     overflow: 'hidden',
   },
   progressFill: {
     height: '100%',
-    backgroundColor: Colors.accentPrimary,
   },
   actions: {
     flexDirection: 'row',
@@ -269,11 +360,13 @@ const styles = StyleSheet.create({
   },
   actionTile: {
     flex: 1,
-    minHeight: 80,
+    minHeight: 64,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: Spacing[4],
-    borderRadius: Radius.lg,
+    gap: Spacing[2],
+    paddingVertical: Spacing[3],
+    borderRadius: Radius.sm,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: Colors.border,
     borderTopColor: Colors.highlightTop,
@@ -281,13 +374,23 @@ const styles = StyleSheet.create({
   },
   historyHeader: {
     paddingHorizontal: EditorialSpacing.pageGutter,
-    marginTop: Spacing[10],
+    marginTop: Spacing[8],
     marginBottom: Spacing[2],
+  },
+  monthGroup: {
+    marginTop: Spacing[4],
   },
   txRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: Spacing[3],
     paddingHorizontal: EditorialSpacing.pageGutter,
-    paddingVertical: Spacing[4],
+    paddingVertical: Spacing[3],
+  },
+  txDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: Colors.textMuted,
   },
 });

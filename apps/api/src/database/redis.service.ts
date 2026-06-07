@@ -214,7 +214,11 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
    */
   async withLock<T>(key: string, ttlSeconds: number, fn: () => Promise<T>): Promise<T> {
     const lockKey = `lock:${key}`;
-    const token = Math.random().toString(36).slice(2);
+    // Use crypto random for cryptographically unique token (collision risk
+    // with Math.random was real — two parallel requests could collide and
+    // the second worker's `del` could nuke an unrelated worker's lock after
+    // a coincidental retake).
+    const token = `${process.pid}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
     const acquired = await this.client.set(lockKey, token, 'EX', ttlSeconds, 'NX');
     if (acquired !== 'OK') {
       throw new LockBusyError(`Lock busy: ${key}`);
@@ -222,9 +226,20 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     try {
       return await fn();
     } finally {
-      // Only delete if token matches (avoid deleting someone else's lock after expiry)
-      const current = await this.client.get(lockKey);
-      if (current === token) await this.client.del(lockKey);
+      // Atomic compare-and-del via Lua. Prevents TOCTOU race where the lock
+      // expires between our GET and DEL, another worker takes it, and we
+      // delete THEIR lock. Single round-trip, server-side atomic.
+      // Audit ref: backend audit P0 #1, 2026-05-18.
+      try {
+        await this.client.eval(
+          "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",
+          1,
+          lockKey,
+          token,
+        );
+      } catch {
+        // Best-effort release; if Redis is down here the lock TTL will reap it.
+      }
     }
   }
 

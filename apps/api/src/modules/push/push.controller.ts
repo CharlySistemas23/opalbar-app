@@ -45,7 +45,9 @@ export class PushController {
   @Delete('unregister')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Unregister a device token (e.g. on logout)' })
-  unregister(@Body() dto: UnregisterTokenDto) {
-    return this.pushService.unregister(dto.token);
+  unregister(@CurrentUser() user: User, @Body() dto: UnregisterTokenDto) {
+    // Ownership-scoped delete: only removes the token if it belongs to the
+    // calling user. Audit ref: P0 #5, 2026-05-18.
+    return this.pushService.unregister(dto.token, user.id);
   }
 }

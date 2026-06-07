@@ -1,19 +1,17 @@
 // ─────────────────────────────────────────────
-//  Tabs layout — Editorial Premium
+//  Tabs layout — Editorial Premium bottom tab bar
 //
-//  Tab bar choice: NOT a pill. Editorial doesn't ride on rounded pills.
-//  Instead: a flat bar with a hairline top border and a 2px underline
-//  marker that slides under the active tab. The label is small caps with
-//  letterspacing — same vocabulary as <Kicker>.
+//  Tab bar at the BOTTOM (default expo-router position). Text-only +
+//  underline indicator. No icons — labels carry meaning, underline marks
+//  active.
 //
-//  Motion: underline + label color cross-fade over 240ms outQuint.
-//  Active label uses textPrimary; inactive uses textMuted. No icon scale,
-//  no jump — the underline carries the active state.
+//  NOTE: The previous NOIR pivot attempted to move this to the TOP via
+//  `tabBarPosition` / `sceneStyle paddingTop` workarounds — both broke
+//  the navigator and caused a hard crash. Keep it at the bottom.
 // ─────────────────────────────────────────────
 import { useEffect } from 'react';
 import { Tabs } from 'expo-router';
 import { StyleSheet, Text, View } from 'react-native';
-import { Feather } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, {
   Easing,
@@ -28,23 +26,26 @@ import { Roles } from '@/constants/a11y';
 import { useAppStore } from '@/stores/app.store';
 import { Pressy } from '@/components/ui/Pressy';
 
-type FeatherIcon = React.ComponentProps<typeof Feather>['name'];
-
 interface TabDef {
   route: string;
-  icon: FeatherIcon;
   label: { es: string; en: string };
 }
 
+// Brief del usuario (2026-05-18): "Club Privado Exclusivo + Estatus + Experiencias".
+// Renombres semánticos:
+//   events → 'Experiencias' (engloba eventos + reservas + cortesías + VIP)
+//   bar    → 'Club' (lugar físico — horarios, menús, reviews)
+//   community → 'Comunidad' (sin cambio de slug; cambia el énfasis)
+//   profile → 'Cuenta' (perfil + wallet + QR + config)
 const TABS: TabDef[] = [
-  { route: 'home', icon: 'home', label: { es: 'INICIO', en: 'HOME' } },
-  { route: 'events', icon: 'calendar', label: { es: 'EVENTOS', en: 'EVENTS' } },
-  { route: 'bar', icon: 'map-pin', label: { es: 'EL BAR', en: 'THE BAR' } },
-  { route: 'community', icon: 'users', label: { es: 'COMUNIDAD', en: 'COMMUNITY' } },
-  { route: 'profile', icon: 'user', label: { es: 'PERFIL', en: 'PROFILE' } },
+  { route: 'home', label: { es: 'Inicio', en: 'Home' } },
+  { route: 'events', label: { es: 'Experiencias', en: 'Experiences' } },
+  { route: 'bar', label: { es: 'Club', en: 'Club' } },
+  { route: 'community', label: { es: 'Comunidad', en: 'Community' } },
+  { route: 'profile', label: { es: 'Cuenta', en: 'Account' } },
 ];
 
-function EditorialTabBar({ state, navigation }: any) {
+function NoirTopBar({ state, navigation }: any) {
   const { language } = useAppStore();
 
   return (
@@ -70,7 +71,6 @@ function EditorialTabBar({ state, navigation }: any) {
             <TabItem
               key={route.key}
               focused={focused}
-              icon={def.icon}
               label={def.label[language]}
               onPress={onPress}
             />
@@ -83,12 +83,10 @@ function EditorialTabBar({ state, navigation }: any) {
 
 function TabItem({
   focused,
-  icon,
   label,
   onPress,
 }: {
   focused: boolean;
-  icon: FeatherIcon;
   label: string;
   onPress: () => void;
 }) {
@@ -116,17 +114,14 @@ function TabItem({
       accessibilityState={{ selected: focused }}
       style={styles.tab}
     >
-      <Feather
-        name={icon}
-        size={20}
-        color={focused ? Colors.textPrimary : Colors.textMuted}
-      />
       <Text
         style={[
-          TypePresets.kicker,
+          TypePresets.subhead,
           {
             color: focused ? Colors.textPrimary : Colors.textMuted,
-            marginTop: Spacing[1],
+            textAlign: 'center',
+            fontSize: 13,
+            letterSpacing: 0.3,
           },
         ]}
         numberOfLines={1}
@@ -139,12 +134,16 @@ function TabItem({
 }
 
 export default function TabsLayout() {
+  // Tab bar custom at the bottom (NOT top — top position caused crashes
+  // because expo-router v6 doesn't support `tabBarPosition` and the
+  // workaround with `tabBarStyle: position absolute + sceneStyle paddingTop`
+  // broke the navigator layout). Stays at the bottom with custom styling.
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
       }}
-      tabBar={(props) => <EditorialTabBar {...props} />}
+      tabBar={(props) => <NoirTopBar {...props} />}
     >
       <Tabs.Screen name="home" />
       <Tabs.Screen name="events" />
@@ -159,26 +158,27 @@ const styles = StyleSheet.create({
   safe: {
     backgroundColor: Colors.bgPrimary,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: Colors.border,
+    borderTopColor: Colors.borderStrong,
   },
   bar: {
     flexDirection: 'row',
     paddingHorizontal: Spacing[2],
-    paddingTop: Spacing[2],
-    minHeight: 64,
+    paddingTop: Spacing[1],
   },
   tab: {
     flex: 1,
+    paddingVertical: Spacing[3],
+    paddingHorizontal: Spacing[2],
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: Spacing[2],
-    minHeight: 56,
+    minHeight: 44,
   },
   underline: {
     position: 'absolute',
-    bottom: 0,
-    height: 2,
-    width: '40%',
-    backgroundColor: Colors.textPrimary,
+    bottom: -StyleSheet.hairlineWidth,
+    left: '20%',
+    right: '20%',
+    height: 1,
+    backgroundColor: Colors.accentPrimary,
   },
 });

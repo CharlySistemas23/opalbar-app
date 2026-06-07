@@ -1,64 +1,68 @@
 // ─────────────────────────────────────────────
-//  OPALBAR Design Tokens — Mobile · Editorial Premium
+//  OPALBAR Design Tokens — Mobile · NOIR ABSOLUTE
 //  Single source of truth for all visual values.
 //  Edit here → propagates to every screen.
 //
-//  Direction: A — Editorial Premium (decided 2026-05-17).
-//  See gbrain page: opalbar/decisions/design-direction-editorial-premium
+//  Direction: Noir Absolute (decided 2026-05-18 after Editorial pivot).
+//  Filosofía: Amex Centurion meets Cartier app — black absolute base,
+//  bone text, brushed gold accent. Sharp geometry, dense layouts, no
+//  rounded-everything. Tier identity carries through tones, not gradients.
 // ─────────────────────────────────────────────
 
 // ── Colors ───────────────────────────────────
 //
-// Palette philosophy (Editorial Premium):
-//  · Warm paper-dark base (no purple/blue tint). Reads as "coffee + leather"
-//    rather than "tech dark mode". Backgrounds sit on a single hue family.
-//  · Restrained accent: amber (burnished gold) + champagne. Used SPARINGLY —
-//    a screen should not have more than 2-3 accent surfaces.
-//  · Hairlines use alpha over background so they read as "insinuated"
-//    separations instead of flat gray lines.
-//  · High-contrast text for editorial readability (parchment-on-paper).
+// Palette philosophy (NOIR ABSOLUTE):
+//  · Pure black `#000` base. Surfaces step up one notch (`#0A0808`/`#141210`)
+//    to read depth without warmth tint.
+//  · Text in bone white (`#EAE2D0`) — premium, not pure white. Slight
+//    yellow undertone reads as "ivory paper", not "tech".
+//  · Single accent: brushed gold `#C9A961` (matte, low-saturation).
+//    No more amber/orange. Cooler, more jewelry-grade.
+//  · Loyalty tiers refined to metallic tones (bronze/silver/gold/platinum).
+//  · Borders barely visible — depth comes from typography and spacing,
+//    not from outlining.
 export const Colors = {
-  // Backgrounds — warm paper-dark family
-  bgPrimary: '#100E0C',
-  bgCard: '#171411',
-  bgElevated: '#1F1B17',
-  bgSubtle: 'rgba(246,241,231,0.025)',
-  bgOverlay: 'rgba(8,7,6,0.78)',
+  // Backgrounds — true black absolute
+  bgPrimary: '#000000',
+  bgCard: '#0A0808',
+  bgElevated: '#141210',
+  bgSubtle: 'rgba(234,226,208,0.018)',
+  bgOverlay: 'rgba(0,0,0,0.86)',
 
-  // Text — warm parchment scale, 5 steps max
-  textPrimary: '#F6F1E7',
-  textSecondary: '#B8B1A2',
-  textMuted: '#827C71',
-  textDisabled: '#56524A',
-  textInverse: '#100E0C',
+  // Text — bone scale, premium not pure white
+  textPrimary: '#EAE2D0',
+  textSecondary: '#9B9587',
+  textMuted: '#6B6760',
+  textDisabled: '#403E3A',
+  textInverse: '#000000',
 
-  // Accent — burnished amber + refined champagne
-  accentPrimary: '#E89F4A',
-  accentPrimaryLight: '#F0B772',
-  accentPrimaryDark: '#B97A26',
-  accentChampagne: '#D7BE94',
-  accentChampagneDark: '#A8966F',
+  // Accent — brushed gold (matte). Was amber → now jewelry-grade gold.
+  accentPrimary: '#C9A961',
+  accentPrimaryLight: '#D9BC7E',
+  accentPrimaryDark: '#9A7F45',
+  accentChampagne: '#D7C9A7',
+  accentChampagneDark: '#A89B7C',
 
-  // Semantic — muted, editorial. No neon.
-  accentSuccess: '#7BB594',
-  accentDanger: '#D96A6A',
-  accentWarning: '#D9A35D',
-  accentInfo: '#85ADCE',
+  // Semantic — kept refined, no neon
+  accentSuccess: '#6FA88A',
+  accentDanger: '#C46868',
+  accentWarning: '#C9A961',
+  accentInfo: '#7FA0BC',
 
-  // Loyalty Levels — warmed
-  levelBronce: '#B07A3F',
-  levelPlata: '#BBB7AD',
-  levelOro: '#E0BF65',
-  levelDiamante: '#A8C9D4',
+  // Loyalty Levels — metallic, refined
+  levelBronce: '#A87148',
+  levelPlata: '#B4B0A6',
+  levelOro: '#C9A961',
+  levelDiamante: '#9FB6BE',
 
-  // Borders & separators — alpha over background, warm parchment tint
-  border: 'rgba(246,241,231,0.06)',
-  borderStrong: 'rgba(246,241,231,0.10)',
-  borderSubtle: 'rgba(246,241,231,0.035)',
-  highlightTop: 'rgba(246,241,231,0.05)',
+  // Borders & separators — barely visible
+  border: 'rgba(234,226,208,0.05)',
+  borderStrong: 'rgba(234,226,208,0.09)',
+  borderSubtle: 'rgba(234,226,208,0.025)',
+  highlightTop: 'rgba(234,226,208,0.04)',
 
-  // Legacy alias — kept temporarily, map to borderStrong
-  borderLight: 'rgba(246,241,231,0.10)',
+  // Legacy alias
+  borderLight: 'rgba(234,226,208,0.09)',
 
   // Misc
   white: '#FFFFFF',
@@ -209,72 +213,74 @@ export const TypePresets = {
     letterSpacing: 0,
   },
 
-  // Editorial intro (serif body)
+  // Editorial intro (sans body — quitamos serif para densidad premium)
   lead: {
-    fontFamily: Typography.fontFamily.serif,
-    fontSize: 20,
-    lineHeight: 20 * 1.5,
+    fontFamily: Typography.fontFamily.sans,
+    fontSize: 16,
+    lineHeight: 16 * 1.5,
     letterSpacing: -0.1,
   },
 
-  // Headings (Fraunces)
+  // Headings (Fraunces) — bajados para densidad premium tipo concierge
   headingSm: {
     fontFamily: Typography.fontFamily.serifSemiBold,
-    fontSize: 22,
-    lineHeight: 22 * 1.2,
-    letterSpacing: -0.3,
+    fontSize: 17,
+    lineHeight: 17 * 1.25,
+    letterSpacing: -0.2,
   },
   heading: {
     fontFamily: Typography.fontFamily.serifSemiBold,
-    fontSize: 28,
-    lineHeight: 28 * 1.15,
-    letterSpacing: -0.4,
+    fontSize: 20,
+    lineHeight: 20 * 1.2,
+    letterSpacing: -0.3,
   },
   headingLg: {
     fontFamily: Typography.fontFamily.serifSemiBold,
-    fontSize: 34,
-    lineHeight: 34 * 1.1,
-    letterSpacing: -0.6,
+    fontSize: 24,
+    lineHeight: 24 * 1.15,
+    letterSpacing: -0.4,
   },
 
-  // Display & Hero (Fraunces, generous tracking)
+  // Display & Hero — restraint. No más 72pt en hero blocks; el "premium"
+  // viene de la composición, no del tamaño tipográfico.
   display: {
-    fontFamily: Typography.fontFamily.serifMedium,
-    fontSize: 44,
-    lineHeight: 44 * 1.05,
-    letterSpacing: -0.8,
+    fontFamily: Typography.fontFamily.serifSemiBold,
+    fontSize: 28,
+    lineHeight: 28 * 1.1,
+    letterSpacing: -0.5,
   },
   displayLg: {
-    fontFamily: Typography.fontFamily.serifMedium,
-    fontSize: 56,
-    lineHeight: 56 * 1.05,
-    letterSpacing: -1.2,
+    fontFamily: Typography.fontFamily.serifSemiBold,
+    fontSize: 34,
+    lineHeight: 34 * 1.08,
+    letterSpacing: -0.7,
   },
   hero: {
-    fontFamily: Typography.fontFamily.serifMedium,
-    fontSize: 72,
-    lineHeight: 72 * 1.02,
-    letterSpacing: -1.8,
+    fontFamily: Typography.fontFamily.serifSemiBold,
+    fontSize: 40,
+    lineHeight: 40 * 1.05,
+    letterSpacing: -1,
   },
 
-  // Numeric data (serif, tabular feel for editorial stat blocks)
+  // Numeric data — serif Fraunces. Mono (Courier) NO está cargado y
+  // referenciarlo crasheaba el app en runtime (crash NOIR v3, 2026-05-18).
   numericSm: {
     fontFamily: Typography.fontFamily.serifMedium,
-    fontSize: 20,
-    lineHeight: 20 * 1.1,
+    fontSize: 17,
+    lineHeight: 17 * 1.1,
     letterSpacing: -0.2,
   },
   numeric: {
     fontFamily: Typography.fontFamily.serifMedium,
-    fontSize: 30,
-    lineHeight: 30 * 1.05,
-    letterSpacing: -0.4,
+    fontSize: 24,
+    lineHeight: 24 * 1.05,
+    letterSpacing: -0.3,
   },
   numericLg: {
     fontFamily: Typography.fontFamily.serifMedium,
-    fontSize: 48,
-    lineHeight: 48 * 1,
-    letterSpacing: -0.8,
+    fontSize: 36,
+    lineHeight: 36 * 1,
+    letterSpacing: -0.6,
   },
 } as const;
 
@@ -312,16 +318,17 @@ export const EditorialSpacing = {
 } as const;
 
 // ── Border Radius ────────────────────────────
-// Editorial: less rounded than tech-modern. Sharper, more "printed".
+// NOIR ABSOLUTE: sharp geometry. NO rounded-everything. The "premium"
+// reads from confident corners + dense composition, not from blob shapes.
 export const Radius = {
-  xs: 2,
-  sm: 4,
-  md: 8,
-  lg: 12,
-  button: 12,
-  card: 14,
-  xl: 18,
-  '2xl': 22,
+  xs: 0,
+  sm: 2,
+  md: 3,
+  lg: 4,
+  button: 4,
+  card: 4,
+  xl: 6,
+  '2xl': 8,
   full: 9999,
 } as const;
 

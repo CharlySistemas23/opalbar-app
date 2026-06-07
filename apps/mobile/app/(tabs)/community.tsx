@@ -8,13 +8,14 @@
 //  live in src/components/community/ so this file stays focused on data
 //  and state.
 // ─────────────────────────────────────────────
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   FlatList,
   RefreshControl,
   StyleSheet,
+  TextInput,
   View,
 } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -37,6 +38,8 @@ import {
 } from '@/constants/tokens';
 import { HitSlop, Roles } from '@/constants/a11y';
 import {
+  Body,
+  Caption,
   Hairline,
   Heading,
   Kicker,
@@ -49,8 +52,10 @@ import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 
 import { CreateSheet } from '@/components/community/CreateSheet';
+import { MemberCard } from '@/components/community/MemberCard';
 import { PostCard, type CommunityPost } from '@/components/community/PostCard';
 import { StoryStripe, type StoryItem } from '@/components/community/StoryStripe';
+import { friendshipsApi, usersApi } from '@/api/client';
 
 // ── Avatar palette ───────────────────────────
 const AVATAR_COLORS = ['#F4A340', '#60A5FA', '#A855F7', '#38C793', '#E45858', '#EC4899'];
@@ -100,7 +105,7 @@ export default function Community() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'foryou' | 'following'>('foryou');
+  const [activeTab, setActiveTab] = useState<'members' | 'foryou' | 'following'>('members');
   const [showCreateSheet, setShowCreateSheet] = useState(false);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
@@ -428,14 +433,17 @@ export default function Community() {
       {/* ── Tabs ────────────────────────────── */}
       <Tabs
         value={activeTab}
-        onChange={(v) => setActiveTab(v as 'foryou' | 'following')}
+        onChange={(v) => setActiveTab(v as 'members' | 'foryou' | 'following')}
         options={[
-          { value: 'foryou', label: t ? 'Para ti' : 'For you' },
+          { value: 'members', label: t ? 'Miembros' : 'Members' },
+          { value: 'foryou', label: t ? 'Feed' : 'Feed' },
           { value: 'following', label: t ? 'Siguiendo' : 'Following' },
         ]}
       />
 
-      {loading && posts.length === 0 ? (
+      {activeTab === 'members' ? (
+        <MembersPanel t={t} router={router} />
+      ) : loading && posts.length === 0 ? (
         <ActivityIndicator
           color={Colors.textMuted}
           style={{ marginTop: Spacing[10] }}
@@ -601,4 +609,154 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing[12],
     flexGrow: 1,
   },
+  searchWrap: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[3],
+    paddingBottom: Spacing[2],
+  },
+  searchInput: {
+    backgroundColor: Colors.bgCard,
+    borderRadius: 4,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+    paddingHorizontal: Spacing[4],
+    paddingVertical: Spacing[3],
+    color: Colors.textPrimary,
+    fontSize: 14,
+    fontFamily: 'Inter_400Regular',
+  },
+  memberList: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingBottom: Spacing[12],
+    gap: Spacing[3],
+  },
 });
+
+// ── MembersPanel — Soho House networking view ──
+function MembersPanel({ t, router }: { t: boolean; router: any }) {
+  const [query, setQuery] = useState('');
+  const [members, setMembers] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadConnected = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const r = await friendshipsApi.list(50);
+      const list = r.data?.data?.data ?? r.data?.data ?? r.data ?? [];
+      setMembers(Array.isArray(list) ? list : []);
+    } catch (err) {
+      setError(apiError(err));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (query.trim().length === 0) {
+      loadConnected();
+      return;
+    }
+    const handle = setTimeout(async () => {
+      setLoading(true);
+      try {
+        const r = await usersApi.search(query.trim(), 30);
+        const list = r.data?.data?.data ?? r.data?.data ?? [];
+        setMembers(Array.isArray(list) ? list : []);
+        setError(null);
+      } catch (err) {
+        setError(apiError(err));
+      } finally {
+        setLoading(false);
+      }
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [query, loadConnected]);
+
+  // Extract member-lite shape from friendship row OR user search result
+  const items = useMemo(
+    () =>
+      members.map((m: any) => {
+        // friendship row has m.friend = { id, profile }
+        const u = m.friend ?? m.user ?? m;
+        return {
+          id: u.id,
+          firstName: u.profile?.firstName ?? u.firstName,
+          lastName: u.profile?.lastName ?? u.lastName,
+          avatarUrl: u.profile?.avatarUrl ?? u.avatarUrl,
+          loyaltyLevel: u.profile?.loyaltyLevel ?? u.loyaltyLevel,
+          profession: u.profile?.profession ?? u.profession,
+          city: u.profile?.city ?? u.city,
+          country: u.profile?.country ?? u.country,
+          connectionState: (m.status === 'ACCEPTED' || m.friend) ? 'connected' : 'none',
+        };
+      }),
+    [members],
+  );
+
+  return (
+    <View style={{ flex: 1 }}>
+      <View style={styles.searchWrap}>
+        <TextInput
+          value={query}
+          onChangeText={setQuery}
+          placeholder={t ? 'Buscar miembros…' : 'Search members…'}
+          placeholderTextColor={Colors.textMuted}
+          autoCapitalize="none"
+          autoCorrect={false}
+          accessibilityLabel={t ? 'Buscar miembros' : 'Search members'}
+          style={styles.searchInput}
+        />
+      </View>
+
+      {loading && items.length === 0 ? (
+        <ActivityIndicator color={Colors.textMuted} style={{ marginTop: Spacing[10] }} />
+      ) : error ? (
+        <ErrorState
+          message={error}
+          retryLabel={t ? 'Reintentar' : 'Retry'}
+          onRetry={loadConnected}
+        />
+      ) : items.length === 0 ? (
+        <EmptyState
+          icon="users"
+          title={t ? 'Aún sin conexiones' : 'No connections yet'}
+          message={
+            query
+              ? t
+                ? 'Sin resultados para tu búsqueda.'
+                : 'No results for your search.'
+              : t
+                ? 'Empieza a conectar con otros miembros del club.'
+                : 'Start connecting with other club members.'
+          }
+        />
+      ) : (
+        <FlatList
+          data={items}
+          keyExtractor={(m) => m.id}
+          contentContainerStyle={styles.memberList}
+          showsVerticalScrollIndicator={false}
+          ItemSeparatorComponent={() => <View style={{ height: Spacing[3] }} />}
+          renderItem={({ item }) => (
+            <MemberCard
+              member={item}
+              connectionState={item.connectionState as 'none' | 'pending' | 'connected'}
+              onPress={() => router.push(`/(app)/users/${item.id}` as never)}
+              onMessage={() => router.push(`/(app)/messages/${item.id}` as never)}
+              onConnect={async () => {
+                try {
+                  await usersApi.follow(item.id);
+                } catch {
+                  /* ignore */
+                }
+              }}
+              t={t}
+            />
+          )}
+        />
+      )}
+    </View>
+  );
+}

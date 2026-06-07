@@ -74,10 +74,15 @@ export class MessagesGateway implements OnGatewayConnection, OnGatewayDisconnect
         joinedThreadIds: new Set(),
       };
 
+      // Per-user room — used by broadcastPresence to target individual users
+      // instead of the global namespace. Mandatory; without this, presence
+      // events have no recipients to land on.
+      socket.join(`user:${payload.sub}`);
+
       // Presence
       const count = (this.online.get(payload.sub) ?? 0) + 1;
       this.online.set(payload.sub, count);
-      if (count === 1) this.broadcastPresence(payload.sub, true);
+      if (count === 1) void this.broadcastPresence(payload.sub, true);
 
       this.logger.log(`user ${payload.sub} connected (sockets=${count})`);
     } catch (err) {
@@ -106,7 +111,7 @@ export class MessagesGateway implements OnGatewayConnection, OnGatewayDisconnect
       } catch (err) {
         this.logger.warn(`lastSeenAt update failed for ${userId}: ${(err as Error).message}`);
       }
-      this.broadcastPresence(userId, false, lastSeenAt);
+      void this.broadcastPresence(userId, false, lastSeenAt);
     } else {
       this.online.set(userId, count);
     }
@@ -266,13 +271,51 @@ export class MessagesGateway implements OnGatewayConnection, OnGatewayDisconnect
     return `thread:${threadId}`;
   }
 
-  private broadcastPresence(userId: string, online: boolean, lastSeenAt?: Date) {
+  // Limit presence to "people who can see this user": followers (one-way
+  // discovery), accepted friendships, and staff (admin/moderator dashboards
+  // may want to know who's online). Anonymous viewers, blocked users, or
+  // strangers must NOT receive presence pings.
+  // Audit ref: backend audit P0 #3, 2026-05-18 — was leaking via this.server.emit.
+  private async broadcastPresence(userId: string, online: boolean, lastSeenAt?: Date) {
     const at = (lastSeenAt ?? new Date()).toISOString();
-    this.server.emit(online ? 'presence:online' : 'presence:offline', {
-      userId,
-      at,
-      lastSeenAt: online ? null : at,
-    });
+    const event = online ? 'presence:online' : 'presence:offline';
+    const payload = { userId, at, lastSeenAt: online ? null : at };
+
+    try {
+      const [followers, friendships, staff] = await Promise.all([
+        this.prisma.follow.findMany({
+          where: { targetUserId: userId },
+          select: { userId: true },
+        }),
+        this.prisma.friendship.findMany({
+          where: {
+            status: 'ACCEPTED',
+            OR: [{ requesterId: userId }, { addresseeId: userId }],
+          },
+          select: { requesterId: true, addresseeId: true },
+        }),
+        this.prisma.user.findMany({
+          where: { role: { in: ['ADMIN', 'SUPER_ADMIN', 'MODERATOR'] } },
+          select: { id: true },
+        }),
+      ]);
+
+      const recipientIds = new Set<string>();
+      followers.forEach((f) => recipientIds.add(f.userId));
+      friendships.forEach((f) => {
+        recipientIds.add(f.requesterId === userId ? f.addresseeId : f.requesterId);
+      });
+      staff.forEach((s) => recipientIds.add(s.id));
+      // The actor's own other sockets — they can see themselves online.
+      recipientIds.add(userId);
+
+      // Emit only to per-user rooms (handleConnection joins `user:{id}`).
+      for (const rid of recipientIds) {
+        this.server.to(`user:${rid}`).emit(event, payload);
+      }
+    } catch (err) {
+      this.logger.warn(`broadcastPresence failed for ${userId}: ${err}`);
+    }
   }
 
   private extractToken(socket: Socket): string | null {

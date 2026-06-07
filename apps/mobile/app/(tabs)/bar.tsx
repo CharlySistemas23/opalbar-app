@@ -252,8 +252,22 @@ export default function BarTab() {
           ) : null}
         </View>
 
+        {/* ── Primary reservation CTA ──────── */}
+        <FadeIn delay={420}>
+          <View style={styles.primaryCtaWrap}>
+            <Button
+              label={t ? 'Reservar mesa' : 'Reserve a table'}
+              onPress={() => router.push('/(app)/reservations/new' as never)}
+              variant="primary"
+              size="lg"
+              fullWidth
+              rightIcon={<Feather name="arrow-right" size={18} color={Colors.textInverse} />}
+            />
+          </View>
+        </FadeIn>
+
         {/* ── Quick actions row ─────────────── */}
-        <FadeIn delay={430}>
+        <FadeIn delay={460}>
           <View style={styles.actionsRow}>
             <ActionTile
               icon="navigation"
@@ -319,6 +333,52 @@ export default function BarTab() {
                 accessibilityHint={t ? 'Inicia una llamada' : 'Starts a call'}
               />
             ) : null}
+          </View>
+        </Section>
+
+        <Hairline style={styles.sectionDivider} />
+
+        {/* ── Carta del Club ──────────────── */}
+        <Section title={t ? 'La carta' : 'The menu'}>
+          <View style={styles.menuTiles}>
+            <Pressy
+              onPress={() =>
+                venue.website
+                  ? Linking.openURL(venue.website).catch(() => {})
+                  : null
+              }
+              haptic="select"
+              accessibilityRole={Roles.button}
+              accessibilityLabel={t ? 'Ver carta de cocteles' : 'View cocktails menu'}
+              style={styles.menuTile}
+            >
+              <Feather name="droplet" size={20} color={Colors.accentChampagne} />
+              <Body size="sm" weight="semiBold" style={{ marginTop: Spacing[2] }}>
+                {t ? 'Cocteles' : 'Cocktails'}
+              </Body>
+              <Caption tone="muted" style={{ marginTop: 2 }}>
+                {t ? 'Signature & clásicos' : 'Signature & classics'}
+              </Caption>
+            </Pressy>
+            <Pressy
+              onPress={() =>
+                venue.website
+                  ? Linking.openURL(venue.website).catch(() => {})
+                  : null
+              }
+              haptic="select"
+              accessibilityRole={Roles.button}
+              accessibilityLabel={t ? 'Ver carta de cocina' : 'View kitchen menu'}
+              style={styles.menuTile}
+            >
+              <Feather name="coffee" size={20} color={Colors.accentChampagne} />
+              <Body size="sm" weight="semiBold" style={{ marginTop: Spacing[2] }}>
+                {t ? 'Cocina' : 'Kitchen'}
+              </Body>
+              <Caption tone="muted" style={{ marginTop: 2 }}>
+                {t ? 'Tapas, snacks, platos' : 'Tapas, snacks, plates'}
+              </Caption>
+            </Pressy>
           </View>
         </Section>
 
@@ -559,12 +619,37 @@ const styles = StyleSheet.create({
     gap: Spacing[2],
   },
 
+  // Primary reservation CTA
+  primaryCtaWrap: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    marginTop: Spacing[6],
+  },
+
+  // Menu tiles
+  menuTiles: {
+    flexDirection: 'row',
+    gap: Spacing[3],
+  },
+  menuTile: {
+    flex: 1,
+    minHeight: 88,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+    borderTopColor: Colors.highlightTop,
+    borderRadius: Radius.md,
+    paddingVertical: Spacing[4],
+    paddingHorizontal: Spacing[3],
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+    backgroundColor: Colors.bgCard,
+  },
+
   // Actions row
   actionsRow: {
     flexDirection: 'row',
     gap: Spacing[3],
     paddingHorizontal: EditorialSpacing.pageGutter,
-    marginTop: Spacing[6],
+    marginTop: Spacing[3],
   },
   actionTile: {
     flex: 1,

@@ -102,11 +102,16 @@ export class ReservationsService {
         where: { userId_eventId: { userId, eventId: eventToAttend.id } },
       });
       if (!alreadyAttending) {
+        // Increment capacity by partySize (not 1). Was a bug — decrement
+        // side used partySize, so cancellations decremented more than the
+        // creation incremented, leaving the counter below zero and
+        // permanently misreporting `is at full capacity`.
+        // Audit ref: backend audit P0 #9, 2026-05-18.
         await this.prisma.$transaction([
           this.prisma.eventAttendee.create({ data: { userId, eventId: eventToAttend.id } }),
           this.prisma.event.update({
             where: { id: eventToAttend.id },
-            data: { currentCapacity: { increment: 1 } },
+            data: { currentCapacity: { increment: dto.partySize } },
           }),
         ]);
       }
