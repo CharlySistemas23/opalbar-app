@@ -1,8 +1,15 @@
-import { BadRequestException, Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { FriendPolicy, User } from '@prisma/client';
+import { IsEnum } from 'class-validator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { FriendshipsService } from './friendships.service';
+
+// Backend audit P1 #7 (2026-05-18): enum validated at boundary via DTO.
+class UpdateFriendPolicyDto {
+  @IsEnum(FriendPolicy)
+  policy: FriendPolicy;
+}
 
 @ApiTags('Friendships')
 @ApiBearerAuth()
@@ -76,11 +83,7 @@ export class FriendshipsController {
 
   @Patch('me/policy')
   @ApiOperation({ summary: 'Update friend-request policy (EVERYONE | FRIENDS_OF_FRIENDS | NONE)' })
-  updatePolicy(@CurrentUser() me: User, @Body('policy') policy: FriendPolicy) {
-    const allowed = Object.values(FriendPolicy);
-    if (!policy || !allowed.includes(policy)) {
-      throw new BadRequestException('policy must be EVERYONE | FRIENDS_OF_FRIENDS | NONE');
-    }
-    return this.friendships.updateFriendPolicy(me.id, policy);
+  updatePolicy(@CurrentUser() me: User, @Body() dto: UpdateFriendPolicyDto) {
+    return this.friendships.updateFriendPolicy(me.id, dto.policy);
   }
 }

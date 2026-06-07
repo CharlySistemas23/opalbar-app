@@ -232,9 +232,13 @@ export class MessagesService {
     });
     if (!ensureMembership) throw new NotFoundException('Thread not found');
 
+    // Audit P1 #10 (2026-05-18): order by createdAt DESC with id as a stable
+    // tiebreak. Two messages created in the same millisecond would otherwise
+    // jump the cursor or duplicate items because Prisma falls back to row
+    // order. Using id as secondary key gives deterministic pagination.
     const messages = await this.prisma.message.findMany({
       where: { threadId, deletedAt: null },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: Math.min(limit, 100),
       ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
       include: {
@@ -245,11 +249,16 @@ export class MessagesService {
       },
     });
 
-    // Mark incoming ones as read
-    await this.prisma.message.updateMany({
-      where: { threadId, senderId: { not: meId }, isRead: false },
-      data: { isRead: true },
-    });
+    // Audit P1 #10 (2026-05-18): markRead used to fire on EVERY page including
+    // history scrolls — marking messages the user hasn't actually seen in the
+    // viewport. Now it only fires on the initial fetch (cursor === undefined).
+    // The mobile-side debounce (also P1) caps it to one call per visible-burst.
+    if (!cursor) {
+      await this.prisma.message.updateMany({
+        where: { threadId, senderId: { not: meId }, isRead: false },
+        data: { isRead: true },
+      });
+    }
 
     return messages.reverse();
   }

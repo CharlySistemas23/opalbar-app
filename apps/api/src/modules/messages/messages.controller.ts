@@ -1,9 +1,43 @@
 import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { User } from '@prisma/client';
+import { IsInt, IsOptional, IsString, Length, Max, Min } from 'class-validator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { ThrottleWrite } from '../../common/decorators/throttle-custom.decorator';
 import { MessagesService } from './messages.service';
+
+// ── DTOs ────────────────────────────────────
+// Backend audit P1 #6 (2026-05-18): controllers used inline `@Body('key')`
+// pickers that bypassed the global ValidationPipe (whitelist + forbid extras
+// + length caps). All inputs now go through validated DTOs so unknown fields
+// are rejected and pathological lengths are caught at the boundary.
+
+class CreateThreadDto {
+  @IsString()
+  @Length(1, 64)
+  userId: string;
+}
+
+class SendMessageDto {
+  @IsOptional() @IsString() @Length(1, 4000)
+  content?: string;
+  @IsOptional() @IsString() @Length(1, 2048)
+  imageUrl?: string;
+  @IsOptional() @IsString() @Length(1, 64)
+  stickerKey?: string;
+  @IsOptional() @IsString() @Length(1, 2048)
+  audioUrl?: string;
+  @IsOptional() @IsInt() @Min(1) @Max(600)
+  audioDurationSec?: number;
+  @IsOptional() @IsString() @Length(1, 64)
+  replyToId?: string;
+}
+
+class ReactToMessageDto {
+  // Single emoji string, capped at 16 bytes (a 4-byte emoji + ZWJ chain).
+  @IsString() @Length(1, 16)
+  emoji: string;
+}
 
 @ApiTags('Messages')
 @ApiBearerAuth()
@@ -52,8 +86,8 @@ export class MessagesController {
 
   @Post('threads')
   @ApiOperation({ summary: 'Create or fetch thread with another user' })
-  createThread(@CurrentUser() me: User, @Body('userId') userId: string) {
-    return this.messagesService.getOrCreateThread(me.id, userId);
+  createThread(@CurrentUser() me: User, @Body() dto: CreateThreadDto) {
+    return this.messagesService.getOrCreateThread(me.id, dto.userId);
   }
 
   @Get('threads/:id')
@@ -80,22 +114,15 @@ export class MessagesController {
   sendMessage(
     @CurrentUser() me: User,
     @Param('id') id: string,
-    @Body() body: {
-      content?: string;
-      imageUrl?: string;
-      stickerKey?: string;
-      audioUrl?: string;
-      audioDurationSec?: number;
-      replyToId?: string;
-    },
+    @Body() dto: SendMessageDto,
   ) {
     return this.messagesService.sendMessage(me.id, id, {
-      content: body.content,
-      imageUrl: body.imageUrl,
-      stickerKey: body.stickerKey,
-      audioUrl: body.audioUrl,
-      audioDurationSec: body.audioDurationSec,
-      replyToId: body.replyToId,
+      content: dto.content,
+      imageUrl: dto.imageUrl,
+      stickerKey: dto.stickerKey,
+      audioUrl: dto.audioUrl,
+      audioDurationSec: dto.audioDurationSec,
+      replyToId: dto.replyToId,
     });
   }
 
@@ -112,9 +139,9 @@ export class MessagesController {
   reactToMessage(
     @CurrentUser() me: User,
     @Param('messageId') messageId: string,
-    @Body('emoji') emoji: string,
+    @Body() dto: ReactToMessageDto,
   ) {
-    return this.messagesService.reactToMessage(me.id, messageId, emoji);
+    return this.messagesService.reactToMessage(me.id, messageId, dto.emoji);
   }
 
   @Delete(':messageId/react/:emoji')

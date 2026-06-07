@@ -43,16 +43,41 @@ export class AdminService {
     const where: any = audience === 'ADMINS'
       ? { role: { in: ['ADMIN', 'SUPER_ADMIN', 'MODERATOR'] } }
       : { status: 'ACTIVE' };
-    const users = await this.prisma.user.findMany({ where, select: { id: true } });
-    const { sent } = await this.notifications.createForUsers(
-      users.map((u) => u.id),
-      {
-        type: NotificationType.SYSTEM,
-        title,
-        body,
-        data: { type: 'BROADCAST', audience },
-      },
-    );
+
+    // Cursor-paginated batching. Backend audit P1 #2 (2026-05-18) — previous
+    // `findMany` with no LIMIT was OOM-prone for audience='ALL' on large
+    // user tables. Mirrors the fix in notifications.service.ts
+    // broadcastToAllActiveUsers (commit 5b9d4f7).
+    const BATCH = 500;
+    let totalUsers = 0;
+    let totalSent = 0;
+    let cursor: string | undefined;
+    // Safety cap to prevent runaway loops in case of corrupt cursor state.
+    let safety = 200;
+    while (safety-- > 0) {
+      const page = await this.prisma.user.findMany({
+        where,
+        select: { id: true },
+        orderBy: { id: 'asc' },
+        take: BATCH,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      });
+      if (page.length === 0) break;
+      totalUsers += page.length;
+      const { sent } = await this.notifications.createForUsers(
+        page.map((u) => u.id),
+        {
+          type: NotificationType.SYSTEM,
+          title,
+          body,
+          data: { type: 'BROADCAST', audience },
+        },
+      );
+      totalSent += sent;
+      if (page.length < BATCH) break;
+      cursor = page[page.length - 1].id;
+    }
+
     // Persistir en historial para que el admin vea qué mando, cuando y a cuantos.
     if (sentById) {
       await this.prisma.pushBroadcast.create({
@@ -60,16 +85,16 @@ export class AdminService {
           title: title.slice(0, 200),
           body: body.slice(0, 500),
           audience,
-          sentCount: sent,
-          failedCount: Math.max(0, users.length - sent),
+          sentCount: totalSent,
+          failedCount: Math.max(0, totalUsers - totalSent),
           sentById,
         },
       }).catch((err) => {
         this.logger.warn(`[admin] broadcast history persist failed: ${err?.message ?? err}`);
       });
     }
-    this.logger.log(`📣 Broadcast persisted+pushed: ${sent} users (${audience})`);
-    return { totalUsers: users.length, sent };
+    this.logger.log(`📣 Broadcast persisted+pushed: ${totalSent}/${totalUsers} users (${audience})`);
+    return { totalUsers, sent: totalSent };
   }
 
   async listBroadcasts() {

@@ -942,11 +942,19 @@ model Notification {
   readAt    DateTime?
   createdAt DateTime         @default(now())
 
+  // Audit P1 #8 (2026-05-18): notifications.service.ts aggregator filters
+  // by `data.path(['aggregationKey'])` which is an un-indexed JSON path
+  // scan — full table scan per like/comment. Mirror the key into a real
+  // indexed column. Service code keeps writing it to data.aggregationKey
+  // AND this column for backward compatibility; reads switch to this column.
+  aggregationKey String?
+
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, read])
   @@index([createdAt])
   @@index([userId, createdAt(sort: Desc)])
+  @@index([userId, type, read, aggregationKey])
 }
 
 model NotificationSettings {

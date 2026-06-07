@@ -120,8 +120,11 @@ function buildTimeline(messages: any[]) {
   return out;
 }
 
-// Public Giphy beta key — fine for dev / preview channel.
-const GIPHY_KEY = process.env['EXPO_PUBLIC_GIPHY_KEY'] ?? 'dc6zaTOxFJmzC';
+// GIPHY API key — must be provided via env. When empty, the GIF picker is
+// disabled (no network calls). Document `EXPO_PUBLIC_GIPHY_KEY` in
+// `.env.example` as optional but recommended to enable the in-app GIF browser.
+const GIPHY_KEY = process.env['EXPO_PUBLIC_GIPHY_KEY'] ?? '';
+const GIPHY_ENABLED = GIPHY_KEY.length > 0;
 
 export default function MessageThread() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -155,7 +158,22 @@ export default function MessageThread() {
   const recTimerRef = useRef<any>(null);
   const lastTapRef = useRef<{ id: string; at: number } | null>(null);
   const listRef = useRef<FlatList>(null);
+  // Mirror of `messages` for closures that need the latest value without
+  // having to capture state (avoids stale-closure bugs in sendPayload's
+  // replyTo lookup when an optimistic insert races with an incoming socket).
+  const messagesRef = useRef<any[]>([]);
+  // Track whether the user is parked near the bottom of the list. When false,
+  // we suppress auto-scroll on incoming/optimistic messages so we don't yank
+  // them away from history they're reading.
+  const atBottomRef = useRef(true);
+  // Debounce token for markRead so a burst of incoming messages collapses
+  // into a single API call.
+  const markReadTimerRef = useRef<any>(null);
   const fb = useFeedback();
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   // ── Load thread + initial page ───────────────
   const load = useCallback(async () => {
@@ -205,7 +223,12 @@ export default function MessageThread() {
       return [...prev, msg];
     });
     if (added && msg.senderId !== me?.id) fb.notification();
-    setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 80);
+    // Only auto-scroll for incoming messages when the user is already
+    // parked near the bottom — otherwise we'd yank them out of history
+    // they're actively reading.
+    if (atBottomRef.current) {
+      setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 80);
+    }
   }, [fb, me?.id]);
 
   const handleReaction = useCallback((payload: any) => {
@@ -246,10 +269,27 @@ export default function MessageThread() {
     },
   );
 
+  // markRead is debounced 800ms: in bursty conversations (peer sends 10
+  // messages back-to-back) we used to fire 10 separate API calls; collapse
+  // those into a single tail call. We also gate on `atBottomRef` so that
+  // if the user is reading old history while new messages arrive, we don't
+  // mark them as read prematurely. The screen-focus + send paths both
+  // reset `atBottomRef` to true, so the normal foreground case still marks.
   useEffect(() => {
-    if (!loading && messages.some((m) => m.senderId !== me?.id && !m.isRead)) {
+    if (loading) return;
+    if (!atBottomRef.current) return;
+    if (!messages.some((m) => m.senderId !== me?.id && !m.isRead)) return;
+    if (markReadTimerRef.current) clearTimeout(markReadTimerRef.current);
+    markReadTimerRef.current = setTimeout(() => {
       markRead();
-    }
+      markReadTimerRef.current = null;
+    }, 800);
+    return () => {
+      if (markReadTimerRef.current) {
+        clearTimeout(markReadTimerRef.current);
+        markReadTimerRef.current = null;
+      }
+    };
   }, [loading, messages, me?.id, markRead]);
 
   // ── Sending (optimistic) ─────────────────────
@@ -276,7 +316,9 @@ export default function MessageThread() {
       audioUrl: payload.audioUrl ?? null,
       audioDurationSec: payload.audioDurationSec ?? null,
       replyToId: payload.replyToId ?? null,
-      replyTo: payload.replyToId ? messages.find((x) => x.id === payload.replyToId) ?? null : null,
+      replyTo: payload.replyToId
+        ? messagesRef.current.find((x) => x.id === payload.replyToId) ?? null
+        : null,
       reactions: [],
       createdAt: new Date().toISOString(),
       isRead: false,
@@ -287,6 +329,9 @@ export default function MessageThread() {
       const without = m.filter((x) => x.id !== tempId);
       return [...without, optimistic];
     });
+    // User-initiated send: always pin to bottom and treat the list as
+    // "at bottom" again, regardless of where they were scrolled.
+    atBottomRef.current = true;
     setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 50);
     try {
       const r = await messagesApi.send(id, payload);
@@ -302,7 +347,7 @@ export default function MessageThread() {
     } finally {
       setSending(false);
     }
-  }, [fb, id, me?.id, messages]);
+  }, [fb, id, me?.id]);
 
   const send = useCallback(async () => {
     const body = text.trim();
@@ -484,6 +529,13 @@ export default function MessageThread() {
 
   // ── GIF picker ───────────────────────────────
   const searchGifs = useCallback(async (q: string) => {
+    // No-op when GIPHY is not configured — the picker entry point is also
+    // hidden in the attach sheet, but guard here too so accidental opens
+    // don't hammer Giphy with a missing key.
+    if (!GIPHY_ENABLED) {
+      setGifs([]);
+      return;
+    }
     setGifLoading(true);
     try {
       const url = q.trim().length > 0
@@ -678,9 +730,19 @@ export default function MessageThread() {
             data={timeline}
             keyExtractor={(x) => x.id}
             contentContainerStyle={styles.listContent}
-            onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
+            onContentSizeChange={() => {
+              // Only pin to bottom when the user was already near the bottom
+              // (or just sent a message — sendPayload resets atBottomRef).
+              // Otherwise we'd hijack scroll while they read history.
+              if (atBottomRef.current) {
+                listRef.current?.scrollToEnd({ animated: false });
+              }
+            }}
             onScroll={(e) => {
-              if (e.nativeEvent.contentOffset.y < 80 && hasMore && !loadingMore) loadMore();
+              const { contentOffset, layoutMeasurement, contentSize } = e.nativeEvent;
+              atBottomRef.current =
+                contentOffset.y + layoutMeasurement.height >= contentSize.height - 80;
+              if (contentOffset.y < 80 && hasMore && !loadingMore) loadMore();
             }}
             scrollEventThrottle={300}
             ListHeaderComponent={
@@ -859,12 +921,14 @@ export default function MessageThread() {
           label={t ? 'Sticker' : 'Sticker'}
           onPress={() => { setAttachOpen(false); setStickerOpen(true); }}
         />
-        <AttachOption
-          label="GIF"
-          customGlyph="GIF"
-          tint="#A855F7"
-          onPress={() => { setAttachOpen(false); setGifOpen(true); setGifQuery(''); }}
-        />
+        {GIPHY_ENABLED ? (
+          <AttachOption
+            label="GIF"
+            customGlyph="GIF"
+            tint="#A855F7"
+            onPress={() => { setAttachOpen(false); setGifOpen(true); setGifQuery(''); }}
+          />
+        ) : null}
       </Sheet>
 
       <Sheet open={stickerOpen} onClose={() => setStickerOpen(false)} title={t ? 'Stickers' : 'Stickers'}>

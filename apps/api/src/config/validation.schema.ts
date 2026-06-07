@@ -71,6 +71,31 @@ export const validationSchema = Joi.object({
   SENTRY_TRACES_SAMPLE_RATE: Joi.number().min(0).max(1).default(0.2),
   SENTRY_PROFILES_SAMPLE_RATE: Joi.number().min(0).max(1).default(0.1),
 
-  // FCM (used by health check + push)
+  // Push providers
+  // NOTE: The backend uses Expo Push API (via expo-server-sdk) — NOT direct
+  // FCM. FCM_SERVER_KEY is kept as an optional legacy var only for the
+  // /health/ready check that probes fcm.googleapis.com reachability; it is
+  // not used for token-based delivery. Safe to leave unset in production.
   FCM_SERVER_KEY: Joi.string().optional().allow(''),
+  // Optional access token for Expo Enhanced Security (Push API).
+  // When set, the push service signs requests with it; when unset, the API
+  // falls back to unauthenticated Expo push (default Expo behavior).
+  EXPO_ACCESS_TOKEN: Joi.string().optional().allow(''),
+
+  // Email transport — 'resend' uses Resend API, anything else falls back to
+  // SMTP_*. Both providers are optional at validation time; runtime code
+  // throws a friendly error if a transport is selected but creds are missing.
+  EMAIL_TRANSPORT: Joi.string().valid('resend', 'smtp').optional(),
+  RESEND_API_KEY: Joi.string().optional().allow(''),
+
+  // Cloudinary (image uploads). All optional — feature degrades gracefully
+  // when unset (uploads return a clear "no media provider configured" error).
+  CLOUDINARY_CLOUD: Joi.string().optional().allow(''),
+  CLOUDINARY_API_KEY: Joi.string().optional().allow(''),
+  CLOUDINARY_API_SECRET: Joi.string().optional().allow(''),
+  CLOUDINARY_UPLOAD_PRESET: Joi.string().optional().allow(''),
+
+  // Mobile-only public env. Documented here for ops visibility but never
+  // read by the API itself — Expo bundles EXPO_PUBLIC_* into the client.
+  EXPO_PUBLIC_GIPHY_KEY: Joi.string().optional().allow(''),
 });

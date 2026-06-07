@@ -2,8 +2,25 @@ import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Patch, Post
 import { SkipThrottle } from '@nestjs/throttler';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ReportStatus, UserRole, UserStatus } from '@prisma/client';
+import { IsEnum, IsOptional, IsString, MaxLength } from 'class-validator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
+
+// Backend audit P1 #6 & #7 (2026-05-18): role + internal note validated
+// via DTOs. Previously `@Body('role')` and `@Body('note')` accepted arbitrary
+// strings → Prisma would throw at runtime instead of failing at the boundary.
+class UpdateRoleDto {
+  @IsEnum(UserRole)
+  role: UserRole;
+}
+
+class UpdateInternalNoteDto {
+  // null is allowed (clears the note); empty string treated as null in service.
+  @IsOptional()
+  @IsString()
+  @MaxLength(4000)
+  note?: string | null;
+}
 import { PaginationDto } from '../../common/dto/pagination.dto';
 import { AdminListUsersDto } from './dto/admin-list-users.dto';
 import { User } from '@prisma/client';
@@ -151,8 +168,8 @@ export class AdminController {
   @Patch('users/:id/role') @Roles(UserRole.SUPER_ADMIN)
   @Audit('user.role.change', { targetType: 'USER' })
   @ApiOperation({ summary: 'Update user role (SuperAdmin only)' })
-  updateRole(@CurrentUser() admin: User, @Param('id') id: string, @Body('role') role: UserRole) {
-    return this.adminService.updateUserRole(admin.id, id, role);
+  updateRole(@CurrentUser() admin: User, @Param('id') id: string, @Body() dto: UpdateRoleDto) {
+    return this.adminService.updateUserRole(admin.id, id, dto.role);
   }
 
   @Patch('users/:id/note')
@@ -161,9 +178,9 @@ export class AdminController {
   updateInternalNote(
     @CurrentUser() admin: User,
     @Param('id') id: string,
-    @Body('note') note: string | null,
+    @Body() dto: UpdateInternalNoteDto,
   ) {
-    return this.adminService.updateInternalNote(admin.id, id, note);
+    return this.adminService.updateInternalNote(admin.id, id, dto.note ?? null);
   }
 
   @Get('users/:id/audit') @ApiOperation({ summary: 'Admin action log for this user (who did what, when)' })

@@ -26,6 +26,7 @@ import { NotificationListener } from '@/components/NotificationListener';
 import { NotificationBannerHost } from '@/components/NotificationBanner';
 import { OfflineBanner } from '@/components/OfflineBanner';
 import { UpdateOverlay } from '@/components/UpdateOverlay';
+import { reportError } from '@/lib/error-reporter';
 
 // ── Web diagnostic: catch ALL errors before React mounts ───────────────────
 if (Platform.OS === 'web' && typeof window !== 'undefined') {
@@ -63,6 +64,14 @@ class ErrorBoundary extends React.Component<
   }
   static getDerivedStateFromError(error: Error) {
     return { error };
+  }
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    // Ship to backend Sentry via /client-errors (best-effort, never throws).
+    // When @sentry/react-native lands, reportError swaps to Sentry.captureException.
+    reportError(error, {
+      component: 'RootErrorBoundary',
+      componentStack: info.componentStack,
+    });
   }
   render() {
     if (this.state.error) {

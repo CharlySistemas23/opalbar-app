@@ -47,6 +47,7 @@ import { MarketingModule } from '../modules/marketing/marketing.module';
 import { RealtimeModule } from '../modules/realtime/realtime.module';
 import { AuditModule } from '../modules/audit/audit.module';
 import { LegalModule } from '../modules/legal/legal.module';
+import { ClientErrorsModule } from '../modules/client-errors/client-errors.module';
 
 @Module({
   imports: [
@@ -111,6 +112,7 @@ import { LegalModule } from '../modules/legal/legal.module';
     PushModule,
     MarketingModule,
     AuditModule,
+    ClientErrorsModule,
   ],
 
   providers: [

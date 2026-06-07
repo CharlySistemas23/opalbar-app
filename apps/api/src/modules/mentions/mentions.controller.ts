@@ -13,9 +13,16 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { MentionPolicy, MentionTargetType, User } from '@prisma/client';
+import { IsEnum } from 'class-validator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { MentionsService } from './mentions.service';
+
+// Backend audit P1 #7 (2026-05-18): enum validated via DTO.
+class UpdateMentionPolicyDto {
+  @IsEnum(MentionPolicy)
+  policy: MentionPolicy;
+}
 
 @ApiTags('Mentions')
 @ApiBearerAuth()
@@ -79,11 +86,7 @@ export class MentionsController {
 
   @Patch('me/policy')
   @ApiOperation({ summary: 'Update my mention policy (EVERYONE | FRIENDS_OF_FRIENDS | FRIENDS_ONLY | NONE)' })
-  updatePolicy(@CurrentUser() me: User, @Body('policy') policy: MentionPolicy) {
-    const allowed = Object.values(MentionPolicy);
-    if (!policy || !allowed.includes(policy)) {
-      throw new BadRequestException('policy must be EVERYONE | FRIENDS_OF_FRIENDS | FRIENDS_ONLY | NONE');
-    }
-    return this.mentions.updateMentionPolicy(me.id, policy);
+  updatePolicy(@CurrentUser() me: User, @Body() dto: UpdateMentionPolicyDto) {
+    return this.mentions.updateMentionPolicy(me.id, dto.policy);
   }
 }

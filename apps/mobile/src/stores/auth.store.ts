@@ -7,6 +7,7 @@ import { Platform } from 'react-native';
 import { apiClient, authApi, tokenStore, onAuthFailed, onTokensRefreshed } from '../api/client';
 import { closeSocket, updateSocketToken } from '../api/socket';
 import { closeRtSocket, getRtSocket, updateRtToken } from '../api/rt-socket';
+import { setUser as setErrorReporterUser } from '../lib/error-reporter';
 
 // Cross-platform storage: localStorage on web, AsyncStorage on native
 function getPlatformStorage() {
@@ -120,6 +121,10 @@ export const useAuthStore = create<AuthState>()(
           updateRtToken(tokens.accessToken);
           getRtSocket();
 
+          // Tag client-error reports with the authenticated user so the
+          // server-side Sentry inbox correlates by ID (no PII in extras).
+          setErrorReporterUser(user.id, user.email);
+
           set({
             user,
             tokens,
@@ -159,6 +164,7 @@ export const useAuthStore = create<AuthState>()(
           tokenStore.clear();
           closeSocket();
           closeRtSocket();
+          setErrorReporterUser(null);
           set({ user: null, tokens: null, isAuthenticated: false, isGuest: false, isLoading: false, error: null });
         }
       },
@@ -174,6 +180,7 @@ export const useAuthStore = create<AuthState>()(
         tokenStore.setTokens(tokens.accessToken, tokens.refreshToken);
         updateRtToken(tokens.accessToken);
         getRtSocket();
+        setErrorReporterUser(user.id, user.email);
         set({
           user,
           tokens,
@@ -194,7 +201,13 @@ export const useAuthStore = create<AuthState>()(
       refreshUser: async () => {
         try {
           const { data: response } = await authApi.me();
-          set({ user: response.data });
+          const fresh = response.data as AuthUser | undefined;
+          if (fresh?.id) {
+            // Keep error-reporter user context in sync (id/email can change on
+            // first profile completion during onboarding).
+            setErrorReporterUser(fresh.id, fresh.email);
+          }
+          set({ user: fresh ?? null });
         } catch {
           // Silent fail
         }
@@ -217,6 +230,11 @@ export const useAuthStore = create<AuthState>()(
           // NotificationListener monte, ya este conectado y autenticado.
           updateRtToken(state.tokens.accessToken);
           if (state.isAuthenticated) getRtSocket();
+        }
+        // Restore error-reporter user context so reports after cold-start are
+        // correlated to the rehydrated session.
+        if (state?.user?.id && state.isAuthenticated) {
+          setErrorReporterUser(state.user.id, state.user.email);
         }
         // Persist rotated tokens so a reload doesn't reuse a spent refresh token
         onTokensRefreshed((accessToken, refreshToken) => {
@@ -252,6 +270,7 @@ export const useAuthStore = create<AuthState>()(
           tokenStore.clear();
           closeSocket();
           closeRtSocket();
+          setErrorReporterUser(null);
           useAuthStore.setState({
             user: null,
             tokens: null,

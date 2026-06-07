@@ -59,6 +59,23 @@ export class PushService {
   }
 
   async sendToUser(userId: string, payload: Omit<PushPayload, 'to'>) {
+    // Centralize the global pushEnabled guard here instead of relying on
+    // every caller (audit P1 — pushEnabled was only respected by
+    // broadcastToAllActiveUsers, direct callers like reservations and offers
+    // were bypassing the user's master push toggle).
+    try {
+      const settings = await this.prisma.notificationSetting.findUnique({
+        where: { userId },
+        select: { pushEnabled: true },
+      });
+      if (settings && settings.pushEnabled === false) {
+        return { sent: 0 };
+      }
+    } catch {
+      // If settings lookup fails, fall through and send — failing closed
+      // would silently drop legitimate pushes for users with no row yet.
+    }
+
     const tokens = await this.prisma.pushToken.findMany({ where: { userId } });
     if (tokens.length === 0) return { sent: 0 };
 

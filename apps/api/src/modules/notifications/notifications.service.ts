@@ -82,11 +82,19 @@ export class NotificationsService {
     bodyEn?: string;
     data?: Record<string, unknown>;
     imageUrl?: string;
+    aggregationKey?: string;
   }) {
     // The inner `data` field is Prisma JSON. Record<string, unknown> isn't
     // structurally identical to InputJsonValue (Prisma forbids `undefined`),
     // so we cast at the boundary.
-    const notification = await this.prisma.notification.create({ data: data as any });
+    // Audit P1 #8 (2026-05-18): aggregationKey is also written to its own
+    // indexed column for fast lookups by the aggregator. JSON data still
+    // carries it for backward compat with old aggregator branches.
+    const aggregationKey =
+      data.aggregationKey ?? (data.data as any)?.aggregationKey ?? null;
+    const notification = await this.prisma.notification.create({
+      data: { ...data, aggregationKey } as any,
+    });
     await this.invalidateUnreadCache(data.userId);
 
     // Send push notification (placeholder — integrate FCM/APNs)
@@ -135,13 +143,22 @@ export class NotificationsService {
     // when 2+ posts had unread aggregations, the query picked the most recent
     // unrelated one and matchesKey failed → new notification created instead
     // of merging. Now we filter by aggregationKey JSON path directly.
+    // Audit P1 #8 (2026-05-18): switched filter from un-indexed JSON path
+    // scan to the indexed `aggregationKey` column. Falls back to the JSON
+    // path filter for legacy rows that predate the column. The composite
+    // index (userId, type, read, aggregationKey) makes this O(log n) instead
+    // of full table scan.
     const existing = await this.prisma.notification.findFirst({
       where: {
         userId: input.userId,
         type: input.type,
         read: false,
         createdAt: { gte: since },
-        data: { path: ['aggregationKey'], equals: input.aggregationKey } as any,
+        OR: [
+          { aggregationKey: input.aggregationKey },
+          // Backward compat for rows created before the column existed.
+          { aggregationKey: null, data: { path: ['aggregationKey'], equals: input.aggregationKey } as any },
+        ],
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -220,6 +237,7 @@ export class NotificationsService {
       body: input.body ?? '',
       data: seedData,
       imageUrl: input.imageUrl,
+      aggregationKey: input.aggregationKey,
     });
   }
 
