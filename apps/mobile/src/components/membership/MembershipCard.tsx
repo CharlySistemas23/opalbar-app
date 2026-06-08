@@ -105,7 +105,8 @@ export function MembershipCard({
     );
   }
 
-  const heroHeight = size === 'hero' ? 230 : 170;
+  // Match Figma exactly: hero=200, md=160 (per node 12:37 spec, 2026-06-07)
+  const heroHeight = size === 'hero' ? 200 : 160;
 
   const frontStyle = useAnimatedStyle(() => ({
     transform: [
@@ -379,11 +380,18 @@ function MetallicBg({ tier }: { tier: TierVisual }) {
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
       <Svg width="100%" height="100%">
         <Defs>
-          <LinearGradient id={`grad-${tier.key}`} x1="0%" y1="0%" x2="100%" y2="100%">
+          {/*
+            Stop positions match Figma 149.68deg gradient (node 12:37):
+              0% → cardBg, 31.82% → cardMid, 42.43% → cardGlint, 70.71% → cardBg.
+            For 149.68deg in SVG userSpaceOnUse: cos(149.68)=-0.86, sin(149.68)=0.50.
+            Vector goes from (1,0) to (-0.72, 0.5) relative — easier with simple
+            top-right to bottom-left approximation that visually matches.
+          */}
+          <LinearGradient id={`grad-${tier.key}`} x1="100%" y1="0%" x2="20%" y2="100%">
             <Stop offset="0%" stopColor={tier.cardBg} />
-            <Stop offset="40%" stopColor={tier.cardMid} />
-            <Stop offset="55%" stopColor={tier.cardGlint} />
-            <Stop offset="100%" stopColor={tier.cardBg} />
+            <Stop offset="31.82%" stopColor={tier.cardMid} />
+            <Stop offset="42.43%" stopColor={tier.cardGlint} />
+            <Stop offset="70.71%" stopColor={tier.cardBg} />
           </LinearGradient>
         </Defs>
         <Rect width="100%" height="100%" fill={`url(#grad-${tier.key})`} />

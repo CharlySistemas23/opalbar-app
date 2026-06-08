@@ -1,19 +1,24 @@
 // ─────────────────────────────────────────────
-//  Welcome — Editorial Premium
+//  Welcome — Figma-matched (node 12:2, 2026-06-07)
 //
-//  First impression. Magazine cover energy: kicker, hero title in
-//  Fraunces, lead paragraph, then the actions. No icon-decorated buttons
-//  — the action is the action.
+//  Layout = Figma exact:
+//   · Status bar handled by SafeAreaView
+//   · Hero: 64x64 brand mark (bgElevated, hairline border, "O" in Fraunces
+//     SemiBold 24pt accent) → Kicker "OPALBAR · CLUB PRIVADO" 0.9 opacity →
+//     Display LG (34/36) "Tu noche\ncomienza aquí." → Body Large 17pt
+//     "Membresía, cortesías y experiencias\ncuradas para nuestros socios."
+//   · Actions: 3 buttons gap 12 — primary gold solid, secondary bgCard
+//     hairline border 0.12, ghost link
 // ─────────────────────────────────────────────
 import { useState } from 'react';
-import { Image, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { Colors, EditorialSpacing, Spacing } from '@/constants/tokens';
+import { Colors, EditorialSpacing, Radius, Spacing } from '@/constants/tokens';
 import { useAuthStore } from '@/stores/auth.store';
 import { useAppStore } from '@/stores/app.store';
-import { Button, FadeIn, Hero, Kicker, Lead, Pressy, Body } from '@/components/ui';
+import { Body, Button, Display, FadeIn, Heading, Kicker, Pressy } from '@/components/ui';
 
 export default function Welcome() {
   const router = useRouter();
@@ -24,80 +29,88 @@ export default function Welcome() {
 
   return (
     <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
-      <View style={styles.hero}>
-        <FadeIn>
-          <Image
-            source={require('../../assets/icon.png')}
-            style={styles.logo}
-            resizeMode="contain"
-            accessibilityIgnoresInvertColors
-          />
-        </FadeIn>
+      <View style={styles.content}>
+        <View style={styles.hero}>
+          <FadeIn>
+            <View style={styles.brandMark} accessibilityIgnoresInvertColors>
+              <Heading
+                size="lg"
+                tone="accent"
+                style={{ lineHeight: 28 }}
+                accessibilityElementsHidden
+              >
+                O
+              </Heading>
+            </View>
+          </FadeIn>
 
-        <FadeIn delay={120} style={styles.kickerWrap}>
-          <Kicker align="center" tone="champagne">
-            {t ? 'BIENVENIDO' : 'WELCOME'}
-          </Kicker>
-        </FadeIn>
+          <FadeIn delay={120}>
+            <Kicker align="center" tone="accent" style={{ opacity: 0.9 }}>
+              {t ? 'OPALBAR · CLUB PRIVADO' : 'OPALBAR · PRIVATE CLUB'}
+            </Kicker>
+          </FadeIn>
 
-        <FadeIn delay={200}>
-          <Hero align="center">opalbar</Hero>
-        </FadeIn>
+          <FadeIn delay={200}>
+            <Display size="lg" align="center" style={styles.title}>
+              {t ? 'Tu noche\ncomienza aquí.' : 'Your night\nstarts here.'}
+            </Display>
+          </FadeIn>
 
-        <FadeIn delay={300} style={styles.leadWrap}>
-          <Lead align="center" tone="secondary">
-            {t
-              ? 'Siempre hay algo pasando,\ny tú te enteras primero.'
-              : "Something's always happening,\nand you hear about it first."}
-          </Lead>
-        </FadeIn>
-      </View>
-
-      <View style={styles.actions}>
-        <FadeIn delay={420}>
-          <Button
-            label={t ? 'Iniciar sesión' : 'Sign in'}
-            onPress={() => router.push('/(auth)/login' as never)}
-            variant="primary"
-            size="lg"
-            fullWidth
-            accessibilityHint={t ? 'Abre la pantalla de inicio de sesión' : 'Open sign in screen'}
-          />
-        </FadeIn>
-        <FadeIn delay={490}>
-          <Button
-            label={t ? 'Crear cuenta' : 'Create account'}
-            onPress={() => router.push('/(auth)/register' as never)}
-            variant="secondary"
-            size="lg"
-            fullWidth
-            accessibilityHint={t ? 'Abre la pantalla de registro' : 'Open registration screen'}
-          />
-        </FadeIn>
-        <FadeIn delay={560}>
-          <Pressy
-            onPress={() => {
-              if (entering) return;
-              setEntering(true);
-              continueAsGuest();
-              router.replace('/(guest)/home' as never);
-            }}
-            disabled={entering}
-            accessibilityRole="button"
-            accessibilityLabel={t ? 'Continuar como invitado' : 'Continue as guest'}
-            style={styles.guestBtn}
-          >
-            <Body tone="accent" weight="semiBold">
-              {entering
-                ? t
-                  ? 'Entrando…'
-                  : 'Entering…'
-                : t
-                  ? 'Continuar como invitado'
-                  : 'Continue as guest'}
+          <FadeIn delay={300}>
+            <Body size="lg" align="center" tone="secondary" style={styles.lead}>
+              {t
+                ? 'Membresía, cortesías y experiencias\ncuradas para nuestros socios.'
+                : 'Membership, perks and curated\nexperiences for our members.'}
             </Body>
-          </Pressy>
-        </FadeIn>
+          </FadeIn>
+        </View>
+
+        <View style={styles.actions}>
+          <FadeIn delay={420}>
+            <Button
+              label={t ? 'Iniciar sesión' : 'Sign in'}
+              onPress={() => router.push('/(auth)/login' as never)}
+              variant="primary"
+              size="lg"
+              fullWidth
+              accessibilityHint={t ? 'Abre la pantalla de inicio de sesión' : 'Open sign in screen'}
+            />
+          </FadeIn>
+          <FadeIn delay={490}>
+            <Button
+              label={t ? 'Crear cuenta' : 'Create account'}
+              onPress={() => router.push('/(auth)/register' as never)}
+              variant="secondary"
+              size="lg"
+              fullWidth
+              accessibilityHint={t ? 'Abre la pantalla de registro' : 'Open registration screen'}
+            />
+          </FadeIn>
+          <FadeIn delay={560}>
+            <Pressy
+              onPress={() => {
+                if (entering) return;
+                setEntering(true);
+                continueAsGuest();
+                router.replace('/(guest)/home' as never);
+              }}
+              disabled={entering}
+              accessibilityRole="button"
+              accessibilityLabel={t ? 'Continuar como invitado' : 'Continue as guest'}
+              style={styles.guestBtn}
+            >
+              <Body size="sm" tone="accent">
+                {entering
+                  ? t
+                    ? 'Entrando…'
+                    : 'Entering…'
+                  : t
+                    ? 'Continuar como invitado'
+                    : 'Continue as guest'}
+              </Body>
+            </Pressy>
+          </FadeIn>
+        </View>
       </View>
     </SafeAreaView>
   );
@@ -107,34 +120,41 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: Colors.bgPrimary,
+  },
+  content: {
+    flex: 1,
     paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingVertical: 60,
+    justifyContent: 'space-between',
   },
   hero: {
-    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: Spacing[3],
+    gap: Spacing[4],
   },
-  logo: {
-    width: 112,
-    height: 112,
-    borderRadius: 24,
-    marginBottom: Spacing[5],
+  brandMark: {
+    width: 64,
+    height: 64,
+    borderRadius: Radius.xl,
+    backgroundColor: Colors.bgElevated,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(246,241,231,0.10)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  kickerWrap: {
-    marginTop: Spacing[2],
+  title: {
+    marginTop: 0,
   },
-  leadWrap: {
-    marginTop: Spacing[3],
+  lead: {
     maxWidth: 320,
   },
   actions: {
     gap: Spacing[3],
-    paddingBottom: Spacing[6],
   },
   guestBtn: {
-    minHeight: 44,
+    paddingVertical: Spacing[3],
     alignItems: 'center',
     justifyContent: 'center',
+    minHeight: 44,
   },
 });

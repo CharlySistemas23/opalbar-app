@@ -549,8 +549,10 @@ const styles = StyleSheet.create({
   },
   tonightImageWrap: {
     width: '100%',
-    aspectRatio: 16 / 10,
+    height: 180, // Match Figma exactly (node 12:54, 2026-06-07)
     backgroundColor: Colors.bgElevated,
+    borderRadius: Radius.md,
+    overflow: 'hidden',
   },
   tonightImage: {
     width: '100%',
