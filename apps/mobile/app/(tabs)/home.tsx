@@ -1,15 +1,19 @@
 // ─────────────────────────────────────────────
-//  Home — OPALBAR · Club Privado Exclusivo
+//  Home — Full rebuild matching Figma node 12:23 (2026-06-08)
 //
-//  Brief del usuario (2026-05-18):
-//   · Hero superior 90% del viewport visual — solo OPALBAR + TIER + name
-//   · NO mostrar perks primero — la EXPERIENCIA vale más que los beneficios
-//   · Orden: Greeting → MembershipCard (flippable) → Tonight at OPALBAR
-//     (foto grande) → Your privileges → Upcoming experiences → Community
-//     highlights
+//  Estructura exacta:
+//   1. Greeting row 24/12 padding — Kicker "OPALBAR" + Body Small
+//      "Buenas noches, Carlos" + 40×40 bell
+//   2. Card wrap 24/8 padding → MembershipCard 200pt hero (gold)
+//   3. Sección "ESTA NOCHE EN OPALBAR" pt:32 px:24 gap:12
+//        kicker + hairline + TonightCard (image 180pt + text 12/4 gap)
+//   4. Sección "TUS PRIVILEGIOS" pt:24 px:24 gap:12
+//        kicker + hairline + 2 PrivilegeRows
+//   5. Spacer 80pt + tab bar
 //
-//  Filosofía: "Estoy entrando a un club privado de lujo", no "Estoy
-//  revisando una app de recompensas".
+//  Colors: bgPrimary #100e0c, bgCard #171411, bgElevated #1f1b17,
+//          textPrimary #f6f1e7, textMuted #827c71, textSecondary #b8b1a2,
+//          accent gold #c9a961.
 // ─────────────────────────────────────────────
 import { useCallback, useState } from 'react';
 import {
@@ -17,31 +21,22 @@ import {
   RefreshControl,
   ScrollView,
   StyleSheet,
+  Text,
   View,
 } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 
-import { Colors, EditorialSpacing, Radius, Spacing } from '@/constants/tokens';
+import { Colors, EditorialSpacing, Radius, Spacing, TypePresets } from '@/constants/tokens';
 import { HitSlop, Roles } from '@/constants/a11y';
 import { eventsApi, offersApi } from '@/api/client';
 import { useAppStore } from '@/stores/app.store';
 import { useAuthStore } from '@/stores/auth.store';
-import {
-  Body,
-  Caption,
-  FadeIn,
-  Hairline,
-  Kicker,
-  Pressy,
-  Skeleton,
-  Subhead,
-} from '@/components/ui';
+import { FadeIn, Pressy, Skeleton } from '@/components/ui';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { MembershipCard } from '@/components/membership';
-import { resolveTier } from '@/constants/tiers';
 
 interface EventItem {
   id: string;
@@ -68,26 +63,10 @@ function toAbsoluteImageUrl(url?: string): string | undefined {
   return `${base}${url.startsWith('/') ? '' : '/'}${url}`;
 }
 
-function formatShortDate(d: string | undefined, language: string): string {
-  if (!d) return '';
-  try {
-    return new Date(d).toLocaleDateString(language, {
-      weekday: 'short',
-      day: 'numeric',
-      month: 'short',
-    });
-  } catch {
-    return '';
-  }
-}
-
 function formatTime(d: string | undefined, language: string): string {
   if (!d) return '';
   try {
-    return new Date(d).toLocaleTimeString(language, {
-      hour: '2-digit',
-      minute: '2-digit',
-    });
+    return new Date(d).toLocaleTimeString(language, { hour: '2-digit', minute: '2-digit' });
   } catch {
     return '';
   }
@@ -145,22 +124,19 @@ export default function Home() {
     }
   }, []);
 
-  useFocusEffect(
-    useCallback(() => {
-      load();
-    }, [load]),
-  );
+  useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  // Membership data
   const firstName = user?.profile?.firstName ?? '';
   const lastName = user?.profile?.lastName ?? '';
   const fullName =
     `${firstName} ${lastName}`.trim() || (user?.email?.split('@')[0] ?? 'Miembro');
   const tierName = user?.profile?.loyaltyLevel?.name;
-  const tier = resolveTier(tierName);
   const points = user?.points ?? 0;
   const memberNumber = user?.id ? user.id.slice(-4) : undefined;
   const validThrough = formatValidThrough(user?.createdAt);
+
+  const hero = events[0];
+  const privileges = offers.slice(0, 2);
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
@@ -170,38 +146,33 @@ export default function Home() {
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            onRefresh={() => {
-              setRefreshing(true);
-              load();
-            }}
+            onRefresh={() => { setRefreshing(true); load(); }}
             tintColor={Colors.textMuted}
           />
         }
       >
-        {/* ── Greeting ── */}
-        <FadeIn style={styles.greetingWrap}>
-          <View style={styles.greetingRow}>
-            <View style={{ flex: 1 }}>
-              <Kicker tone="muted">OPALBAR</Kicker>
-              <Body size="sm" tone="secondary" style={{ marginTop: 2 }}>
-                {getGreeting(t)}, {firstName || 'Miembro'}
-              </Body>
-            </View>
-            <Pressy
-              onPress={() => router.push('/(app)/profile/notifications' as never)}
-              haptic="select"
-              accessibilityRole={Roles.button}
-              accessibilityLabel={t ? 'Notificaciones' : 'Notifications'}
-              hitSlop={HitSlop.expand}
-              style={styles.bellBtn}
-            >
-              <Feather name="bell" size={20} color={Colors.textPrimary} />
-            </Pressy>
+        {/* ── 1. Greeting ── */}
+        <View style={styles.greeting}>
+          <View style={styles.greetText}>
+            <Text style={[TypePresets.kicker, { color: Colors.textMuted }]}>OPALBAR</Text>
+            <Text style={[TypePresets.bodySm, { color: Colors.textSecondary }]}>
+              {getGreeting(t)}, {firstName || 'Miembro'}
+            </Text>
           </View>
-        </FadeIn>
+          <Pressy
+            onPress={() => router.push('/(app)/profile/notifications' as never)}
+            haptic="select"
+            accessibilityRole={Roles.button}
+            accessibilityLabel={t ? 'Notificaciones' : 'Notifications'}
+            hitSlop={HitSlop.expand}
+            style={styles.bell}
+          >
+            <Feather name="bell" size={20} color={Colors.textPrimary} />
+          </Pressy>
+        </View>
 
-        {/* ── Membership Card (flippable) ── */}
-        <FadeIn delay={80} style={styles.heroWrap}>
+        {/* ── 2. MembershipCard hero ── */}
+        <FadeIn style={styles.cardWrap}>
           <MembershipCard
             fullName={fullName}
             memberNumber={memberNumber}
@@ -216,390 +187,199 @@ export default function Home() {
         {errored && !loading ? (
           <View style={{ minHeight: 220, paddingHorizontal: EditorialSpacing.pageGutter }}>
             <ErrorState
-              message={
-                t
-                  ? 'No pudimos cargar la información del club.'
-                  : "We couldn't load the club's information."
-              }
+              message={t ? 'No pudimos cargar la información del club.' : "We couldn't load the club's information."}
               onRetry={load}
             />
           </View>
         ) : (
           <>
-            {/* ── Tonight at OPALBAR ── */}
-            <Section
-              kicker={t ? 'ESTA NOCHE EN OPALBAR' : 'TONIGHT AT OPALBAR'}
-              delay={160}
-            >
-              {loading && events.length === 0 ? (
-                <Skeleton height={220} radius={Radius.md} />
-              ) : events.length === 0 ? (
+            {/* ── 3. ESTA NOCHE EN OPALBAR ── */}
+            <View style={[styles.section, { paddingTop: 32 }]}>
+              <FadeIn delay={140}>
+                <Text style={[TypePresets.kicker, { color: Colors.textMuted }]}>
+                  {t ? 'ESTA NOCHE EN OPALBAR' : 'TONIGHT AT OPALBAR'}
+                </Text>
+                <View style={styles.hairline} />
+              </FadeIn>
+
+              {loading && !hero ? (
+                <Skeleton height={240} radius={Radius.md} />
+              ) : !hero ? (
                 <View style={{ minHeight: 180 }}>
                   <EmptyState
                     icon="moon"
                     title={t ? 'Sin programa esta noche' : 'No program tonight'}
-                    message={
-                      t
-                        ? 'El club siempre tiene algo para ti pronto.'
-                        : 'The club always has something coming up.'
-                    }
+                    message={t ? 'El club siempre tiene algo para ti.' : 'The club always has something coming up.'}
                   />
                 </View>
               ) : (
-                <TonightHero
-                  event={events[0]}
-                  onPress={() =>
-                    events[0]?.id && router.push(`/(app)/events/${events[0].id}` as never)
-                  }
-                  t={t}
-                  language={language}
-                />
+                <Pressy
+                  onPress={() => hero.id && router.push(`/(app)/events/${hero.id}` as never)}
+                  haptic="select"
+                  accessibilityRole={Roles.button}
+                  accessibilityLabel={hero.title || hero.name || ''}
+                  style={styles.tonightCard}
+                >
+                  <View style={styles.tonightImage}>
+                    {hero.imageUrl ? (
+                      <Image
+                        source={{ uri: toAbsoluteImageUrl(hero.imageUrl) }}
+                        style={StyleSheet.absoluteFill}
+                        resizeMode="cover"
+                        accessibilityIgnoresInvertColors
+                      />
+                    ) : (
+                      <Text style={[TypePresets.caption, { color: Colors.textMuted }]}>
+                        [ Imagen evento ]
+                      </Text>
+                    )}
+                  </View>
+                  <View style={styles.tonightText}>
+                    <Text style={[TypePresets.kicker, { color: Colors.accentPrimary }]}>
+                      {[formatTime(hero.startDate, language), hero.category?.name].filter(Boolean).join(' · ').toUpperCase()}
+                    </Text>
+                    <Text style={[TypePresets.subhead, { color: Colors.textPrimary }]} numberOfLines={2}>
+                      {hero.title || hero.name || (t ? 'Sin título' : 'Untitled')}
+                    </Text>
+                    {hero.spotsLeft != null ? (
+                      <Text style={[TypePresets.caption, { color: Colors.textMuted }]}>
+                        {t ? `${hero.spotsLeft} plazas disponibles` : `${hero.spotsLeft} spots available`}
+                      </Text>
+                    ) : null}
+                  </View>
+                </Pressy>
               )}
-            </Section>
+            </View>
 
-            {/* ── Your privileges (cortesías) ── */}
-            <Section
-              kicker={t ? 'TUS PRIVILEGIOS' : 'YOUR PRIVILEGES'}
-              ctaLabel={t ? 'Ver todos' : 'See all'}
-              onCtaPress={() => router.push('/(app)/offers' as never)}
-              delay={240}
-            >
-              {loading && offers.length === 0 ? (
-                <View style={{ gap: Spacing[2] }}>
-                  {[0, 1].map((i) => (
-                    <Skeleton key={i} height={56} radius={Radius.sm} />
-                  ))}
-                </View>
-              ) : offers.length === 0 ? (
-                <Body tone="muted" style={{ paddingVertical: Spacing[3] }}>
-                  {t
-                    ? 'Pronto habrá nuevas cortesías para ti.'
-                    : 'New privileges will be available soon.'}
-                </Body>
+            {/* ── 4. TUS PRIVILEGIOS ── */}
+            <View style={[styles.section, { paddingTop: 24 }]}>
+              <FadeIn delay={220}>
+                <Text style={[TypePresets.kicker, { color: Colors.textMuted }]}>
+                  {t ? 'TUS PRIVILEGIOS' : 'YOUR PRIVILEGES'}
+                </Text>
+                <View style={styles.hairline} />
+              </FadeIn>
+
+              {loading && privileges.length === 0 ? (
+                <>
+                  <Skeleton height={56} radius={Radius.md} />
+                  <Skeleton height={56} radius={Radius.md} />
+                </>
+              ) : privileges.length === 0 ? (
+                <Text style={[TypePresets.body, { color: Colors.textMuted, paddingVertical: Spacing[3] }]}>
+                  {t ? 'Pronto habrá nuevas cortesías para ti.' : 'New privileges coming soon.'}
+                </Text>
               ) : (
-                offers.slice(0, 3).map((off, idx) => (
-                  <FadeIn key={off.id ?? idx} delay={50 * idx}>
-                    <PrivilegeRow
-                      offer={off}
-                      tierAccent={tier.base}
+                privileges.map((off, idx) => (
+                  <FadeIn key={off.id ?? idx} delay={60 * idx}>
+                    <Pressy
                       onPress={() => off.id && router.push(`/(app)/offers/${off.id}` as never)}
-                    />
+                      haptic="select"
+                      accessibilityRole={Roles.button}
+                      accessibilityLabel={off.title}
+                      style={styles.privilegeRow}
+                    >
+                      <View style={styles.privilegeDot} />
+                      <View style={styles.privilegeText}>
+                        <Text style={[TypePresets.subhead, { color: Colors.textPrimary }]} numberOfLines={1}>
+                          {off.title}
+                        </Text>
+                        {off.validWhen || off.description ? (
+                          <Text style={[TypePresets.caption, { color: Colors.textMuted }]} numberOfLines={1}>
+                            {off.validWhen || off.description}
+                          </Text>
+                        ) : null}
+                      </View>
+                      <Text style={[TypePresets.body, { color: Colors.textMuted }]}>›</Text>
+                    </Pressy>
                   </FadeIn>
                 ))
               )}
-            </Section>
-
-            {/* ── Upcoming experiences ── */}
-            {events.length > 1 ? (
-              <Section
-                kicker={t ? 'PRÓXIMAS EXPERIENCIAS' : 'UPCOMING EXPERIENCES'}
-                ctaLabel={t ? 'Ver todas' : 'See all'}
-                onCtaPress={() => router.push('/(tabs)/events' as never)}
-                delay={320}
-              >
-                {events.slice(1, 4).map((ev, idx) => (
-                  <FadeIn key={ev.id ?? idx} delay={50 * idx}>
-                    <ExperienceRow
-                      event={ev}
-                      onPress={() => ev.id && router.push(`/(app)/events/${ev.id}` as never)}
-                      language={language}
-                    />
-                  </FadeIn>
-                ))}
-              </Section>
-            ) : null}
-
-            {/* ── Community highlights ── */}
-            <Section
-              kicker={t ? 'DEL CLUB' : 'FROM THE CLUB'}
-              ctaLabel={t ? 'Ver más' : 'See more'}
-              onCtaPress={() => router.push('/(tabs)/community' as never)}
-              delay={400}
-            >
-              <Pressy
-                onPress={() => router.push('/(tabs)/community' as never)}
-                haptic="select"
-                accessibilityRole={Roles.button}
-                accessibilityLabel={t ? 'Ir a comunidad' : 'Go to community'}
-                style={styles.communityCard}
-              >
-                <View style={{ flex: 1 }}>
-                  <Subhead>{t ? 'Nuevos miembros esta semana' : 'New members this week'}</Subhead>
-                  <Caption tone="muted" style={{ marginTop: 2 }}>
-                    {t
-                      ? 'Conoce a quienes se unieron al club'
-                      : 'Meet who joined the club'}
-                  </Caption>
-                </View>
-                <Feather name="chevron-right" size={18} color={Colors.textMuted} />
-              </Pressy>
-            </Section>
+            </View>
           </>
         )}
+
+        {/* Spacer for tab bar */}
+        <View style={{ height: 80 }} />
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-// ── Section ──────────────────────────────────
-function Section({
-  kicker,
-  ctaLabel,
-  onCtaPress,
-  delay,
-  children,
-}: {
-  kicker: string;
-  ctaLabel?: string;
-  onCtaPress?: () => void;
-  delay?: number;
-  children: React.ReactNode;
-}) {
-  return (
-    <View style={styles.section}>
-      <FadeIn delay={delay}>
-        <View style={styles.sectionHeader}>
-          <Kicker tone="muted">{kicker}</Kicker>
-          {ctaLabel && onCtaPress ? (
-            <Pressy
-              onPress={onCtaPress}
-              haptic="select"
-              accessibilityRole={Roles.link}
-              accessibilityLabel={ctaLabel}
-              hitSlop={HitSlop.expand}
-            >
-              <Caption tone="accent">{ctaLabel}</Caption>
-            </Pressy>
-          ) : null}
-        </View>
-        <Hairline variant="subtle" style={{ marginTop: Spacing[2], marginBottom: Spacing[3] }} />
-      </FadeIn>
-      <View style={styles.sectionBody}>{children}</View>
-    </View>
-  );
-}
-
-// ── Tonight hero (experiential) ──────────────
-function TonightHero({
-  event,
-  onPress,
-  t,
-  language,
-}: {
-  event: EventItem;
-  onPress: () => void;
-  t: boolean;
-  language: string;
-}) {
-  const title = event.title || event.name || (t ? 'Sin título' : 'Untitled');
-  const time = formatTime(event.startDate, language);
-  const cat = event.category?.name;
-
-  return (
-    <Pressy
-      onPress={onPress}
-      haptic="select"
-      accessibilityRole={Roles.button}
-      accessibilityLabel={`${title} ${time}`}
-      style={styles.tonightCard}
-    >
-      <View style={styles.tonightImageWrap}>
-        {event.imageUrl ? (
-          <Image
-            source={{ uri: toAbsoluteImageUrl(event.imageUrl) }}
-            style={styles.tonightImage}
-            resizeMode="cover"
-            accessibilityIgnoresInvertColors
-          />
-        ) : (
-          <View style={[styles.tonightImage, { backgroundColor: Colors.bgElevated }]} />
-        )}
-      </View>
-      <View style={styles.tonightText}>
-        <Kicker tone="champagne">
-          {[time, cat].filter(Boolean).join(' · ').toUpperCase()}
-        </Kicker>
-        <Subhead style={{ marginTop: Spacing[1] }} numberOfLines={2}>
-          {title}
-        </Subhead>
-        {event.spotsLeft != null ? (
-          <Caption tone="muted" style={{ marginTop: 2 }}>
-            {t ? `${event.spotsLeft} plazas disponibles` : `${event.spotsLeft} spots available`}
-          </Caption>
-        ) : null}
-      </View>
-    </Pressy>
-  );
-}
-
-// ── Privilege row (cortesía) ─────────────────
-function PrivilegeRow({
-  offer,
-  tierAccent,
-  onPress,
-}: {
-  offer: OfferItem;
-  tierAccent: string;
-  onPress: () => void;
-}) {
-  return (
-    <Pressy
-      onPress={onPress}
-      haptic="select"
-      accessibilityRole={Roles.button}
-      accessibilityLabel={offer.title}
-      style={styles.privilegeRow}
-    >
-      <View style={[styles.privilegeDot, { backgroundColor: tierAccent }]} />
-      <View style={{ flex: 1 }}>
-        <Subhead numberOfLines={1}>{offer.title}</Subhead>
-        {offer.validWhen || offer.description ? (
-          <Caption tone="muted" numberOfLines={1} style={{ marginTop: 2 }}>
-            {offer.validWhen || offer.description}
-          </Caption>
-        ) : null}
-      </View>
-      <Feather name="chevron-right" size={18} color={Colors.textMuted} />
-    </Pressy>
-  );
-}
-
-// ── Experience row (compact event) ───────────
-function ExperienceRow({
-  event,
-  onPress,
-  language,
-}: {
-  event: EventItem;
-  onPress: () => void;
-  language: string;
-}) {
-  const title = event.title || event.name || '—';
-  const date = formatShortDate(event.startDate, language);
-  const time = formatTime(event.startDate, language);
-  return (
-    <Pressy
-      onPress={onPress}
-      haptic="select"
-      accessibilityRole={Roles.button}
-      accessibilityLabel={`${title} ${date} ${time}`}
-      style={styles.experienceRow}
-    >
-      <View style={styles.experienceDateCol}>
-        <Kicker tone="champagne">{date.split(' ')[0]?.toUpperCase()}</Kicker>
-        <Subhead style={{ marginTop: 2 }}>{date.split(' ')[1] ?? ''}</Subhead>
-      </View>
-      <View style={{ flex: 1 }}>
-        <Subhead numberOfLines={1}>{title}</Subhead>
-        {time ? (
-          <Caption tone="muted" style={{ marginTop: 2 }}>
-            {time}
-            {event.category?.name ? ` · ${event.category.name}` : ''}
-          </Caption>
-        ) : null}
-      </View>
-      <Feather name="chevron-right" size={18} color={Colors.textMuted} />
-    </Pressy>
-  );
-}
-
-// ── Styles ───────────────────────────────────
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
-  scroll: { paddingBottom: Spacing[10] },
+  scroll: { paddingBottom: 0 },
 
-  greetingWrap: {
-    paddingHorizontal: EditorialSpacing.pageGutter,
-    paddingTop: Spacing[2],
-    paddingBottom: Spacing[4],
-  },
-  greetingRow: {
+  greeting: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
   },
-  bellBtn: {
+  greetText: {
+    gap: 2,
+  },
+  bell: {
     width: 40,
     height: 40,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: Radius.full,
   },
 
-  heroWrap: {
-    paddingHorizontal: EditorialSpacing.pageGutter,
+  cardWrap: {
+    paddingHorizontal: 24,
+    paddingVertical: 8,
   },
 
   section: {
-    paddingHorizontal: EditorialSpacing.pageGutter,
-    marginTop: Spacing[8],
+    paddingHorizontal: 24,
+    gap: 12,
   },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  sectionBody: {
-    gap: Spacing[2],
+  hairline: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(246,241,231,0.06)',
+    marginTop: 12,
   },
 
+  // Tonight card
   tonightCard: {
-    overflow: 'hidden',
-    borderRadius: Radius.md,
-  },
-  tonightImageWrap: {
-    width: '100%',
-    height: 180, // Match Figma exactly (node 12:54, 2026-06-07)
-    backgroundColor: Colors.bgElevated,
     borderRadius: Radius.md,
     overflow: 'hidden',
   },
   tonightImage: {
-    width: '100%',
-    height: '100%',
+    height: 180,
+    backgroundColor: Colors.bgElevated,
+    borderRadius: Radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
   },
   tonightText: {
-    paddingTop: Spacing[3],
+    paddingTop: 12,
+    gap: 4,
   },
 
+  // Privilege row
   privilegeRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing[3],
-    paddingVertical: Spacing[3],
-    paddingHorizontal: Spacing[4],
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     backgroundColor: Colors.bgCard,
-    borderRadius: Radius.sm,
+    borderRadius: Radius.md,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: Colors.border,
+    borderColor: 'rgba(246,241,231,0.06)',
   },
   privilegeDot: {
     width: 6,
     height: 6,
     borderRadius: 3,
+    backgroundColor: Colors.accentPrimary,
   },
-
-  experienceRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing[4],
-    paddingVertical: Spacing[3],
-    paddingHorizontal: Spacing[3],
-  },
-  experienceDateCol: {
-    width: 44,
-    alignItems: 'flex-start',
-  },
-
-  communityCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing[3],
-    paddingVertical: Spacing[4],
-    paddingHorizontal: Spacing[4],
-    backgroundColor: Colors.bgCard,
-    borderRadius: Radius.sm,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: Colors.border,
+  privilegeText: {
+    flex: 1,
+    gap: 2,
   },
 });

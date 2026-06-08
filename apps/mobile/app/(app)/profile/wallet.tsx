@@ -1,15 +1,26 @@
 // ─────────────────────────────────────────────
-//  Wallet — OPALBAR · Premium Members Balance
+//  Wallet — Full rebuild matching Figma node 14:2 (2026-06-08)
 //
-//  Brief (2026-05-18):
-//   · Balance hero gigante Fraunces (no fintech feel)
-//   · Progress to next tier — barra elegante, tier-colored
-//   · Timeline (NO tabla) — formato "+200 / Reservation / May 18"
-//
-//  Tier color propagates to progress bar and +/- accents.
+//  Estructura:
+//   1. Status bar (SafeArea)
+//   2. Header con back (16/12 padding)
+//   3. Hero (24 padX, 16 padY, gap 12):
+//        Kicker BALANCE DISPONIBLE
+//        Text Fraunces 40/42 #f6f1e7 "1,820"
+//        Label "GOLD · 1,180 PTS A DIAMOND" en accent
+//   4. ProgWrap (24 padX, 12 padY):
+//        Row: gold 205pt + muted 137pt (2pt height)
+//   5. Actions (24 padX, 12 padY, gap 12):
+//        2 tiles bgCard radius 8 padding 16, flex 1 cada
+//   6. Timeline header (24 padding):
+//        Kicker MOVIMIENTOS + hairline
+//   7. Month groups (24 padX, 8 padY, gap 8):
+//        Label MAYO/ABRIL @0.6
+//        Rows: 4×4 dot + text col + Numeric SM
+//   8. Spacer 40pt
 // ─────────────────────────────────────────────
 import { useCallback, useEffect, useState } from 'react';
-import { FlatList, StyleSheet, View } from 'react-native';
+import { FlatList, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
@@ -18,21 +29,12 @@ import { walletApi } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { useAuthStore } from '@/stores/auth.store';
 import { useAppStore } from '@/stores/app.store';
-import { Colors, EditorialSpacing, Radius, Spacing, TypePresets } from '@/constants/tokens';
+import { Colors, Radius, Spacing, TypePresets } from '@/constants/tokens';
 import { HitSlop, Roles } from '@/constants/a11y';
-import {
-  Body,
-  Caption,
-  FadeIn,
-  Hairline,
-  Kicker,
-  Pressy,
-  SkeletonList,
-} from '@/components/ui';
+import { FadeIn, Pressy, SkeletonList } from '@/components/ui';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { resolveTier } from '@/constants/tiers';
-import { Text } from 'react-native';
 
 interface Tx {
   id: string;
@@ -41,6 +43,24 @@ interface Tx {
   amount?: number;
   points?: number;
   createdAt?: string;
+}
+
+interface MonthGrouped {
+  month: string;
+  txs: Tx[];
+}
+
+function groupByMonth(txs: Tx[], lang: string): MonthGrouped[] {
+  const map = new Map<string, Tx[]>();
+  for (const tx of txs) {
+    if (!tx.createdAt) continue;
+    const d = new Date(tx.createdAt);
+    const key = d.toLocaleDateString(lang, { month: 'long', year: 'numeric' });
+    const arr = map.get(key) ?? [];
+    arr.push(tx);
+    map.set(key, arr);
+  }
+  return Array.from(map.entries()).map(([month, txs]) => ({ month, txs }));
 }
 
 export default function Wallet() {
@@ -64,9 +84,7 @@ export default function Wallet() {
       .finally(() => setLoading(false));
   }, []);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useEffect(() => { load(); }, [load]);
 
   const points = wallet?.points ?? user?.points ?? 0;
   const tierName = wallet?.currentLevel?.name || user?.profile?.loyaltyLevel?.name;
@@ -74,8 +92,6 @@ export default function Wallet() {
   const nextLevel = wallet?.nextLevel;
   const delta = nextLevel ? Math.max(0, (nextLevel.minPoints ?? 0) - points) : 0;
   const progress = nextLevel ? Math.min(1, points / (nextLevel.minPoints || 1)) : 1;
-
-  // Group transactions by month for timeline-style display
   const grouped = groupByMonth(txs, language);
 
   return (
@@ -91,91 +107,95 @@ export default function Wallet() {
         >
           <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
         </Pressy>
+        <View style={{ width: 40, height: 40 }} />
       </View>
 
       {loading ? (
-        <View style={{ paddingHorizontal: EditorialSpacing.pageGutter, gap: Spacing[6] }}>
-          <SkeletonList count={1} itemHeight={180} />
+        <View style={{ paddingHorizontal: 24, gap: 24 }}>
+          <SkeletonList count={1} itemHeight={140} />
           <SkeletonList count={4} itemHeight={56} />
         </View>
       ) : error && !wallet ? (
         <ErrorState
           message={error}
           retryLabel={t ? 'Reintentar' : 'Retry'}
-          onRetry={() => {
-            setLoading(true);
-            load();
-          }}
+          onRetry={() => { setLoading(true); load(); }}
         />
       ) : (
         <FlatList
           data={grouped}
           keyExtractor={(g) => g.month}
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ paddingBottom: Spacing[12] }}
+          contentContainerStyle={{ paddingBottom: 40 }}
           ListHeaderComponent={
             <View>
-              {/* ── Hero balance ── */}
+              {/* Hero */}
               <FadeIn style={styles.hero}>
-                <Kicker tone="muted">{t ? 'BALANCE DISPONIBLE' : 'AVAILABLE BALANCE'}</Kicker>
-                <Text
-                  style={[
-                    TypePresets.hero,
-                    { color: tier.text, marginTop: Spacing[3] },
-                  ]}
-                  numberOfLines={1}
-                  adjustsFontSizeToFit
-                >
+                <Text style={[TypePresets.kicker, { color: Colors.textMuted }]}>
+                  {t ? 'BALANCE DISPONIBLE' : 'AVAILABLE BALANCE'}
+                </Text>
+                <Text style={[styles.heroNumber]} numberOfLines={1} adjustsFontSizeToFit>
                   {points.toLocaleString(language)}
                 </Text>
-                <Caption style={{ color: tier.base, marginTop: Spacing[2], letterSpacing: 1.4 }}>
-                  {(tier.labelEn ?? '').toUpperCase()} {t ? 'PTS' : 'PTS'}
-                </Caption>
-
-                {nextLevel ? (
-                  <View style={styles.progressBlock}>
-                    <View style={styles.progressRow}>
-                      <Caption tone="muted">
-                        {t ? `${delta} pts para ${nextLevel.name}` : `${delta} pts to ${nextLevel.name}`}
-                      </Caption>
-                      <Caption tone="muted">{Math.round(progress * 100)}%</Caption>
-                    </View>
-                    <View style={styles.progressTrack}>
-                      <View
-                        style={[
-                          styles.progressFill,
-                          { width: `${progress * 100}%`, backgroundColor: tier.base },
-                        ]}
-                      />
-                    </View>
-                  </View>
-                ) : null}
+                <Text style={[TypePresets.label, { color: tier.base }]}>
+                  {(tier.labelEn ?? '').toUpperCase()}
+                  {nextLevel
+                    ? ` · ${delta.toLocaleString(language)} PTS A ${nextLevel.name.toUpperCase()}`
+                    : ''}
+                </Text>
               </FadeIn>
 
-              {/* ── Actions ── */}
+              {/* Progress bar */}
+              <View style={styles.progWrap}>
+                <View style={styles.trackRow}>
+                  <View
+                    style={[
+                      styles.trackFill,
+                      { flex: progress, backgroundColor: tier.base },
+                    ]}
+                  />
+                  <View
+                    style={[
+                      styles.trackEmpty,
+                      { flex: Math.max(0, 1 - progress) },
+                    ]}
+                  />
+                </View>
+              </View>
+
+              {/* Actions */}
               <FadeIn delay={100} style={styles.actions}>
                 <ActionTile
-                  icon="gift"
+                  emoji="🎁"
                   label={t ? 'Canjear' : 'Redeem'}
                   onPress={() => router.push('/(app)/offers' as never)}
                 />
                 <ActionTile
-                  icon="award"
+                  emoji="🏆"
                   label={t ? 'Niveles' : 'Tiers'}
                   onPress={() => router.push('/(app)/profile/loyalty-levels' as never)}
                 />
               </FadeIn>
 
-              {/* ── Timeline header ── */}
-              <FadeIn delay={160} style={styles.historyHeader}>
-                <Kicker tone="muted">{t ? 'MOVIMIENTOS' : 'ACTIVITY'}</Kicker>
-                <Hairline variant="subtle" style={{ marginTop: Spacing[2] }} />
+              {/* Timeline header */}
+              <FadeIn delay={160} style={styles.timelineHeader}>
+                <Text style={[TypePresets.kicker, { color: Colors.textMuted }]}>
+                  {t ? 'MOVIMIENTOS' : 'ACTIVITY'}
+                </Text>
+                <View style={styles.hairline} />
               </FadeIn>
             </View>
           }
           renderItem={({ item, index }) => (
-            <FadeIn delay={50 * Math.min(index, 4)}>
-              <MonthGroup group={item} tierAccent={tier.base} lang={language} t={t} />
+            <FadeIn delay={40 * Math.min(index, 4)}>
+              <View style={styles.monthGroup}>
+                <Text style={[TypePresets.label, { color: Colors.textMuted, opacity: 0.6 }]}>
+                  {item.month.toUpperCase()}
+                </Text>
+                {item.txs.map((tx) => (
+                  <TxRow key={tx.id} tx={tx} tierAccent={tier.base} lang={language} t={t} />
+                ))}
+              </View>
             </FadeIn>
           )}
           ListEmptyComponent={
@@ -183,11 +203,7 @@ export default function Wallet() {
               <EmptyState
                 icon="clock"
                 title={t ? 'Sin movimientos aún' : 'No activity yet'}
-                message={
-                  t
-                    ? 'Tus puntos ganados y canjeados aparecerán aquí.'
-                    : 'Earned and spent points will appear here.'
-                }
+                message={t ? 'Tus puntos aparecerán aquí.' : 'Your points will appear here.'}
               />
             </View>
           }
@@ -197,13 +213,12 @@ export default function Wallet() {
   );
 }
 
-// ── Action tile ──────────────────────────────
 function ActionTile({
-  icon,
+  emoji,
   label,
   onPress,
 }: {
-  icon: React.ComponentProps<typeof Feather>['name'];
+  emoji: string;
   label: string;
   onPress: () => void;
 }) {
@@ -215,46 +230,12 @@ function ActionTile({
       accessibilityLabel={label}
       style={styles.actionTile}
     >
-      <Feather name={icon} size={18} color={Colors.textPrimary} />
-      <Caption tone="primary" style={{ marginTop: Spacing[2] }}>
-        {label}
-      </Caption>
+      <Text style={[TypePresets.bodyLg, { color: Colors.textPrimary }]}>{emoji}</Text>
+      <Text style={[TypePresets.subhead, { color: Colors.textPrimary }]}>{label}</Text>
     </Pressy>
   );
 }
 
-// ── Month group (timeline) ───────────────────
-function MonthGroup({
-  group,
-  tierAccent,
-  lang,
-  t,
-}: {
-  group: MonthGrouped;
-  tierAccent: string;
-  lang: string;
-  t: boolean;
-}) {
-  return (
-    <View style={styles.monthGroup}>
-      <Text
-        style={[
-          TypePresets.label,
-          { color: Colors.textMuted, paddingHorizontal: EditorialSpacing.pageGutter },
-        ]}
-      >
-        {group.month.toUpperCase()}
-      </Text>
-      <View style={{ marginTop: Spacing[2] }}>
-        {group.txs.map((tx) => (
-          <TxRow key={tx.id} tx={tx} tierAccent={tierAccent} lang={lang} t={t} />
-        ))}
-      </View>
-    </View>
-  );
-}
-
-// ── Tx row (timeline item) ───────────────────
 function TxRow({
   tx,
   tierAccent,
@@ -267,64 +248,41 @@ function TxRow({
   t: boolean;
 }) {
   const amount = tx.amount ?? tx.points ?? 0;
-  const isPositive = amount > 0;
+  const positive = amount > 0;
   const dateStr = tx.createdAt
     ? new Date(tx.createdAt).toLocaleDateString(lang, { day: 'numeric', month: 'short' })
     : '';
-  const amountColor = isPositive ? tierAccent : Colors.accentDanger;
-  const sign = isPositive ? '+' : '';
-
   return (
     <View style={styles.txRow}>
-      <View style={styles.txDot} />
-      <View style={{ flex: 1 }}>
-        <Body size="sm" weight="medium" numberOfLines={1}>
+      <View style={styles.dot} />
+      <View style={styles.txText}>
+        <Text style={[TypePresets.bodySm, { color: Colors.textPrimary }]} numberOfLines={1}>
           {tx.description || tx.reason || (t ? 'Movimiento' : 'Activity')}
-        </Body>
-        <Caption tone="muted" style={{ marginTop: 1 }}>
-          {dateStr}
-        </Caption>
+        </Text>
+        <Text style={[TypePresets.caption, { color: Colors.textMuted }]}>{dateStr}</Text>
       </View>
       <Text
         style={[
-          TypePresets.headingSm,
-          { color: amountColor, fontVariant: ['tabular-nums'] },
+          TypePresets.numericSm,
+          { color: positive ? tierAccent : Colors.accentDanger },
         ]}
       >
-        {sign}
+        {positive ? '+' : ''}
         {amount}
       </Text>
     </View>
   );
 }
 
-// ── Helpers ──────────────────────────────────
-interface MonthGrouped {
-  month: string;
-  txs: Tx[];
-}
-
-function groupByMonth(txs: Tx[], lang: string): MonthGrouped[] {
-  const map = new Map<string, Tx[]>();
-  for (const tx of txs) {
-    if (!tx.createdAt) continue;
-    const d = new Date(tx.createdAt);
-    const key = d.toLocaleDateString(lang, { month: 'long', year: 'numeric' });
-    const arr = map.get(key) ?? [];
-    arr.push(tx);
-    map.set(key, arr);
-  }
-  return Array.from(map.entries()).map(([month, txs]) => ({ month, txs }));
-}
-
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
+
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: EditorialSpacing.pageGutter,
-    paddingTop: Spacing[2],
-    paddingBottom: Spacing[2],
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
   },
   backBtn: {
     width: 40,
@@ -332,65 +290,85 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+
   hero: {
-    paddingHorizontal: EditorialSpacing.pageGutter,
-    paddingBottom: Spacing[6],
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+    gap: 12,
   },
-  progressBlock: {
-    marginTop: Spacing[6],
+  heroNumber: {
+    fontFamily: 'Fraunces_700Bold',
+    fontSize: 40,
+    lineHeight: 42,
+    letterSpacing: -1,
+    color: Colors.textPrimary,
   },
-  progressRow: {
+
+  progWrap: {
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+  },
+  trackRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: Spacing[2],
-  },
-  progressTrack: {
     height: 2,
-    backgroundColor: Colors.border,
     overflow: 'hidden',
   },
-  progressFill: {
+  trackFill: {
     height: '100%',
   },
+  trackEmpty: {
+    height: '100%',
+    backgroundColor: 'rgba(246,241,231,0.10)',
+  },
+
   actions: {
     flexDirection: 'row',
-    gap: Spacing[3],
-    paddingHorizontal: EditorialSpacing.pageGutter,
-    marginTop: Spacing[2],
+    gap: 12,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
   },
   actionTile: {
     flex: 1,
-    minHeight: 64,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: Spacing[2],
-    paddingVertical: Spacing[3],
-    borderRadius: Radius.sm,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: Colors.border,
-    borderTopColor: Colors.highlightTop,
+    gap: 8,
+    padding: 16,
     backgroundColor: Colors.bgCard,
+    borderRadius: Radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(246,241,231,0.06)',
   },
-  historyHeader: {
-    paddingHorizontal: EditorialSpacing.pageGutter,
-    marginTop: Spacing[8],
-    marginBottom: Spacing[2],
+
+  timelineHeader: {
+    paddingHorizontal: 24,
+    paddingVertical: 24,
+    gap: 8,
   },
+  hairline: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(246,241,231,0.06)',
+  },
+
   monthGroup: {
-    marginTop: Spacing[4],
+    paddingHorizontal: 24,
+    paddingVertical: 8,
+    gap: 8,
   },
   txRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing[3],
-    paddingHorizontal: EditorialSpacing.pageGutter,
-    paddingVertical: Spacing[3],
+    gap: 12,
+    paddingVertical: 10,
   },
-  txDot: {
+  dot: {
     width: 4,
     height: 4,
     borderRadius: 2,
     backgroundColor: Colors.textMuted,
+  },
+  txText: {
+    flex: 1,
+    gap: 1,
   },
 });
