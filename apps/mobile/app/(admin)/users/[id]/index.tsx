@@ -423,11 +423,11 @@ export default function AdminUserDetail() {
         <View style={styles.statsGrid}>
           <Stat icon="award" label="Puntos" value={user.points ?? 0} tint={Colors.accentPrimary} />
           <Stat icon="file-text" label="Posts" value={user._count?.posts ?? 0} tint={Colors.accentSuccess} />
-          <Stat icon="message-circle" label="Comentarios" value={user._count?.comments ?? 0} tint="#60A5FA" />
-          <Stat icon="bookmark" label="Reservas" value={user._count?.reservations ?? 0} tint="#EC4899" />
-          <Stat icon="calendar" label="Eventos" value={user._count?.events ?? 0} tint="#A855F7" />
+          <Stat icon="message-circle" label="Comentarios" value={user._count?.comments ?? 0} tint="#7FA0BC" />
+          <Stat icon="bookmark" label="Reservas" value={user._count?.reservations ?? 0} tint="#C48A8A" />
+          <Stat icon="calendar" label="Eventos" value={user._count?.events ?? 0} tint="#9F8DBE" />
           <Stat icon="star" label="Reseñas" value={user._count?.reviews ?? 0} tint={Colors.accentWarning} />
-          <Stat icon="user-plus" label="Seguidores" value={user._count?.followers ?? 0} tint="#38C793" />
+          <Stat icon="user-plus" label="Seguidores" value={user._count?.followers ?? 0} tint="#6FA88A" />
           <Stat icon="user-check" label="Sigue a" value={user._count?.following ?? 0} tint="#6B6B78" />
         </View>
 

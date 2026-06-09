@@ -60,7 +60,7 @@ const TIERS: Record<TierKey, TierVisual> = {
     cardMid: '#2A1B0E',
     cardGlint: '#3D2918',
     edgeGlint: 'rgba(201,150,114,0.45)',
-    text: '#EAE2D0',
+    text: '#F6F1E7',
     textMuted: '#9B8B73',
     material: 'brushed copper',
   },
@@ -75,7 +75,7 @@ const TIERS: Record<TierKey, TierVisual> = {
     cardMid: '#22222A',
     cardGlint: '#33333E',
     edgeGlint: 'rgba(212,208,198,0.40)',
-    text: '#EAE2D0',
+    text: '#F6F1E7',
     textMuted: '#8E8B83',
     material: 'satin aluminum',
   },
@@ -90,7 +90,7 @@ const TIERS: Record<TierKey, TierVisual> = {
     cardMid: '#2A210E',
     cardGlint: '#3D3018',
     edgeGlint: 'rgba(229,199,126,0.50)',
-    text: '#EAE2D0',
+    text: '#F6F1E7',
     textMuted: '#A28D5E',
     material: 'matte gold',
   },
@@ -105,27 +105,31 @@ const TIERS: Record<TierKey, TierVisual> = {
     cardMid: '#16212A',
     cardGlint: '#243340',
     edgeGlint: 'rgba(197,214,220,0.50)',
-    text: '#EAE2D0',
+    text: '#F6F1E7',
     textMuted: '#7E8E94',
     material: 'platinum titanium',
   },
 } as const;
 
-/** Fallback when user has no tier assigned yet (Club / Aspirante). */
+/**
+ * Fallback when user has no tier assigned yet (Club / Aspirante).
+ * Uses Bronze-tinted warm metallic so new members see a card consistent
+ * with the Figma warm paper-dark palette — never pure black.
+ */
 export const NEUTRAL_TIER: TierVisual = {
-  key: 'Bronce', // for typing — not displayed
+  key: 'Bronce',
   labelEs: 'Club',
   labelEn: 'Club',
-  base: '#9B9587',
-  baseDark: '#6B6760',
-  baseLight: '#C9C3B3',
-  cardBg: '#0A0808',
-  cardMid: '#141210',
-  cardGlint: '#1E1B17',
-  edgeGlint: 'rgba(234,226,208,0.20)',
-  text: '#EAE2D0',
-  textMuted: '#6B6760',
-  material: 'matte ivory',
+  base: '#C9A961',
+  baseDark: '#8C7440',
+  baseLight: '#E5C77E',
+  cardBg: '#1A1408',
+  cardMid: '#2A210E',
+  cardGlint: '#3D3018',
+  edgeGlint: 'rgba(229,199,126,0.45)',
+  text: '#F6F1E7',
+  textMuted: '#A28D5E',
+  material: 'matte gold',
 };
 
 /** Normalize any tier name string to a TierKey. Accepts es/en/lowercased. */

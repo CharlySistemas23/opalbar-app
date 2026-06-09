@@ -264,7 +264,7 @@ export default function OfferDetail() {
           {redemption?.code ? (
             <>
               <View style={styles.qrBox}>
-                <QRCode value={redemption.code} size={200} backgroundColor="#FFFFFF" color="#0D0D0F" />
+                <QRCode value={redemption.code} size={200} backgroundColor="#FFFFFF" color="#100E0C" />
               </View>
               <Body weight="semiBold" style={styles.qrCode}>
                 {redemption.code.slice(-8).toUpperCase()}

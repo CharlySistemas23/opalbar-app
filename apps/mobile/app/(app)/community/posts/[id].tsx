@@ -44,7 +44,7 @@ import { Kicker, Pressy } from '@/components/ui';
 //  · Quick-reaction emoji row above compose (IG)
 // ─────────────────────────────────────────────
 
-const AVATAR_COLORS = ['#F4A340', '#60A5FA', '#A855F7', '#38C793', '#E45858', '#EC4899'];
+const AVATAR_COLORS = ['#C9A961', '#7FA0BC', '#9F8DBE', '#6FA88A', '#C46868', '#C48A8A'];
 // Reactions now use the shared <ReactionPicker /> with the canonical FB-style set.
 import { ReactionPicker, REACTION_EMOJIS } from '@/components/ui/ReactionPicker';
 const QUICK_EMOJI = REACTION_EMOJIS;

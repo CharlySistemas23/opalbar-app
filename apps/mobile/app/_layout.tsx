@@ -24,7 +24,6 @@ import { useRealtimeConnection } from '@/hooks/useRealtime';
 import { ToastHost } from '@/components/Toast';
 import { NotificationListener } from '@/components/NotificationListener';
 import { NotificationBannerHost } from '@/components/NotificationBanner';
-import { AmbientBridge } from '@/components/AmbientBridge';
 import { OfflineBanner } from '@/components/OfflineBanner';
 import { UpdateOverlay } from '@/components/UpdateOverlay';
 import { reportError } from '@/lib/error-reporter';
@@ -38,7 +37,7 @@ if (Platform.OS === 'web' && typeof window !== 'undefined') {
   const showWebError = (msg: string) => {
     const el = document.createElement('div');
     el.style.cssText =
-      'position:fixed;inset:0;background:#0D0D0F;color:#E45858;padding:24px;' +
+      'position:fixed;inset:0;background:#100E0C;color:#C46868;padding:24px;' +
       'font-size:13px;font-family:monospace;z-index:99999;overflow:auto;white-space:pre-wrap;';
     el.textContent = '⚠ JS Error:\n' + msg;
     document.body?.appendChild(el);
@@ -77,8 +76,8 @@ class ErrorBoundary extends React.Component<
   render() {
     if (this.state.error) {
       return (
-        <View style={{ flex: 1, backgroundColor: '#0D0D0F', padding: 24, paddingTop: 60 }}>
-          <Text style={{ color: '#E45858', fontSize: 18, fontWeight: 'bold', marginBottom: 12 }}>
+        <View style={{ flex: 1, backgroundColor: '#100E0C', padding: 24, paddingTop: 60 }}>
+          <Text style={{ color: '#C46868', fontSize: 18, fontWeight: 'bold', marginBottom: 12 }}>
             ⚠ Render Error
           </Text>
           <ScrollView>
@@ -200,7 +199,6 @@ export default function RootLayout() {
         <SessionGuard />
         <PushGuard />
         <RealtimeBridge />
-        <AmbientBridge />
         <NotificationListener />
         <Stack screenOptions={{ headerShown: false }}>
           <Stack.Screen name="index" />

@@ -150,7 +150,7 @@ export default function ReservationDetail() {
                 value={reservation.confirmCode}
                 size={200}
                 backgroundColor="#FFFFFF"
-                color="#0D0D0F"
+                color="#100E0C"
               />
             </View>
             <Subhead align="center" style={styles.qrCode}>

@@ -21,7 +21,7 @@ import { Colors, Radius, Spacing, Typography } from '@/constants/tokens';
 import { Body, Caption } from '@/components/ui';
 import { VoiceBubble } from './VoiceBubble';
 
-const AVATAR_COLORS = ['#F4A340', '#60A5FA', '#A855F7', '#6FB892', '#E06868', '#EC4899'];
+const AVATAR_COLORS = ['#C9A961', '#7FA0BC', '#9F8DBE', '#6FA88A', '#C46868', '#C48A8A'];
 function colorFor(id: string) {
   const idx = Math.abs([...id].reduce((a, c) => a + c.charCodeAt(0), 0)) % AVATAR_COLORS.length;
   return AVATAR_COLORS[idx];
