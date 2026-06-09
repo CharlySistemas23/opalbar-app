@@ -46,7 +46,7 @@ import {
   SkeletonText,
 } from '@/components/ui';
 import { ErrorState } from '@/components/ErrorState';
-import { OPALBAR_WEBSITE, OpalbarRoutes } from '@/lib/website';
+import { OpalbarRoutes } from '@/lib/website';
 
 // ── External actions ─────────────────────────
 async function openDirections(venue: {
@@ -287,12 +287,7 @@ export default function BarTab() {
             <ActionTile
               icon="globe"
               label={t ? 'Sitio' : 'Website'}
-              onPress={() => {
-                const url = venue.website || OPALBAR_WEBSITE;
-                Linking.openURL(url).catch(() => {
-                  /* noop */
-                });
-              }}
+              onPress={() => OpalbarRoutes.home()}
             />
           </View>
         </FadeIn>

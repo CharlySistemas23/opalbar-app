@@ -8,8 +8,10 @@
 // ─────────────────────────────────────────────
 import { Platform, Share, type ShareContent } from 'react-native';
 
+import { OPALBAR_WEBSITE } from '@/lib/website';
+
 const APP_BRAND = 'OPAL BAR';
-const APP_WEB = 'https://opalbar.app';
+const APP_WEB = OPALBAR_WEBSITE; // public site, never admin
 const APP_DEEP_SCHEME = 'opalbar://';
 
 function appendDownloadFooter(lines: string[]) {

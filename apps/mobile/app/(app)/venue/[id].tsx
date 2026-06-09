@@ -39,6 +39,7 @@ import { Colors, EditorialSpacing, Radius, Spacing } from '@/constants/tokens';
 import { HitSlop, Roles } from '@/constants/a11y';
 import { reviewsApi, venueApi } from '@/api/client';
 import { apiError } from '@/api/errors';
+import { sanitizePublicUrl } from '@/lib/website';
 import { useAppStore } from '@/stores/app.store';
 import { ErrorState } from '@/components/ErrorState';
 
@@ -253,7 +254,10 @@ export default function VenueDetail() {
                   icon="globe"
                   kicker={t ? 'SITIO' : 'WEBSITE'}
                   value={venue.website}
-                  onPress={() => Linking.openURL(venue.website).catch(() => {})}
+                  onPress={() => {
+                    const safe = sanitizePublicUrl(venue.website);
+                    Linking.openURL(safe).catch(() => {});
+                  }}
                 />
                 <Hairline variant="subtle" />
               </>
