@@ -38,6 +38,7 @@ import { Colors, EditorialSpacing, Radius, Spacing } from '@/constants/tokens';
 import { HitSlop, Roles } from '@/constants/a11y';
 import { eventsApi, offersApi } from '@/api/client';
 import { useAppStore } from '@/stores/app.store';
+import { OpalbarRoutes } from '@/lib/website';
 
 interface EventItem {
   id: string;
@@ -319,6 +320,21 @@ export default function GuestHome() {
           </View>
         </View>
 
+        <FadeIn delay={200}>
+          <Pressy
+            onPress={() => OpalbarRoutes.home()}
+            accessibilityRole={Roles.button}
+            accessibilityLabel={t ? 'Visitar opalbar.com.mx' : 'Visit opalbar.com.mx'}
+            hitSlop={HitSlop.expand}
+            style={styles.webFooter}
+          >
+            <Caption tone="muted" align="center">
+              {t ? 'Conoce más en ' : 'Learn more at '}
+              <Caption tone="accent">opalbar.com.mx</Caption>
+            </Caption>
+          </Pressy>
+        </FadeIn>
+
         <View style={{ height: Spacing[12] }} />
       </ScrollView>
     </SafeAreaView>
@@ -328,6 +344,12 @@ export default function GuestHome() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
   scroll: { paddingBottom: 0 },
+  webFooter: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingVertical: Spacing[6],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
   header: {
     flexDirection: 'row',

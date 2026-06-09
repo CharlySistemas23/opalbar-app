@@ -30,6 +30,7 @@ import {
   Spacing,
 } from '@/constants/tokens';
 import { HitSlop, Roles } from '@/constants/a11y';
+import { playUiSound } from '@/hooks/useFeedback';
 import {
   Body,
   Button,
@@ -45,6 +46,7 @@ import {
   SkeletonText,
 } from '@/components/ui';
 import { ErrorState } from '@/components/ErrorState';
+import { OPALBAR_WEBSITE, OpalbarRoutes } from '@/lib/website';
 
 // ── External actions ─────────────────────────
 async function openDirections(venue: {
@@ -192,6 +194,7 @@ export default function BarTab() {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={() => {
+              playUiSound('swoosh');
               setRefreshing(true);
               load();
             }}
@@ -281,17 +284,16 @@ export default function BarTab() {
                 onPress={() => callVenue(venue.phone)}
               />
             ) : null}
-            {venue.website ? (
-              <ActionTile
-                icon="globe"
-                label={t ? 'Sitio' : 'Website'}
-                onPress={() =>
-                  Linking.openURL(venue.website).catch(() => {
-                    /* noop */
-                  })
-                }
-              />
-            ) : null}
+            <ActionTile
+              icon="globe"
+              label={t ? 'Sitio' : 'Website'}
+              onPress={() => {
+                const url = venue.website || OPALBAR_WEBSITE;
+                Linking.openURL(url).catch(() => {
+                  /* noop */
+                });
+              }}
+            />
           </View>
         </FadeIn>
 
@@ -342,11 +344,7 @@ export default function BarTab() {
         <Section title={t ? 'La carta' : 'The menu'}>
           <View style={styles.menuTiles}>
             <Pressy
-              onPress={() =>
-                venue.website
-                  ? Linking.openURL(venue.website).catch(() => {})
-                  : null
-              }
+              onPress={() => OpalbarRoutes.menu()}
               haptic="select"
               accessibilityRole={Roles.button}
               accessibilityLabel={t ? 'Ver carta de cocteles' : 'View cocktails menu'}
@@ -361,10 +359,7 @@ export default function BarTab() {
               </Caption>
             </Pressy>
             <Pressy
-              onPress={() =>
-                venue.website
-                  ? Linking.openURL(venue.website).catch(() => {})
-                  : null
+              onPress={() => OpalbarRoutes.menu()
               }
               haptic="select"
               accessibilityRole={Roles.button}

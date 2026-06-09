@@ -29,10 +29,11 @@ import {
 } from '@/components/ui';
 import { checkForUpdateManual } from '@/components/UpdateOverlay';
 import { toast } from '@/components/Toast';
+import { OPALBAR_WEBSITE, OpalbarRoutes, openOpalbarWebsite } from '@/lib/website';
 
 const LEGAL_URLS = {
-  terms: 'https://opalbar.app/terms',
-  privacy: 'https://opalbar.app/privacy',
+  terms: `${OPALBAR_WEBSITE}/terminos`,
+  privacy: `${OPALBAR_WEBSITE}/privacidad`,
 };
 
 export default function About() {
@@ -101,9 +102,21 @@ export default function About() {
           <View style={styles.listShell}>
             <ListItem title={t ? 'Desarrollado por' : 'Developed by'} meta="OpalBar Team" />
             <ListItem.Separator />
-            <ListItem title={t ? 'Contacto' : 'Contact'} meta="hello@opalbar.app" />
+            <ListItem
+              title={t ? 'Contacto' : 'Contact'}
+              meta="hello@opalbar.com.mx"
+              leftIcon={<Feather name="mail" size={18} color={Colors.textSecondary} />}
+              onPress={() => Linking.openURL('mailto:hello@opalbar.com.mx').catch(() => toast(t ? 'No se pudo abrir el correo.' : 'Could not open mail.', 'danger'))}
+              showChevron
+            />
             <ListItem.Separator />
-            <ListItem title={t ? 'Sitio web' : 'Website'} meta="opalbar.app" />
+            <ListItem
+              title={t ? 'Sitio web' : 'Website'}
+              meta="opalbar.com.mx"
+              leftIcon={<Feather name="globe" size={18} color={Colors.accentPrimary} />}
+              onPress={() => OpalbarRoutes.home()}
+              showChevron
+            />
           </View>
         </FadeIn>
 

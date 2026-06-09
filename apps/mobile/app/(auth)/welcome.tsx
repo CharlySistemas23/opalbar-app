@@ -18,7 +18,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, EditorialSpacing, Radius, Spacing } from '@/constants/tokens';
 import { useAuthStore } from '@/stores/auth.store';
 import { useAppStore } from '@/stores/app.store';
-import { Body, Button, Display, FadeIn, Heading, Kicker, Pressy } from '@/components/ui';
+import { Body, Button, Caption, Display, FadeIn, Heading, Kicker, Pressy } from '@/components/ui';
+import { OpalbarRoutes } from '@/lib/website';
 
 export default function Welcome() {
   const router = useRouter();
@@ -110,6 +111,19 @@ export default function Welcome() {
               </Body>
             </Pressy>
           </FadeIn>
+          <FadeIn delay={620}>
+            <Pressy
+              onPress={() => OpalbarRoutes.home()}
+              accessibilityRole="button"
+              accessibilityLabel={t ? 'Visitar opalbar.com.mx' : 'Visit opalbar.com.mx'}
+              style={styles.webLink}
+            >
+              <Caption tone="muted" align="center">
+                {t ? 'Conoce más en ' : 'Learn more at '}
+                <Caption tone="accent">opalbar.com.mx</Caption>
+              </Caption>
+            </Pressy>
+          </FadeIn>
         </View>
       </View>
     </SafeAreaView>
@@ -156,5 +170,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: 44,
+  },
+  webLink: {
+    paddingVertical: Spacing[2],
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 32,
   },
 });
