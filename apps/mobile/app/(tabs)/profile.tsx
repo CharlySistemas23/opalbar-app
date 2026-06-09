@@ -196,7 +196,7 @@ export default function Profile() {
 
         {/* ── Mi muro ── */}
         <FadeIn delay={200} style={styles.wallBlock}>
-          <Kicker tone="muted" style={{ marginBottom: Spacing[3] }}>
+          <Kicker tone="muted" style={{ marginBottom: Spacing[2] }}>
             {t ? 'MI MURO' : 'MY WALL'}
           </Kicker>
           <View style={styles.wallTiles}>
@@ -386,7 +386,7 @@ function MenuSection({
 }) {
   return (
     <FadeIn delay={delay} style={styles.menuSection}>
-      <Kicker tone="muted" style={{ marginBottom: Spacing[3] }}>
+      <Kicker tone="muted" style={{ marginBottom: Spacing[2] }}>
         {kicker}
       </Kicker>
       <View style={styles.listShell}>
@@ -436,7 +436,7 @@ const styles = StyleSheet.create({
 
   wallBlock: {
     paddingHorizontal: EditorialSpacing.pageGutter,
-    marginTop: Spacing[5],
+    marginTop: Spacing[3],
   },
   wallTiles: {
     flexDirection: 'row',
@@ -461,7 +461,7 @@ const styles = StyleSheet.create({
 
   menuSection: {
     paddingHorizontal: EditorialSpacing.pageGutter,
-    marginTop: Spacing[5],
+    marginTop: Spacing[3],
   },
   listShell: {
     backgroundColor: Colors.bgCard,

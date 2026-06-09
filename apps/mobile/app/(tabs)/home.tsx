@@ -195,7 +195,7 @@ export default function Home() {
         ) : (
           <>
             {/* ── 3. ESTA NOCHE EN OPALBAR ── */}
-            <View style={[styles.section, { paddingTop: 20 }]}>
+            <View style={[styles.section, { paddingTop: 8 }]}>
               <FadeIn delay={140}>
                 <Text style={[TypePresets.kicker, { color: Colors.textMuted }]}>
                   {t ? 'ESTA NOCHE EN OPALBAR' : 'TONIGHT AT OPALBAR'}
@@ -253,7 +253,7 @@ export default function Home() {
             </View>
 
             {/* ── 4. TUS PRIVILEGIOS ── */}
-            <View style={[styles.section, { paddingTop: 16 }]}>
+            <View style={[styles.section, { paddingTop: 8 }]}>
               <FadeIn delay={220}>
                 <Text style={[TypePresets.kicker, { color: Colors.textMuted }]}>
                   {t ? 'TUS PRIVILEGIOS' : 'YOUR PRIVILEGES'}
@@ -336,12 +336,12 @@ const styles = StyleSheet.create({
 
   section: {
     paddingHorizontal: 24,
-    gap: 10,
+    gap: 8,
   },
   hairline: {
     height: StyleSheet.hairlineWidth,
     backgroundColor: 'rgba(246,241,231,0.06)',
-    marginTop: 8,
+    marginTop: 4,
   },
 
   // Tonight card
