@@ -80,6 +80,7 @@ export function Card({
     return (
       <Pressy
         onPress={onPress}
+        sound="tick"
         style={composed}
         accessibilityLabel={accessibilityLabel}
         accessibilityHint={accessibilityHint}

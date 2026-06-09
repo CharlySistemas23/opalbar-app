@@ -11,9 +11,9 @@ type FeatherIcon = React.ComponentProps<typeof Feather>['name'];
 
 const TYPE_META: Record<string, { icon: FeatherIcon; color: string; label: string }> = {
   POST: { icon: 'message-square', color: Colors.accentPrimary, label: 'Post' },
-  COMMENT: { icon: 'message-circle', color: '#60A5FA', label: 'Comentario' },
-  USER: { icon: 'user', color: '#A855F7', label: 'Usuario' },
-  REVIEW: { icon: 'star', color: '#EC4899', label: 'Reseña' },
+  COMMENT: { icon: 'message-circle', color: Colors.accentInfo, label: 'Comentario' },
+  USER: { icon: 'user', color: Colors.accentChampagne, label: 'Usuario' },
+  REVIEW: { icon: 'star', color: Colors.accentChampagne, label: 'Reseña' },
 };
 
 const STATUS_META: Record<string, { color: string; label: string }> = {
@@ -259,8 +259,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row', gap: 8, alignItems: 'center',
     paddingHorizontal: 10, paddingVertical: 8,
     borderRadius: 8,
-    backgroundColor: 'rgba(228,88,88,0.1)',
-    borderWidth: 1, borderColor: 'rgba(228,88,88,0.3)',
+    backgroundColor: 'rgba(196,104,104,0.10)',
+    borderWidth: 1, borderColor: 'rgba(196,104,104,0.30)',
   },
   moreReportsText: { color: Colors.accentDanger, fontSize: 11, fontWeight: '700', flex: 1 },
 
@@ -272,7 +272,7 @@ const styles = StyleSheet.create({
   viewUserBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     paddingHorizontal: 12, paddingVertical: 8,
-    backgroundColor: 'rgba(244,163,64,0.12)',
+    backgroundColor: 'rgba(201,169,97,0.12)',
     borderRadius: 8, alignSelf: 'flex-start',
   },
   viewUserLbl: { color: Colors.accentPrimary, fontSize: 12, fontWeight: '700' },
@@ -287,8 +287,8 @@ const styles = StyleSheet.create({
   banBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
     height: 48, borderRadius: 12,
-    backgroundColor: 'rgba(228,88,88,0.1)',
-    borderWidth: 1, borderColor: 'rgba(228,88,88,0.3)',
+    backgroundColor: 'rgba(196,104,104,0.10)',
+    borderWidth: 1, borderColor: 'rgba(196,104,104,0.30)',
   },
   banLbl: { color: Colors.accentDanger, fontSize: 14, fontWeight: '700' },
 

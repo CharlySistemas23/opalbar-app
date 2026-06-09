@@ -22,6 +22,7 @@ import Animated, {
 import { Colors, Radius, Spacing, TypePresets } from '@/constants/tokens';
 import { Durations } from '@/constants/motion';
 import { A11yDefaults, HitSlop, Roles } from '@/constants/a11y';
+import { playUiSound } from '@/hooks/useFeedback';
 import { Pressy } from './Pressy';
 
 export interface SegmentOption<T extends string> {
@@ -53,7 +54,10 @@ export function SegmentedControl<T extends string>({
         return (
           <Pressy
             key={opt.value}
-            onPress={() => onChange(opt.value)}
+            onPress={() => {
+              if (!active) playUiSound('tick');
+              onChange(opt.value);
+            }}
             haptic="select"
             accessibilityRole={Roles.tab}
             accessibilityLabel={opt.label}
@@ -90,7 +94,10 @@ export function Tabs<T extends string>({ value, onChange, options }: TabsProps<T
           key={opt.value}
           option={opt}
           active={opt.value === value}
-          onPress={() => onChange(opt.value)}
+          onPress={() => {
+            if (opt.value !== value) playUiSound('tick');
+            onChange(opt.value);
+          }}
         />
       ))}
     </View>

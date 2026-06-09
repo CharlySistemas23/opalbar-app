@@ -119,7 +119,7 @@ export default function LoyaltyLevels() {
           {/* ── Hero ── */}
           <FadeIn style={styles.hero}>
             <Kicker tone="muted">{t ? 'NIVEL ACTUAL' : 'CURRENT TIER'}</Kicker>
-            <Heading size="lg" style={{ marginTop: Spacing[3] }}>
+            <Heading size="lg" style={{ marginTop: Spacing[2] }}>
               {currentLevel?.name ?? '—'}
             </Heading>
             <View style={{ flexDirection: 'row', alignItems: 'baseline', marginTop: Spacing[5], gap: Spacing[2] }}>
@@ -233,6 +233,7 @@ const styles = StyleSheet.create({
   },
   hero: {
     paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[4],
     paddingBottom: Spacing[8],
   },
   progressTrack: {

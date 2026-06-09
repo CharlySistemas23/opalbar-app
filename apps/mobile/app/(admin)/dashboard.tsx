@@ -1,3 +1,11 @@
+// ─────────────────────────────────────────────
+//  Admin Dashboard — Editorial Premium
+//
+//  Logica intacta. Solo se rediseno el chrome:
+//   · Hero greeting con tipografia serif (Heading)
+//   · KPI chips compactas con tokens
+//   · Inbox + Activity como AdminRows
+// ─────────────────────────────────────────────
 import {
   View,
   Text,
@@ -14,22 +22,14 @@ import { Feather } from '@expo/vector-icons';
 import { adminApi } from '@/api/client';
 import { useAuthStore } from '@/stores/auth.store';
 import { useAdminCounts } from '@/hooks/useAdminCounts';
-import { Colors } from '@/constants/tokens';
-
-// ─────────────────────────────────────────────
-//  Admin Dashboard — rethought for elegance + signal
-//  · Hero greeting + user avatar (top-right)
-//  · 4 KPI chips in horizontal scroll (flat, airy)
-//  · Unified Inbox (primary work area)
-//  · Activity feed (secondary, compact)
-//  · No duplicate quick actions (those live in Manage)
-// ─────────────────────────────────────────────
+import { Colors, Radius, Spacing, TypePresets } from '@/constants/tokens';
+import { Body, Caption, Heading, Kicker, Numeric, Subhead } from '@/components/ui';
 
 type FeatherIcon = React.ComponentProps<typeof Feather>['name'];
 
 const ACTIVITY_META: Record<string, { icon: FeatherIcon; color: string }> = {
   SIGNUP: { icon: 'user-plus', color: Colors.accentPrimary },
-  RESERVATION: { icon: 'calendar', color: '#60A5FA' },
+  RESERVATION: { icon: 'calendar', color: Colors.accentInfo },
   POST: { icon: 'message-square', color: Colors.accentSuccess },
   REPORT: { icon: 'flag', color: Colors.accentDanger },
 };
@@ -37,7 +37,7 @@ const ACTIVITY_META: Record<string, { icon: FeatherIcon; color: string }> = {
 const INBOX_META: Record<string, { icon: FeatherIcon; color: string }> = {
   FLAG: { icon: 'alert-triangle', color: Colors.accentDanger },
   REPORT: { icon: 'flag', color: Colors.accentDanger },
-  TICKET: { icon: 'life-buoy', color: '#60A5FA' },
+  TICKET: { icon: 'life-buoy', color: Colors.accentInfo },
   POST: { icon: 'message-square', color: Colors.accentSuccess },
   REVIEW: { icon: 'star', color: Colors.accentWarning },
   RESERVATION: { icon: 'calendar', color: Colors.accentPrimary },
@@ -54,7 +54,7 @@ function relTime(d?: string) {
 
 function getGreeting(): string {
   const h = new Date().getHours();
-  if (h < 12) return 'Buenos días';
+  if (h < 12) return 'Buenos dias';
   if (h < 19) return 'Buenas tardes';
   return 'Buenas noches';
 }
@@ -99,10 +99,10 @@ export default function AdminDashboard() {
 
   const kpis = useMemo(
     () => [
-      { label: 'Usuarios', value: stats?.totalUsers ?? 0, color: Colors.accentPrimary, icon: 'users' as FeatherIcon },
-      { label: 'Eventos hoy', value: stats?.activeEvents ?? 0, color: Colors.accentSuccess, icon: 'calendar' as FeatherIcon },
-      { label: 'Reservas pend.', value: stats?.pendingReservations ?? 0, color: Colors.accentInfo, icon: 'bookmark' as FeatherIcon },
-      { label: 'Reportes', value: stats?.openReports ?? 0, color: Colors.accentDanger, icon: 'flag' as FeatherIcon },
+      { label: 'Usuarios', value: stats?.totalUsers ?? 0, icon: 'users' as FeatherIcon },
+      { label: 'Eventos hoy', value: stats?.activeEvents ?? 0, icon: 'calendar' as FeatherIcon },
+      { label: 'Reservas pend.', value: stats?.pendingReservations ?? 0, icon: 'bookmark' as FeatherIcon },
+      { label: 'Reportes', value: stats?.openReports ?? 0, icon: 'flag' as FeatherIcon, danger: true },
     ],
     [stats],
   );
@@ -123,22 +123,20 @@ export default function AdminDashboard() {
           />
         }
       >
-        {/* ── Hero header ─────────────────────── */}
+        {/* Hero header */}
         <View style={styles.hero}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.heroGreeting}>
-              {getGreeting()},
-            </Text>
-            <Text style={styles.heroName} numberOfLines={1}>
+            <Kicker tone="muted">{getGreeting()}</Kicker>
+            <Heading size="lg" style={{ marginTop: 4 }} numberOfLines={1}>
               {user?.profile?.firstName ?? 'Admin'}
-            </Text>
-            <Text style={styles.heroSub}>
+            </Heading>
+            <Caption tone="muted" style={{ marginTop: 6, textTransform: 'capitalize' }}>
               {new Date().toLocaleDateString('es', {
                 weekday: 'long',
                 day: 'numeric',
                 month: 'long',
               })}
-            </Text>
+            </Caption>
           </View>
 
           <View style={styles.heroActions}>
@@ -146,6 +144,8 @@ export default function AdminDashboard() {
               style={({ pressed }) => [styles.modePill, pressed && styles.pressed]}
               onPress={() => router.replace('/(tabs)/home' as never)}
               hitSlop={6}
+              accessibilityRole="button"
+              accessibilityLabel="Cambiar a modo usuario"
             >
               <Feather name="smartphone" size={13} color={Colors.accentPrimary} />
               <Text style={styles.modePillText}>Usuario</Text>
@@ -154,17 +154,15 @@ export default function AdminDashboard() {
               style={({ pressed }) => [styles.avatar, pressed && styles.pressed]}
               onPress={() => router.push('/(tabs)/profile' as never)}
               hitSlop={6}
+              accessibilityRole="button"
+              accessibilityLabel="Perfil"
             >
-              {user?.profile?.avatarUrl ? (
-                <Text style={styles.avatarText}>{initials}</Text>
-              ) : (
-                <Text style={styles.avatarText}>{initials}</Text>
-              )}
+              <Text style={styles.avatarText}>{initials}</Text>
             </Pressable>
           </View>
         </View>
 
-        {/* ── KPI row (horizontal scroll, airy chips) ─ */}
+        {/* KPI row */}
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -172,40 +170,54 @@ export default function AdminDashboard() {
         >
           {kpis.map((k) => (
             <View key={k.label} style={styles.kpi}>
-              <View style={[styles.kpiIconBox, { backgroundColor: k.color + '1F' }]}>
-                <Feather name={k.icon} size={15} color={k.color} />
+              <View style={styles.kpiIconBox}>
+                <Feather
+                  name={k.icon}
+                  size={14}
+                  color={k.danger ? Colors.accentDanger : Colors.accentPrimary}
+                />
               </View>
               {loading ? (
-                <ActivityIndicator color={k.color} size="small" style={{ marginTop: 8 }} />
+                <ActivityIndicator
+                  color={k.danger ? Colors.accentDanger : Colors.accentPrimary}
+                  size="small"
+                  style={{ marginTop: 8 }}
+                />
               ) : (
-                <Text style={styles.kpiValue}>{k.value}</Text>
+                <Numeric size="sm" tone={k.danger ? 'danger' : 'primary'}>
+                  {k.value}
+                </Numeric>
               )}
-              <Text style={styles.kpiLabel}>{k.label}</Text>
+              <Caption tone="muted" size="sm" style={{ marginTop: 2 }}>
+                {k.label}
+              </Caption>
             </View>
           ))}
         </ScrollView>
 
-        {/* ── Mis clientes CTA ──────────────── */}
+        {/* Mis clientes CTA */}
         <Pressable
           style={({ pressed }) => [styles.insightsCta, pressed && styles.pressed]}
           onPress={() => router.push('/(admin)/analytics' as never)}
+          accessibilityRole="button"
+          accessibilityLabel="Ver analiticas de clientes"
         >
           <View style={styles.insightsCtaIcon}>
-            <Feather name="bar-chart-2" size={18} color={Colors.accentPrimary} />
+            <Feather name="bar-chart-2" size={16} color={Colors.accentPrimary} />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={styles.insightsCtaTitle}>Mis clientes</Text>
-            <Text style={styles.insightsCtaSub}>
-              Quiénes son, qué les interesa, cómo te encontraron
-            </Text>
+            <Subhead>Mis clientes</Subhead>
+            <Caption tone="muted" style={{ marginTop: 2 }}>
+              Quienes son, que les interesa, como te encontraron
+            </Caption>
           </View>
           <Feather name="chevron-right" size={18} color={Colors.textMuted} />
         </Pressable>
 
-        {/* ── Inbox ──────────────────────────── */}
+        {/* Inbox section */}
         <View style={styles.sectionHeader}>
           <View style={styles.sectionTitleRow}>
-            <Text style={styles.sectionTitle}>Bandeja de hoy</Text>
+            <Kicker tone="muted">Bandeja de hoy</Kicker>
             {counts.total > 0 && (
               <View style={styles.sectionBadge}>
                 <Text style={styles.sectionBadgeText}>{counts.total}</Text>
@@ -216,6 +228,8 @@ export default function AdminDashboard() {
             style={({ pressed }) => pressed && styles.pressed}
             onPress={() => router.push('/(admin)/manage' as never)}
             hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Gestionar bandeja"
           >
             <Text style={styles.sectionLink}>Gestionar</Text>
           </Pressable>
@@ -229,10 +243,10 @@ export default function AdminDashboard() {
           ) : inbox.length === 0 ? (
             <View style={styles.inboxEmpty}>
               <View style={styles.inboxEmptyIcon}>
-                <Feather name="check" size={22} color={Colors.accentSuccess} />
+                <Feather name="check" size={20} color={Colors.accentSuccess} />
               </View>
-              <Text style={styles.inboxEmptyTitle}>Todo al día</Text>
-              <Text style={styles.inboxEmptySub}>Nada pendiente. Buen trabajo.</Text>
+              <Subhead style={{ marginTop: 4 }}>Todo al dia</Subhead>
+              <Caption tone="muted">Nada pendiente. Buen trabajo.</Caption>
             </View>
           ) : (
             inbox.map((it: any, idx: number) => {
@@ -246,34 +260,40 @@ export default function AdminDashboard() {
                     pressed && styles.pressed,
                   ]}
                   onPress={() => router.push(it.deepLink as never)}
+                  accessibilityRole="button"
+                  accessibilityLabel={it.title}
                 >
                   <View style={[styles.inboxIcon, { backgroundColor: meta.color + '1F' }]}>
-                    <Feather name={meta.icon} size={15} color={meta.color} />
+                    <Feather name={meta.icon} size={14} color={meta.color} />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.inboxTitle} numberOfLines={1}>
+                    <Body size="sm" weight="semiBold" numberOfLines={1}>
                       {it.title}
-                    </Text>
+                    </Body>
                     {it.preview ? (
-                      <Text style={styles.inboxPreview} numberOfLines={1}>
+                      <Caption tone="muted" size="sm" numberOfLines={1} style={{ marginTop: 2 }}>
                         {it.preview}
-                      </Text>
+                      </Caption>
                     ) : null}
                   </View>
-                  <View style={[styles.urgencyDot, { backgroundColor: urgencyColor(it.urgency) }]} />
+                  <View
+                    style={[styles.urgencyDot, { backgroundColor: urgencyColor(it.urgency) }]}
+                  />
                 </Pressable>
               );
             })
           )}
         </View>
 
-        {/* ── Activity ────────────────────────── */}
+        {/* Activity */}
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Actividad reciente</Text>
+          <Kicker tone="muted">Actividad reciente</Kicker>
           <Pressable
             style={({ pressed }) => pressed && styles.pressed}
             onPress={() => router.push('/(admin)/activity' as never)}
             hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Ver toda la actividad"
           >
             <Text style={styles.sectionLink}>Ver todo</Text>
           </Pressable>
@@ -285,7 +305,9 @@ export default function AdminDashboard() {
               <ActivityIndicator color={Colors.accentPrimary} />
             </View>
           ) : activity.length === 0 ? (
-            <Text style={styles.activityEmpty}>Sin actividad reciente.</Text>
+            <Caption tone="muted" align="center" style={{ paddingVertical: 14 }}>
+              Sin actividad reciente.
+            </Caption>
           ) : (
             activity.map((a, i) => {
               const meta = ACTIVITY_META[a.type] ?? ACTIVITY_META.SIGNUP;
@@ -298,10 +320,10 @@ export default function AdminDashboard() {
                   ]}
                 >
                   <View style={[styles.activityDot, { backgroundColor: meta.color }]} />
-                  <Text style={styles.activityText} numberOfLines={1}>
+                  <Body size="sm" style={{ flex: 1 }} numberOfLines={1}>
                     {a.text}
-                  </Text>
-                  <Text style={styles.activityTime}>{relTime(a.when)}</Text>
+                  </Body>
+                  <Caption tone="muted" size="sm">{relTime(a.when)}</Caption>
                 </View>
               );
             })
@@ -318,232 +340,180 @@ function urgencyColor(urgency: number): string {
   return Colors.textMuted;
 }
 
-// ─────────────────────────────────────────────
-//  Styles
-// ─────────────────────────────────────────────
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
   pressed: { opacity: 0.7 },
 
-  // Hero
   hero: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: 20,
-    gap: 12,
-  },
-  heroGreeting: {
-    color: Colors.textMuted,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  heroName: {
-    color: Colors.textPrimary,
-    fontSize: 28,
-    fontWeight: '800',
-    letterSpacing: -0.5,
-    marginTop: 2,
-  },
-  heroSub: {
-    color: Colors.textMuted,
-    fontSize: 12,
-    marginTop: 3,
-    textTransform: 'capitalize',
+    paddingHorizontal: Spacing[5],
+    paddingTop: Spacing[3],
+    paddingBottom: Spacing[5],
+    gap: Spacing[3],
   },
   heroActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: Spacing[2],
   },
   modePill: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
     paddingHorizontal: 10,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(244,163,64,0.12)',
+    height: 30,
+    borderRadius: Radius.full,
+    backgroundColor: 'rgba(201,169,97,0.10)',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(244,163,64,0.3)',
+    borderColor: 'rgba(201,169,97,0.30)',
   },
-  modePillText: { color: Colors.accentPrimary, fontSize: 11, fontWeight: '700' },
+  modePillText: {
+    ...TypePresets.label,
+    color: Colors.accentPrimary,
+    fontSize: 11,
+  },
   avatar: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: Colors.accentPrimary,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarText: { color: Colors.textInverse, fontWeight: '800', fontSize: 14 },
+  avatarText: { color: Colors.textInverse, fontWeight: '700', fontSize: 13 },
 
-  // KPI row
   kpiRow: {
-    paddingHorizontal: 20,
-    gap: 10,
-    paddingBottom: 8,
-  },
-
-  // Insights CTA
-  insightsCta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    marginHorizontal: 20,
-    marginTop: 14,
-    marginBottom: 6,
-    padding: 14,
-    borderRadius: 14,
-    backgroundColor: 'rgba(244,163,64,0.08)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(244,163,64,0.35)',
-  },
-  insightsCtaIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 10,
-    backgroundColor: 'rgba(244,163,64,0.18)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  insightsCtaTitle: {
-    color: Colors.textPrimary,
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  insightsCtaSub: {
-    color: Colors.textMuted,
-    fontSize: 11,
-    marginTop: 2,
+    paddingHorizontal: Spacing[5],
+    gap: Spacing[2],
+    paddingBottom: Spacing[2],
   },
   kpi: {
-    width: 130,
-    padding: 14,
-    borderRadius: 14,
+    width: 132,
+    padding: Spacing[3],
+    borderRadius: Radius['2xl'],
     backgroundColor: Colors.bgCard,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: Colors.border,
     gap: 4,
   },
   kpiIconBox: {
-    width: 30,
-    height: 30,
-    borderRadius: 9,
+    width: 28,
+    height: 28,
+    borderRadius: Radius.lg,
+    backgroundColor: 'rgba(201,169,97,0.12)',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 6,
   },
-  kpiValue: {
-    color: Colors.textPrimary,
-    fontSize: 24,
-    fontWeight: '800',
-    letterSpacing: -0.5,
-  },
-  kpiLabel: { color: Colors.textMuted, fontSize: 11, fontWeight: '500' },
 
-  // Section header
+  insightsCta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing[3],
+    marginHorizontal: Spacing[5],
+    marginTop: Spacing[3],
+    marginBottom: 4,
+    padding: Spacing[3],
+    borderRadius: Radius['2xl'],
+    backgroundColor: 'rgba(201,169,97,0.06)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(201,169,97,0.25)',
+  },
+  insightsCtaIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: Radius.lg,
+    backgroundColor: 'rgba(201,169,97,0.14)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingTop: 24,
-    paddingBottom: 10,
+    paddingHorizontal: Spacing[5],
+    paddingTop: Spacing[6],
+    paddingBottom: Spacing[2],
   },
   sectionTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  sectionTitle: {
-    color: Colors.textPrimary,
-    fontSize: 16,
-    fontWeight: '700',
-  },
   sectionBadge: {
-    minWidth: 22,
-    height: 22,
-    paddingHorizontal: 7,
-    borderRadius: 11,
+    minWidth: 20,
+    height: 20,
+    paddingHorizontal: 6,
+    borderRadius: Radius.full,
     backgroundColor: Colors.accentDanger,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  sectionBadgeText: { color: Colors.textInverse, fontSize: 11, fontWeight: '800' },
-  sectionLink: { color: Colors.accentPrimary, fontSize: 13, fontWeight: '600' },
+  sectionBadgeText: { color: Colors.textInverse, fontSize: 10, fontWeight: '700' },
+  sectionLink: {
+    ...TypePresets.label,
+    color: Colors.accentPrimary,
+    fontSize: 11,
+  },
 
-  // Inbox card
   inboxCard: {
-    marginHorizontal: 20,
+    marginHorizontal: Spacing[5],
     backgroundColor: Colors.bgCard,
-    borderRadius: 14,
+    borderRadius: Radius['2xl'],
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: Colors.border,
     overflow: 'hidden',
   },
-  centerSmall: { padding: 24, alignItems: 'center', justifyContent: 'center' },
+  centerSmall: { padding: Spacing[6], alignItems: 'center', justifyContent: 'center' },
   inboxEmpty: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 28,
-    gap: 6,
+    paddingVertical: Spacing[7],
+    gap: 4,
   },
   inboxEmptyIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(56,199,147,0.15)',
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(111,168,138,0.14)',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 4,
   },
-  inboxEmptyTitle: {
-    color: Colors.textPrimary,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  inboxEmptySub: { color: Colors.textMuted, fontSize: 12 },
 
   inboxItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
+    gap: Spacing[3],
+    paddingVertical: Spacing[3],
+    paddingHorizontal: Spacing[4],
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: Colors.border,
   },
   inboxItemLast: { borderBottomWidth: 0 },
   inboxIcon: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
+    width: 32,
+    height: 32,
+    borderRadius: Radius.lg,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  inboxTitle: { color: Colors.textPrimary, fontSize: 13, fontWeight: '700' },
-  inboxPreview: { color: Colors.textMuted, fontSize: 11, marginTop: 2 },
-  urgencyDot: { width: 7, height: 7, borderRadius: 3.5 },
+  urgencyDot: { width: 6, height: 6, borderRadius: 3 },
 
-  // Activity
   activityCard: {
-    marginHorizontal: 20,
+    marginHorizontal: Spacing[5],
     backgroundColor: Colors.bgCard,
-    borderRadius: 14,
+    borderRadius: Radius['2xl'],
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: Colors.border,
-    paddingHorizontal: 14,
-    paddingVertical: 2,
+    paddingHorizontal: Spacing[4],
   },
-  activityEmpty: { color: Colors.textMuted, fontSize: 12, paddingVertical: 14, textAlign: 'center' },
   activityRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingVertical: 10,
+    gap: Spacing[2],
+    paddingVertical: Spacing[3],
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: Colors.border,
   },
   activityRowLast: { borderBottomWidth: 0 },
-  activityDot: { width: 7, height: 7, borderRadius: 3.5 },
-  activityText: { flex: 1, color: Colors.textPrimary, fontSize: 13 },
-  activityTime: { color: Colors.textMuted, fontSize: 11 },
+  activityDot: { width: 6, height: 6, borderRadius: 3 },
 });

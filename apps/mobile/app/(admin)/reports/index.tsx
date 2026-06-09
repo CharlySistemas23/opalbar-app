@@ -1,19 +1,22 @@
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, RefreshControl, Alert } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, RefreshControl, Alert, Pressable } from 'react-native';
 import { useCallback, useMemo, useState } from 'react';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { adminApi } from '@/api/client';
 import { apiError } from '@/api/errors';
-import { Colors } from '@/constants/tokens';
+import { Colors, Spacing } from '@/constants/tokens';
+import { Caption, SegmentedControl, Subhead } from '@/components/ui';
+import { AdminHeader } from '@/components/admin';
+import type { SegmentOption } from '@/components/ui';
 
 type Filter = 'all' | 'PENDING' | 'RESOLVED' | 'DISMISSED';
 
 const TYPE_META: Record<string, { icon: any; color: string; label: string }> = {
   POST: { icon: 'message-square', color: Colors.accentPrimary, label: 'Post' },
-  COMMENT: { icon: 'message-circle', color: '#60A5FA', label: 'Comentario' },
-  USER: { icon: 'user', color: '#A855F7', label: 'Usuario' },
-  REVIEW: { icon: 'star', color: '#EC4899', label: 'Reseña' },
+  COMMENT: { icon: 'message-circle', color: Colors.accentInfo, label: 'Comentario' },
+  USER: { icon: 'user', color: Colors.accentChampagne, label: 'Usuario' },
+  REVIEW: { icon: 'star', color: Colors.accentChampagne, label: 'Reseña' },
 };
 
 export default function AdminReports() {
@@ -47,20 +50,30 @@ export default function AdminReports() {
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
-      <View style={styles.header}>
-        <View style={styles.logo}><Feather name="flag" size={16} color={Colors.accentPrimary} /></View>
-        <Text style={styles.title}>Reportes</Text>
-        <View style={{ flex: 1 }} />
-        <View style={styles.count}>
-          <Text style={styles.countText}>{reports.filter(r => r.status === 'PENDING').length}</Text>
-        </View>
-      </View>
+      <AdminHeader
+        title="Reportes"
+        kicker="Moderacion"
+        onBack={() => router.back()}
+        right={
+          <View style={styles.count}>
+            <Caption tone="danger" style={{ fontWeight: '700' }}>
+              {reports.filter(r => r.status === 'PENDING').length}
+            </Caption>
+          </View>
+        }
+      />
 
-      <View style={styles.tabs}>
-        <Tab active={filter === 'PENDING'} label="Pendientes" onPress={() => setFilter('PENDING')} />
-        <Tab active={filter === 'RESOLVED'} label="Resueltos" onPress={() => setFilter('RESOLVED')} />
-        <Tab active={filter === 'DISMISSED'} label="Descartados" onPress={() => setFilter('DISMISSED')} />
-        <Tab active={filter === 'all'} label="Todos" onPress={() => setFilter('all')} />
+      <View style={styles.tabsWrap}>
+        <SegmentedControl<Filter>
+          value={filter}
+          onChange={setFilter}
+          options={[
+            { value: 'PENDING', label: 'Pendientes' },
+            { value: 'RESOLVED', label: 'Resueltos' },
+            { value: 'DISMISSED', label: 'Descartados' },
+            { value: 'all', label: 'Todos' },
+          ] as SegmentOption<Filter>[]}
+        />
       </View>
 
       {loading ? (
@@ -122,14 +135,6 @@ export default function AdminReports() {
   );
 }
 
-function Tab({ active, label, onPress }: any) {
-  return (
-    <TouchableOpacity style={[styles.tab, active && styles.tabActive]} onPress={onPress} activeOpacity={0.85}>
-      <Text style={[styles.tabLabel, active && styles.tabLabelActive]}>{label}</Text>
-    </TouchableOpacity>
-  );
-}
-
 function relTime(d?: string) {
   if (!d) return '';
   const diff = Math.max(0, Math.floor((Date.now() - new Date(d).getTime()) / 1000));
@@ -143,33 +148,14 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
-  header: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    paddingHorizontal: 20, paddingTop: 8, paddingBottom: 8,
-  },
-  logo: {
-    width: 32, height: 32, borderRadius: 8,
-    backgroundColor: 'rgba(244,163,64,0.15)',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  title: { color: Colors.textPrimary, fontSize: 18, fontWeight: '800' },
   count: {
     minWidth: 40, height: 28, borderRadius: 14,
-    backgroundColor: 'rgba(228,88,88,0.15)',
+    backgroundColor: 'rgba(196,104,104,0.14)',
     paddingHorizontal: 10,
     alignItems: 'center', justifyContent: 'center',
   },
-  countText: { color: Colors.accentDanger, fontSize: 13, fontWeight: '800' },
 
-  tabs: { flexDirection: 'row', gap: 8, paddingHorizontal: 20, paddingVertical: 12, flexWrap: 'wrap' },
-  tab: {
-    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 18,
-    backgroundColor: Colors.bgCard,
-    borderWidth: 1, borderColor: Colors.border,
-  },
-  tabActive: { backgroundColor: Colors.accentPrimary, borderColor: Colors.accentPrimary },
-  tabLabel: { color: Colors.textSecondary, fontSize: 11, fontWeight: '600' },
-  tabLabelActive: { color: Colors.textInverse, fontWeight: '700' },
+  tabsWrap: { paddingHorizontal: Spacing[5], paddingVertical: Spacing[3] },
 
   card: {
     backgroundColor: Colors.bgCard,

@@ -9,17 +9,17 @@ import { Colors } from '@/constants/tokens';
 type Filter = 'all' | 'ACTIVE' | 'BANNED' | 'PENDING_VERIFICATION';
 
 const STATUS_META: Record<string, { bg: string; color: string; label: string }> = {
-  ACTIVE: { bg: 'rgba(56,199,147,0.15)', color: Colors.accentSuccess, label: 'ACTIVO' },
-  BANNED: { bg: 'rgba(228,88,88,0.15)', color: Colors.accentDanger, label: 'BANEADO' },
-  PENDING_VERIFICATION: { bg: 'rgba(244,163,64,0.15)', color: Colors.accentPrimary, label: 'SIN VERIF.' },
-  DELETED: { bg: 'rgba(107,107,120,0.15)', color: Colors.textMuted, label: 'ELIMINADO' },
+  ACTIVE: { bg: 'rgba(111,168,138,0.14)', color: Colors.accentSuccess, label: 'ACTIVO' },
+  BANNED: { bg: 'rgba(196,104,104,0.14)', color: Colors.accentDanger, label: 'BANEADO' },
+  PENDING_VERIFICATION: { bg: 'rgba(201,169,97,0.14)', color: Colors.accentPrimary, label: 'SIN VERIF.' },
+  DELETED: { bg: 'rgba(184,177,162,0.12)', color: Colors.textMuted, label: 'ELIMINADO' },
 };
 
 const ROLE_COLOR: Record<string, string> = {
   USER: Colors.textMuted,
-  MODERATOR: '#60A5FA',
+  MODERATOR: Colors.accentInfo,
   ADMIN: Colors.accentPrimary,
-  SUPER_ADMIN: '#A855F7',
+  SUPER_ADMIN: Colors.accentChampagne,
 };
 
 function relTime(iso?: string | null): string {
@@ -368,22 +368,22 @@ const styles = StyleSheet.create({
   },
   logo: {
     width: 32, height: 32, borderRadius: 8,
-    backgroundColor: 'rgba(244,163,64,0.15)',
+    backgroundColor: 'rgba(201,169,97,0.14)',
     alignItems: 'center', justifyContent: 'center',
   },
   title: { color: Colors.textPrimary, fontSize: 18, fontWeight: '800' },
   count: {
     color: Colors.accentPrimary, fontSize: 14, fontWeight: '800',
-    backgroundColor: 'rgba(244,163,64,0.15)',
+    backgroundColor: 'rgba(201,169,97,0.14)',
     paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10,
   },
   insightsBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     paddingHorizontal: 10, paddingVertical: 6,
     borderRadius: 10,
-    backgroundColor: 'rgba(244,163,64,0.10)',
+    backgroundColor: 'rgba(201,169,97,0.10)',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(244,163,64,0.45)',
+    borderColor: 'rgba(201,169,97,0.30)',
   },
   insightsBtnLbl: {
     color: Colors.accentPrimary, fontSize: 12, fontWeight: '800',
@@ -429,7 +429,7 @@ const styles = StyleSheet.create({
   newDot: {
     paddingHorizontal: 6, paddingVertical: 2,
     borderRadius: 6,
-    backgroundColor: 'rgba(56,199,147,0.18)',
+    backgroundColor: 'rgba(111,168,138,0.14)',
   },
   newDotText: {
     color: Colors.accentSuccess, fontSize: 8, fontWeight: '800', letterSpacing: 0.4,
@@ -443,7 +443,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: 3,
     paddingHorizontal: 6, paddingVertical: 2,
     borderRadius: 6,
-    backgroundColor: 'rgba(228,88,88,0.15)',
+    backgroundColor: 'rgba(196,104,104,0.14)',
   },
   alertPillText: {
     color: Colors.accentDanger, fontSize: 10, fontWeight: '800',
@@ -475,9 +475,9 @@ const styles = StyleSheet.create({
 
   headerBtn: {
     width: 32, height: 32, borderRadius: 10,
-    backgroundColor: 'rgba(244,163,64,0.10)',
+    backgroundColor: 'rgba(201,169,97,0.10)',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(244,163,64,0.45)',
+    borderColor: 'rgba(201,169,97,0.30)',
     alignItems: 'center', justifyContent: 'center',
   },
 

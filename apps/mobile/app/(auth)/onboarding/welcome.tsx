@@ -1,33 +1,46 @@
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  Pressable,
-  Animated,
-  Easing,
-} from 'react-native';
-import { useEffect, useRef } from 'react';
+// ─────────────────────────────────────────────
+//  Onboarding · Welcome celebration (Editorial Premium)
+//
+//  Layout = Figma canonical:
+//   · Progress 4/4 (all complete)
+//   · Kicker accent overline + Display headline ("¡Bienvenido, Nombre.")
+//   · Lead body with welcome line + champagne points note
+//   · Section label + 3 suggestion list items (bgCard hairline pill,
+//     icon chip + Subhead + Caption + arrow-right)
+//   · Bottom CTA: primary gold "Entrar a OPAL BAR"
+//
+//  Lógica intacta: success haptic on mount, router.replace to (tabs)/home
+//  o a las rutas de cada sugerencia.
+// ─────────────────────────────────────────────
+import { useEffect } from 'react';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+
 import { useAuthStore } from '@/stores/auth.store';
 import { useAppStore } from '@/stores/app.store';
-import { Colors } from '@/constants/tokens';
+import {
+  Colors,
+  EditorialSpacing,
+  Radius,
+  Spacing,
+} from '@/constants/tokens';
 import { useFeedback } from '@/hooks/useFeedback';
-
-// ─────────────────────────────────────────────
-//  Onboarding step 4 — Welcome celebration
-//  · Hero check icon: spring scale + fade
-//  · Floating confetti dots behind it
-//  · Staggered text fade-up
-//  · Cards slide in from the right
-//  · Success haptic on mount
-// ─────────────────────────────────────────────
+import {
+  Body,
+  Button,
+  Caption,
+  Display,
+  FadeIn,
+  Kicker,
+  Label,
+  Lead,
+  Pressy,
+  Subhead,
+} from '@/components/ui';
 
 type FeatherIcon = React.ComponentProps<typeof Feather>['name'];
-
-const CONFETTI_COLORS = ['#F4A340', '#A855F7', '#60A5FA', '#38C793', '#EC4899', '#FFD700'];
 
 export default function OnboardingWelcome() {
   const router = useRouter();
@@ -38,176 +51,42 @@ export default function OnboardingWelcome() {
 
   const firstName = user?.profile?.firstName ?? '';
 
-  // Animation values
-  const ringScale = useRef(new Animated.Value(0.2)).current;
-  const ringOpacity = useRef(new Animated.Value(0)).current;
-  const coreScale = useRef(new Animated.Value(0)).current;
-  const titleOpacity = useRef(new Animated.Value(0)).current;
-  const titleTranslate = useRef(new Animated.Value(20)).current;
-  const bonusTranslate = useRef(new Animated.Value(20)).current;
-  const bonusOpacity = useRef(new Animated.Value(0)).current;
-  const card1 = useRef(new Animated.Value(0)).current;
-  const card2 = useRef(new Animated.Value(0)).current;
-  const card3 = useRef(new Animated.Value(0)).current;
-  const confetti = useRef(
-    Array.from({ length: 12 }, () => ({
-      x: new Animated.Value(0),
-      y: new Animated.Value(0),
-      opacity: new Animated.Value(0),
-      rotate: new Animated.Value(0),
-    })),
-  ).current;
-
   useEffect(() => {
-    // Fire success haptic + chime when the screen lands
     fb.success();
-
-    // Sequence: ring expands, then check pops, then text fades in, then cards slide
-    Animated.sequence([
-      // Ring: spring expand + fade
-      Animated.parallel([
-        Animated.spring(ringScale, {
-          toValue: 1,
-          tension: 50,
-          friction: 7,
-          useNativeDriver: true,
-        }),
-        Animated.timing(ringOpacity, {
-          toValue: 1,
-          duration: 280,
-          useNativeDriver: true,
-        }),
-      ]),
-      // Core check: bouncy pop
-      Animated.spring(coreScale, {
-        toValue: 1,
-        tension: 120,
-        friction: 8,
-        useNativeDriver: true,
-      }),
-      // Title + bonus stagger
-      Animated.parallel([
-        Animated.timing(titleOpacity, {
-          toValue: 1,
-          duration: 350,
-          easing: Easing.out(Easing.quad),
-          useNativeDriver: true,
-        }),
-        Animated.timing(titleTranslate, {
-          toValue: 0,
-          duration: 350,
-          easing: Easing.out(Easing.quad),
-          useNativeDriver: true,
-        }),
-      ]),
-      Animated.parallel([
-        Animated.timing(bonusOpacity, {
-          toValue: 1,
-          duration: 280,
-          useNativeDriver: true,
-        }),
-        Animated.spring(bonusTranslate, {
-          toValue: 0,
-          tension: 100,
-          friction: 9,
-          useNativeDriver: true,
-        }),
-      ]),
-      // Cards cascade
-      Animated.stagger(80, [
-        Animated.spring(card1, { toValue: 1, tension: 60, friction: 8, useNativeDriver: true }),
-        Animated.spring(card2, { toValue: 1, tension: 60, friction: 8, useNativeDriver: true }),
-        Animated.spring(card3, { toValue: 1, tension: 60, friction: 8, useNativeDriver: true }),
-      ]),
-    ]).start();
-
-    // Confetti burst once ring appears
-    confetti.forEach((c, i) => {
-      const angle = (i / confetti.length) * Math.PI * 2;
-      const distance = 140 + Math.random() * 60;
-      const targetX = Math.cos(angle) * distance;
-      const targetY = Math.sin(angle) * distance + 20;
-      Animated.parallel([
-        Animated.sequence([
-          Animated.delay(200 + i * 30),
-          Animated.timing(c.opacity, {
-            toValue: 1,
-            duration: 180,
-            useNativeDriver: true,
-          }),
-          Animated.delay(800),
-          Animated.timing(c.opacity, {
-            toValue: 0,
-            duration: 600,
-            useNativeDriver: true,
-          }),
-        ]),
-        Animated.sequence([
-          Animated.delay(200 + i * 30),
-          Animated.parallel([
-            Animated.timing(c.x, {
-              toValue: targetX,
-              duration: 1400,
-              easing: Easing.out(Easing.cubic),
-              useNativeDriver: true,
-            }),
-            Animated.timing(c.y, {
-              toValue: targetY,
-              duration: 1400,
-              easing: Easing.out(Easing.cubic),
-              useNativeDriver: true,
-            }),
-            Animated.timing(c.rotate, {
-              toValue: Math.random() > 0.5 ? 1 : -1,
-              duration: 1400,
-              useNativeDriver: true,
-            }),
-          ]),
-        ]),
-      ]).start();
-    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const suggestions: {
     icon: FeatherIcon;
-    tint: string;
     titleEs: string;
     titleEn: string;
     subEs: string;
     subEn: string;
     path: string;
-    anim: Animated.Value;
   }[] = [
     {
       icon: 'calendar',
-      tint: Colors.accentPrimary,
       titleEs: 'Descubre eventos',
       titleEn: 'Discover events',
       subEs: 'Mira qué pasa esta semana',
       subEn: "See what's on this week",
       path: '/(tabs)/events',
-      anim: card1,
     },
     {
       icon: 'tag',
-      tint: '#A855F7',
       titleEs: 'Revisa las ofertas',
       titleEn: 'Check offers',
       subEs: 'Promociones activas del día',
       subEn: "Today's active promotions",
       path: '/(app)/offers',
-      anim: card2,
     },
     {
       icon: 'message-square',
-      tint: Colors.accentSuccess,
       titleEs: 'Entra a la comunidad',
       titleEn: 'Join the community',
       subEs: 'Conecta con otros clientes',
       subEn: 'Connect with other guests',
       path: '/(tabs)/community',
-      anim: card3,
     },
   ];
 
@@ -225,151 +104,96 @@ export default function OnboardingWelcome() {
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
       >
-        {/* Hero with celebration */}
-        <View style={styles.hero}>
-          {/* Confetti burst layer */}
-          <View style={styles.confettiLayer} pointerEvents="none">
-            {confetti.map((c, i) => (
-              <Animated.View
-                key={i}
-                style={[
-                  styles.confettiDot,
-                  {
-                    backgroundColor: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
-                    opacity: c.opacity,
-                    transform: [
-                      { translateX: c.x },
-                      { translateY: c.y },
-                      {
-                        rotate: c.rotate.interpolate({
-                          inputRange: [-1, 0, 1],
-                          outputRange: ['-360deg', '0deg', '360deg'],
-                        }),
-                      },
-                    ],
-                  },
-                ]}
-              />
-            ))}
+        <FadeIn>
+          <Kicker tone="champagne">{t ? 'TODO LISTO' : 'ALL SET'}</Kicker>
+        </FadeIn>
+        <FadeIn delay={80} style={{ marginTop: Spacing[3] }}>
+          <Display size="md">
+            {firstName
+              ? t
+                ? `Bienvenido,\n${firstName}.`
+                : `Welcome,\n${firstName}.`
+              : t
+                ? 'Bienvenido.'
+                : 'Welcome.'}
+          </Display>
+        </FadeIn>
+        <FadeIn delay={180} style={{ marginTop: Spacing[4], maxWidth: 360 }}>
+          <Lead tone="secondary">
+            {t
+              ? 'Tu cuenta en OPALBAR está activa. Te regalamos 50 puntos para empezar.'
+              : 'Your OPALBAR account is active. We gifted you 50 points to start.'}
+          </Lead>
+        </FadeIn>
+
+        <FadeIn delay={260} style={styles.bonusCard}>
+          <View
+            style={styles.bonusIcon}
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+          >
+            <Feather name="gift" size={16} color={Colors.accentPrimary} />
           </View>
-
-          {/* Ring + Core */}
-          <Animated.View
-            style={[
-              styles.successRing,
-              {
-                opacity: ringOpacity,
-                transform: [{ scale: ringScale }],
-              },
-            ]}
-          >
-            <Animated.View
-              style={[
-                styles.successCore,
-                { transform: [{ scale: coreScale }] },
-              ]}
-            >
-              <Feather name="check" size={42} color={Colors.textInverse} />
-            </Animated.View>
-          </Animated.View>
-
-          <Animated.View
-            style={{
-              opacity: titleOpacity,
-              transform: [{ translateY: titleTranslate }],
-              alignItems: 'center',
-            }}
-          >
-            <Text style={styles.kicker}>{t ? 'Todo listo' : 'All set'}</Text>
-            <Text style={styles.title}>
-              {firstName
-                ? t
-                  ? `¡Bienvenido,\n${firstName}!`
-                  : `Welcome,\n${firstName}!`
-                : t
-                  ? '¡Bienvenido!'
-                  : 'Welcome!'}
-            </Text>
-            <Text style={styles.subtitle}>
+          <View style={{ flex: 1 }}>
+            <Label tone="accent">
+              {t ? '+50 PUNTOS DE BIENVENIDA' : '+50 WELCOME POINTS'}
+            </Label>
+            <Caption tone="muted" style={{ marginTop: 2 }}>
               {t
-                ? 'Tu cuenta en OPAL BAR está activa.\nTe regalamos 50 puntos para empezar.'
-                : 'Your OPAL BAR account is active.\nWe gifted you 50 points to start.'}
-            </Text>
-          </Animated.View>
+                ? 'Disponibles en tu wallet desde hoy.'
+                : 'Available in your wallet from today.'}
+            </Caption>
+          </View>
+        </FadeIn>
 
-          <Animated.View
-            style={[
-              styles.bonusChip,
-              {
-                opacity: bonusOpacity,
-                transform: [{ translateY: bonusTranslate }],
-              },
-            ]}
-          >
-            <Feather name="gift" size={14} color={Colors.accentPrimary} />
-            <Text style={styles.bonusText}>
-              {t ? '+50 puntos de bienvenida' : '+50 welcome points'}
-            </Text>
-          </Animated.View>
-        </View>
-
-        <Text style={styles.sectionLabel}>
-          {t ? 'Por dónde empezar' : 'Where to start'}
-        </Text>
+        <FadeIn delay={340} style={{ marginTop: Spacing[8] }}>
+          <Label tone="secondary">{t ? 'POR DÓNDE EMPEZAR' : 'WHERE TO START'}</Label>
+        </FadeIn>
 
         <View style={styles.suggestionsCol}>
-          {suggestions.map((s) => (
-            <Animated.View
-              key={s.path}
-              style={{
-                opacity: s.anim,
-                transform: [
-                  {
-                    translateX: s.anim.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [40, 0],
-                    }),
-                  },
-                ],
-              }}
-            >
-              <Pressable
-                style={({ pressed }) => [
-                  styles.suggestionCard,
-                  pressed && styles.pressed,
-                ]}
+          {suggestions.map((s, i) => (
+            <FadeIn key={s.path} delay={400 + i * 70}>
+              <Pressy
+                accessibilityRole="button"
+                accessibilityLabel={t ? s.titleEs : s.titleEn}
                 onPress={() => {
                   fb.tap();
                   router.replace(s.path as never);
                 }}
+                style={styles.suggestionCard}
               >
-                <View style={[styles.suggestionIcon, { backgroundColor: s.tint + '1F' }]}>
-                  <Feather name={s.icon} size={20} color={s.tint} />
+                <View
+                  style={styles.suggestionIcon}
+                  accessibilityElementsHidden
+                  importantForAccessibility="no-hide-descendants"
+                >
+                  <Feather name={s.icon} size={18} color={Colors.accentPrimary} />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.suggestionTitle}>{t ? s.titleEs : s.titleEn}</Text>
-                  <Text style={styles.suggestionSub}>{t ? s.subEs : s.subEn}</Text>
+                  <Subhead tone="primary">{t ? s.titleEs : s.titleEn}</Subhead>
+                  <Caption tone="muted" style={{ marginTop: 2 }}>
+                    {t ? s.subEs : s.subEn}
+                  </Caption>
                 </View>
                 <Feather name="arrow-right" size={16} color={Colors.textMuted} />
-              </Pressable>
-            </Animated.View>
+              </Pressy>
+            </FadeIn>
           ))}
         </View>
       </ScrollView>
 
       <View style={styles.footer}>
-        <Pressable
-          style={({ pressed }) => [styles.primaryBtn, pressed && styles.pressed]}
+        <Button
+          label={t ? 'Entrar a OPALBAR' : 'Enter OPALBAR'}
           onPress={() => {
             fb.tap();
             router.replace('/(tabs)/home' as never);
           }}
-        >
-          <Text style={styles.primaryBtnLabel}>
-            {t ? 'Entrar a OPAL BAR' : 'Enter OPAL BAR'}
-          </Text>
-          <Feather name="arrow-right" size={18} color={Colors.textInverse} />
-        </Pressable>
+          variant="primary"
+          size="lg"
+          fullWidth
+          rightIcon={<Feather name="arrow-right" size={18} color={Colors.textInverse} />}
+        />
       </View>
     </SafeAreaView>
   );
@@ -377,14 +201,13 @@ export default function OnboardingWelcome() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
-  pressed: { opacity: 0.7 },
 
   stepRow: {
     flexDirection: 'row',
     gap: 6,
-    paddingHorizontal: 24,
-    paddingTop: 20,
-    paddingBottom: 20,
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[5],
+    paddingBottom: Spacing[3],
   },
   stepDot: {
     flex: 1,
@@ -394,134 +217,65 @@ const styles = StyleSheet.create({
   },
   stepDotActive: { backgroundColor: Colors.accentPrimary },
 
-  scroll: { paddingHorizontal: 24, paddingBottom: 20 },
-
-  hero: {
-    alignItems: 'center',
-    paddingTop: 10,
-    paddingBottom: 32,
-    position: 'relative',
-  },
-  confettiLayer: {
-    position: 'absolute',
-    top: 70,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    alignItems: 'center',
-    justifyContent: 'flex-start',
-  },
-  confettiDot: {
-    position: 'absolute',
-    width: 8,
-    height: 8,
-    borderRadius: 2,
+  scroll: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[6],
+    paddingBottom: Spacing[8],
   },
 
-  successRing: {
-    width: 128,
-    height: 128,
-    borderRadius: 64,
-    backgroundColor: 'rgba(56,199,147,0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 22,
-  },
-  successCore: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
-    backgroundColor: Colors.accentSuccess,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  kicker: {
-    color: Colors.accentSuccess,
-    fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 1,
-    textTransform: 'uppercase',
-  },
-  title: {
-    color: Colors.textPrimary,
-    fontSize: 30,
-    fontWeight: '800',
-    textAlign: 'center',
-    lineHeight: 36,
-    marginTop: 8,
-    letterSpacing: -0.3,
-  },
-  subtitle: {
-    color: Colors.textSecondary,
-    fontSize: 14,
-    lineHeight: 21,
-    textAlign: 'center',
-    marginTop: 10,
-  },
-  bonusChip: {
+  bonusCard: {
+    marginTop: Spacing[6],
     flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing[3],
+    paddingHorizontal: Spacing[4],
+    paddingVertical: Spacing[3],
+    backgroundColor: Colors.bgCard,
+    borderWidth: 1,
+    borderColor: 'rgba(201,169,97,0.35)',
+    borderRadius: Radius.lg,
+  },
+  bonusIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: Radius.md,
+    backgroundColor: 'rgba(201,169,97,0.12)',
     alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 999,
-    backgroundColor: 'rgba(244,163,64,0.12)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(244,163,64,0.35)',
-    marginTop: 18,
+    justifyContent: 'center',
   },
-  bonusText: { color: Colors.accentPrimary, fontSize: 12, fontWeight: '800' },
 
-  sectionLabel: {
-    color: Colors.textMuted,
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-    marginBottom: 10,
+  suggestionsCol: {
+    marginTop: Spacing[3],
+    gap: Spacing[2],
   },
-  suggestionsCol: { gap: 10 },
   suggestionCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
-    padding: 14,
-    borderRadius: 14,
+    gap: Spacing[3],
+    paddingHorizontal: Spacing[4],
+    paddingVertical: Spacing[3],
     backgroundColor: Colors.bgCard,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderWidth: 1,
     borderColor: Colors.border,
+    borderRadius: Radius.lg,
   },
   suggestionIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
+    width: 40,
+    height: 40,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.bgElevated,
+    borderWidth: 1,
+    borderColor: Colors.border,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  suggestionTitle: {
-    color: Colors.textPrimary,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  suggestionSub: {
-    color: Colors.textMuted,
-    fontSize: 12,
-    marginTop: 2,
   },
 
   footer: {
-    paddingHorizontal: 24,
-    paddingBottom: 16,
-    paddingTop: 10,
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingBottom: Spacing[4],
+    paddingTop: Spacing[3],
+    gap: Spacing[3],
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
   },
-  primaryBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    height: 56,
-    borderRadius: 14,
-    backgroundColor: Colors.accentPrimary,
-  },
-  primaryBtnLabel: { color: Colors.textInverse, fontSize: 16, fontWeight: '800' },
 });

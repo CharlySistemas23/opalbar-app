@@ -97,6 +97,7 @@ export function ListItem({
     return (
       <Pressy
         onPress={onPress}
+        sound="tick"
         disabled={disabled}
         accessibilityRole={Roles.button}
         accessibilityLabel={accessibilityLabel ?? title}

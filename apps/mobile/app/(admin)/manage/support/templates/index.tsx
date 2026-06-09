@@ -1,30 +1,32 @@
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator,
-  RefreshControl, Alert, Modal, TextInput, ScrollView,
+  RefreshControl, Alert, Modal, TextInput, ScrollView, Pressable,
 } from 'react-native';
 import { useCallback, useState } from 'react';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { adminApi } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { useSafeBack } from '@/hooks/useSafeBack';
 import { Colors } from '@/constants/tokens';
+import { ConfirmDialog } from '@/components/ui';
+import { AdminHeader } from '@/components/admin';
 
 const CATEGORY_OPTIONS = [
   { value: 'GREETING', label: 'Saludo', color: Colors.accentPrimary },
-  { value: 'APOLOGY', label: 'Disculpa', color: '#EC4899' },
-  { value: 'CLOSURE', label: 'Cierre', color: '#60A5FA' },
-  { value: 'INFO', label: 'Información', color: '#A855F7' },
+  { value: 'APOLOGY', label: 'Disculpa', color: Colors.accentChampagne },
+  { value: 'CLOSURE', label: 'Cierre', color: Colors.accentInfo },
+  { value: 'INFO', label: 'Información', color: Colors.accentChampagne },
   { value: 'OFFER', label: 'Oferta', color: Colors.accentSuccess },
 ];
 
 export default function QuickRepliesList() {
-  const router = useRouter();
   const goBack = useSafeBack('/(admin)/manage/support');
   const [replies, setReplies] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [confirmDel, setConfirmDel] = useState<{ id: string; title: string } | null>(null);
 
   const [showEdit, setShowEdit] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
@@ -79,39 +81,36 @@ export default function QuickRepliesList() {
     finally { setSaving(false); }
   }
 
-  async function remove(r: any) {
-    Alert.alert(
-      'Eliminar plantilla',
-      `¿Eliminar "${r.title}"? Ya no podrá insertarse en el chat.`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Eliminar', style: 'destructive',
-          onPress: async () => {
-            try {
-              await adminApi.deleteQuickReply(r.id);
-              setReplies((p) => p.filter((x) => x.id !== r.id));
-            } catch (err) { Alert.alert('Error', apiError(err)); }
-          },
-        },
-      ],
-    );
+  async function performDelete() {
+    if (!confirmDel) return;
+    const id = confirmDel.id;
+    setConfirmDel(null);
+    try {
+      await adminApi.deleteQuickReply(id);
+      setReplies((p) => p.filter((x) => x.id !== id));
+    } catch (err) {
+      Alert.alert('Error', apiError(err));
+    }
   }
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.iconBtn} onPress={goBack} hitSlop={10}>
-          <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
-        </TouchableOpacity>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.title}>Plantillas de respuesta</Text>
-          <Text style={styles.subtitle}>{replies.length} disponibles</Text>
-        </View>
-        <TouchableOpacity style={styles.addBtn} onPress={openNew} hitSlop={10}>
-          <Feather name="plus" size={20} color={Colors.textInverse} />
-        </TouchableOpacity>
-      </View>
+      <AdminHeader
+        title="Plantillas de respuesta"
+        kicker={`${replies.length} disponibles`}
+        onBack={goBack}
+        right={
+          <Pressable
+            onPress={openNew}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel="Nueva plantilla"
+            style={({ pressed }) => [styles.addBtn, pressed && { opacity: 0.7 }]}
+          >
+            <Feather name="plus" size={18} color={Colors.textInverse} />
+          </Pressable>
+        }
+      />
 
       <View style={styles.hint}>
         <Feather name="zap" size={13} color={Colors.accentPrimary} />
@@ -153,7 +152,7 @@ export default function QuickRepliesList() {
                     <Feather name="edit-2" size={13} color={Colors.accentPrimary} />
                     <Text style={styles.editLbl}>Editar</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={styles.delBtn} onPress={() => remove(item)}>
+                  <TouchableOpacity style={styles.delBtn} onPress={() => setConfirmDel({ id: item.id, title: item.title })}>
                     <Feather name="trash-2" size={13} color={Colors.accentDanger} />
                     <Text style={styles.delLbl}>Eliminar</Text>
                   </TouchableOpacity>
@@ -227,6 +226,16 @@ export default function QuickRepliesList() {
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
+
+      <ConfirmDialog
+        open={!!confirmDel}
+        onClose={() => setConfirmDel(null)}
+        onConfirm={performDelete}
+        title="Eliminar plantilla"
+        description={`Eliminar "${confirmDel?.title ?? ''}"? Ya no podra insertarse en el chat.`}
+        confirmLabel="Eliminar"
+        confirmVariant="danger"
+      />
     </SafeAreaView>
   );
 }
@@ -235,20 +244,8 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
-  header: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    paddingHorizontal: 20, paddingTop: 8, paddingBottom: 8,
-  },
-  iconBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: Colors.bgCard,
-    alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1, borderColor: Colors.border,
-  },
-  title: { color: Colors.textPrimary, fontSize: 16, fontWeight: '700' },
-  subtitle: { color: Colors.textMuted, fontSize: 11, marginTop: 2 },
   addBtn: {
-    width: 40, height: 40, borderRadius: 20,
+    width: 36, height: 36, borderRadius: 8,
     backgroundColor: Colors.accentPrimary,
     alignItems: 'center', justifyContent: 'center',
   },
@@ -257,9 +254,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: 8,
     marginHorizontal: 20, marginTop: 4,
     paddingHorizontal: 12, paddingVertical: 8,
-    backgroundColor: 'rgba(244,163,64,0.1)',
+    backgroundColor: 'rgba(201,169,97,0.10)',
     borderRadius: 10,
-    borderWidth: 1, borderColor: 'rgba(244,163,64,0.3)',
+    borderWidth: 1, borderColor: 'rgba(201,169,97,0.30)',
   },
   hintText: { color: Colors.textSecondary, fontSize: 11, flex: 1 },
 
@@ -278,15 +275,15 @@ const styles = StyleSheet.create({
   editBtn: {
     flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
     height: 32, borderRadius: 8,
-    backgroundColor: 'rgba(244,163,64,0.12)',
-    borderWidth: 1, borderColor: 'rgba(244,163,64,0.3)',
+    backgroundColor: 'rgba(201,169,97,0.12)',
+    borderWidth: 1, borderColor: 'rgba(201,169,97,0.30)',
   },
   editLbl: { color: Colors.accentPrimary, fontSize: 11, fontWeight: '700' },
   delBtn: {
     flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
     height: 32, borderRadius: 8,
-    backgroundColor: 'rgba(228,88,88,0.1)',
-    borderWidth: 1, borderColor: 'rgba(228,88,88,0.3)',
+    backgroundColor: 'rgba(196,104,104,0.10)',
+    borderWidth: 1, borderColor: 'rgba(196,104,104,0.30)',
   },
   delLbl: { color: Colors.accentDanger, fontSize: 11, fontWeight: '700' },
 

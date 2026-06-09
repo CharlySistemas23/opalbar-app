@@ -1,25 +1,49 @@
 import {
-  View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator,
-  RefreshControl, Alert, Modal, TextInput, ScrollView,
+  View,
+  StyleSheet,
+  FlatList,
+  ActivityIndicator,
+  RefreshControl,
+  Alert,
+  Pressable,
 } from 'react-native';
 import { useCallback, useState } from 'react';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
-import { adminApi, eventsApi } from '@/api/client';
+import { adminApi } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { useSafeBack } from '@/hooks/useSafeBack';
-import { Colors } from '@/constants/tokens';
+import { Colors, Radius, Spacing } from '@/constants/tokens';
+import {
+  Body,
+  Button,
+  Caption,
+  ConfirmDialog,
+  Input,
+  Kicker,
+  SegmentedControl,
+  Sheet,
+  Subhead,
+} from '@/components/ui';
+import { AdminHeader } from '@/components/admin';
+import type { SegmentOption } from '@/components/ui';
 
 type Tab = 'active' | 'archived';
 
+// Palette restricted to the NOIR brand accents + champagne/info/danger tones.
 const COLOR_PALETTE = [
-  '#F4A340', '#60A5FA', '#A855F7', '#38C793',
-  '#E45858', '#EC4899', '#FFD700', '#14B8A6',
+  Colors.accentPrimary,
+  Colors.accentChampagne,
+  Colors.accentSuccess,
+  Colors.accentInfo,
+  Colors.accentDanger,
+  Colors.accentPrimaryDark,
+  Colors.accentChampagneDark,
+  Colors.textSecondary,
 ];
 
 export default function AdminCategoriesList() {
-  const router = useRouter();
   const goBack = useSafeBack('/(admin)/manage/events');
   const [tab, setTab] = useState<Tab>('active');
   const [active, setActive] = useState<any[]>([]);
@@ -28,11 +52,13 @@ export default function AdminCategoriesList() {
   const [refreshing, setRefreshing] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  // New category modal
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState('');
   const [newColor, setNewColor] = useState(COLOR_PALETTE[0]);
   const [creating, setCreating] = useState(false);
+
+  const [archiveTarget, setArchiveTarget] = useState<any>(null);
+  const [hardDelTarget, setHardDelTarget] = useState<any>(null);
 
   const load = useCallback(async () => {
     try {
@@ -60,58 +86,48 @@ export default function AdminCategoriesList() {
       setShowCreate(false);
     } catch (err) {
       Alert.alert('Error', apiError(err));
-    } finally { setCreating(false); }
+    } finally {
+      setCreating(false);
+    }
   }
 
-  function archiveCat(cat: any) {
-    Alert.alert(
-      'Archivar categoría',
-      `¿Archivar "${cat.name}"? Los eventos existentes la conservarán, pero ya no aparecerá al crear nuevos.`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Archivar', style: 'destructive',
-          onPress: async () => {
-            setDeletingId(cat.id);
-            try {
-              await adminApi.deleteCategory(cat.id, false);
-              setActive((p) => p.filter((c) => c.id !== cat.id));
-              setArchived((p) => [...p, { ...cat, isActive: false }]);
-            } catch (err) { Alert.alert('Error', apiError(err)); }
-            finally { setDeletingId(null); }
-          },
-        },
-      ],
-    );
+  async function performArchive() {
+    const cat = archiveTarget;
+    if (!cat) return;
+    setArchiveTarget(null);
+    setDeletingId(cat.id);
+    try {
+      await adminApi.deleteCategory(cat.id, false);
+      setActive((p) => p.filter((c) => c.id !== cat.id));
+      setArchived((p) => [...p, { ...cat, isActive: false }]);
+    } catch (err) {
+      Alert.alert('Error', apiError(err));
+    } finally {
+      setDeletingId(null);
+    }
   }
 
-  function hardDeleteCat(cat: any) {
-    Alert.alert(
-      'Eliminar permanentemente',
-      `¿Eliminar "${cat.name}" y TODOS los eventos asociados? Esta acción no se puede deshacer.`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Eliminar todo', style: 'destructive',
-          onPress: async () => {
-            setDeletingId(cat.id);
-            try {
-              const r = await adminApi.deleteCategory(cat.id, true);
-              const data = r.data?.data ?? r.data;
-              setActive((p) => p.filter((c) => c.id !== cat.id));
-              setArchived((p) => p.filter((c) => c.id !== cat.id));
-              if (data?.eventsDeleted > 0 || data?.interestsDeleted > 0) {
-                Alert.alert(
-                  'Categoría eliminada',
-                  `Se eliminaron ${data.eventsDeleted ?? 0} eventos y ${data.interestsDeleted ?? 0} intereses de usuarios.`,
-                );
-              }
-            } catch (err) { Alert.alert('Error', apiError(err)); }
-            finally { setDeletingId(null); }
-          },
-        },
-      ],
-    );
+  async function performHardDelete() {
+    const cat = hardDelTarget;
+    if (!cat) return;
+    setHardDelTarget(null);
+    setDeletingId(cat.id);
+    try {
+      const r = await adminApi.deleteCategory(cat.id, true);
+      const data = r.data?.data ?? r.data;
+      setActive((p) => p.filter((c) => c.id !== cat.id));
+      setArchived((p) => p.filter((c) => c.id !== cat.id));
+      if (data?.eventsDeleted > 0 || data?.interestsDeleted > 0) {
+        Alert.alert(
+          'Categoria eliminada',
+          `Se eliminaron ${data.eventsDeleted ?? 0} eventos y ${data.interestsDeleted ?? 0} intereses de usuarios.`,
+        );
+      }
+    } catch (err) {
+      Alert.alert('Error', apiError(err));
+    } finally {
+      setDeletingId(null);
+    }
   }
 
   async function restoreCat(cat: any) {
@@ -120,97 +136,124 @@ export default function AdminCategoriesList() {
       await adminApi.restoreCategory(cat.id);
       setArchived((p) => p.filter((c) => c.id !== cat.id));
       setActive((p) => [...p, { ...cat, isActive: true }]);
-    } catch (err) { Alert.alert('Error', apiError(err)); }
-    finally { setDeletingId(null); }
+    } catch (err) {
+      Alert.alert('Error', apiError(err));
+    } finally {
+      setDeletingId(null);
+    }
   }
 
   const shown = tab === 'active' ? active : archived;
 
+  const segments: SegmentOption<Tab>[] = [
+    { value: 'active', label: `Activas (${active.length})` },
+    { value: 'archived', label: `Archivadas (${archived.length})` },
+  ];
+
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.iconBtn} onPress={goBack} hitSlop={10}>
-          <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
-        </TouchableOpacity>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.title}>Categorías</Text>
-          <Text style={styles.subtitle}>{active.length} activas · {archived.length} archivadas</Text>
-        </View>
-        <TouchableOpacity
-          style={styles.addBtn}
-          onPress={() => setShowCreate(true)}
-          hitSlop={10}
-        >
-          <Feather name="plus" size={20} color={Colors.textInverse} />
-        </TouchableOpacity>
-      </View>
+      <AdminHeader
+        title="Categorias"
+        kicker={`${active.length} activas · ${archived.length} archivadas`}
+        onBack={goBack}
+        right={
+          <Pressable
+            onPress={() => setShowCreate(true)}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel="Nueva categoria"
+            style={({ pressed }) => [styles.addBtn, pressed && styles.pressed]}
+          >
+            <Feather name="plus" size={18} color={Colors.textInverse} />
+          </Pressable>
+        }
+      />
 
-      <View style={styles.tabs}>
-        <TouchableOpacity
-          style={[styles.tab, tab === 'active' && styles.tabActive]}
-          onPress={() => setTab('active')}
-        >
-          <Text style={[styles.tabLbl, tab === 'active' && styles.tabLblActive]}>
-            Activas ({active.length})
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tab, tab === 'archived' && styles.tabActive]}
-          onPress={() => setTab('archived')}
-        >
-          <Text style={[styles.tabLbl, tab === 'archived' && styles.tabLblActive]}>
-            Archivadas ({archived.length})
-          </Text>
-        </TouchableOpacity>
+      <View style={styles.tabsWrap}>
+        <SegmentedControl<Tab> value={tab} onChange={setTab} options={segments} />
       </View>
 
       {loading ? (
-        <View style={styles.center}><ActivityIndicator color={Colors.accentPrimary} /></View>
+        <View style={styles.center}>
+          <ActivityIndicator color={Colors.accentPrimary} />
+        </View>
       ) : (
         <FlatList
           data={shown}
           keyExtractor={(c) => c.id}
-          contentContainerStyle={{ padding: 20, paddingBottom: 120, gap: 8 }}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={Colors.accentPrimary} />}
+          contentContainerStyle={{ padding: Spacing[5], paddingBottom: 120, gap: Spacing[2] }}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => { setRefreshing(true); load(); }}
+              tintColor={Colors.accentPrimary}
+            />
+          }
           ListEmptyComponent={
             <View style={styles.empty}>
-              <Feather name={tab === 'active' ? 'tag' : 'archive'} size={40} color={Colors.textMuted} />
-              <Text style={styles.emptyTitle}>
-                {tab === 'active' ? 'Sin categorías activas' : 'Sin categorías archivadas'}
-              </Text>
-              <Text style={styles.emptyText}>
+              <Feather
+                name={tab === 'active' ? 'tag' : 'archive'}
+                size={32}
+                color={Colors.textMuted}
+              />
+              <Subhead style={{ marginTop: Spacing[2] }}>
+                {tab === 'active' ? 'Sin categorias activas' : 'Sin categorias archivadas'}
+              </Subhead>
+              <Caption tone="muted" align="center" style={{ paddingHorizontal: 40 }}>
                 {tab === 'active'
-                  ? 'Crea la primera con el botón + arriba.'
-                  : 'Cuando archives una categoría aparecerá aquí.'}
-              </Text>
+                  ? 'Crea la primera con el boton + arriba.'
+                  : 'Cuando archives una categoria aparecera aqui.'}
+              </Caption>
             </View>
           }
           renderItem={({ item }) => {
             const isArchived = !item.isActive;
             return (
               <View style={[styles.card, isArchived && { opacity: 0.7 }]}>
-                <View style={[styles.colorDot, { backgroundColor: item.color || Colors.accentPrimary }]} />
+                <View
+                  style={[styles.colorDot, { backgroundColor: item.color || Colors.accentPrimary }]}
+                />
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.catName} numberOfLines={1}>{item.name}</Text>
+                  <Subhead numberOfLines={1}>{item.name}</Subhead>
                   {item.nameEn && item.nameEn !== item.name && (
-                    <Text style={styles.catNameEn} numberOfLines={1}>{item.nameEn}</Text>
+                    <Caption tone="muted" numberOfLines={1} style={{ marginTop: 2 }}>
+                      {item.nameEn}
+                    </Caption>
                   )}
                 </View>
                 {deletingId === item.id ? (
                   <ActivityIndicator color={Colors.accentDanger} size="small" />
                 ) : isArchived ? (
-                  <TouchableOpacity style={styles.restoreBtn} onPress={() => restoreCat(item)} hitSlop={8}>
-                    <Feather name="rotate-ccw" size={13} color={Colors.accentSuccess} />
-                    <Text style={styles.restoreLbl}>Restaurar</Text>
-                  </TouchableOpacity>
+                  <Pressable
+                    onPress={() => restoreCat(item)}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel="Restaurar"
+                    style={({ pressed }) => [styles.restoreBtn, pressed && styles.pressed]}
+                  >
+                    <Feather name="rotate-ccw" size={12} color={Colors.accentSuccess} />
+                    <Kicker tone="success" style={{ fontSize: 10 }}>Restaurar</Kicker>
+                  </Pressable>
                 ) : (
                   <View style={styles.actions}>
-                    <TouchableOpacity style={styles.actionBtn} onPress={() => archiveCat(item)} hitSlop={6}>
+                    <Pressable
+                      onPress={() => setArchiveTarget(item)}
+                      hitSlop={6}
+                      accessibilityRole="button"
+                      accessibilityLabel="Archivar"
+                      style={({ pressed }) => [styles.actionBtn, pressed && styles.pressed]}
+                    >
                       <Feather name="archive" size={15} color={Colors.accentPrimary} />
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.actionBtn} onPress={() => hardDeleteCat(item)} hitSlop={6}>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => setHardDelTarget(item)}
+                      hitSlop={6}
+                      accessibilityRole="button"
+                      accessibilityLabel="Eliminar permanente"
+                      style={({ pressed }) => [styles.actionBtn, pressed && styles.pressed]}
+                    >
                       <Feather name="trash-2" size={15} color={Colors.accentDanger} />
-                    </TouchableOpacity>
+                    </Pressable>
                   </View>
                 )}
               </View>
@@ -219,181 +262,153 @@ export default function AdminCategoriesList() {
         />
       )}
 
-      <Modal visible={showCreate} transparent animationType="fade" onRequestClose={() => setShowCreate(false)}>
-        <TouchableOpacity
-          style={styles.modalBackdrop}
-          activeOpacity={1}
-          onPress={() => setShowCreate(false)}
-        >
-          <TouchableOpacity activeOpacity={1} onPress={() => {}} style={styles.modalCard}>
-            <View style={styles.modalHead}>
-              <View>
-                <Text style={styles.modalTitle}>Nueva categoría</Text>
-                <Text style={styles.modalSub}>Elige un nombre y un color distintivo</Text>
-              </View>
-              <TouchableOpacity onPress={() => setShowCreate(false)} hitSlop={10}>
-                <Feather name="x" size={22} color={Colors.textPrimary} />
-              </TouchableOpacity>
-            </View>
+      <Sheet open={showCreate} onClose={() => setShowCreate(false)} title="Nueva categoria">
+        <View style={{ gap: Spacing[3] }}>
+          <Caption tone="muted">Elige un nombre y un color distintivo</Caption>
+          <Input
+            label="Nombre"
+            value={newName}
+            onChangeText={setNewName}
+            placeholder="Ej. Noche de salsa"
+            autoFocus
+          />
 
-            <Text style={styles.modalLabel}>NOMBRE</Text>
-            <TextInput
-              style={styles.modalInput}
-              value={newName}
-              onChangeText={setNewName}
-              placeholder="Ej. Noche de salsa"
-              placeholderTextColor={Colors.textMuted}
-              autoFocus
-            />
-
-            <Text style={styles.modalLabel}>COLOR</Text>
+          <View>
+            <Kicker style={{ marginBottom: Spacing[2] }}>Color</Kicker>
             <View style={styles.palette}>
-              {COLOR_PALETTE.map((c) => (
-                <TouchableOpacity
-                  key={c}
-                  style={[styles.paletteDot, { backgroundColor: c }, newColor === c && styles.paletteDotActive]}
-                  onPress={() => setNewColor(c)}
-                >
-                  {newColor === c && <Feather name="check" size={14} color="#fff" />}
-                </TouchableOpacity>
-              ))}
+              {COLOR_PALETTE.map((c) => {
+                const active = newColor === c;
+                return (
+                  <Pressable
+                    key={c}
+                    onPress={() => setNewColor(c)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Color ${c}`}
+                    accessibilityState={{ selected: active }}
+                    style={[
+                      styles.paletteDot,
+                      { backgroundColor: c },
+                      active && styles.paletteDotActive,
+                    ]}
+                  >
+                    {active && <Feather name="check" size={14} color="#fff" />}
+                  </Pressable>
+                );
+              })}
             </View>
+          </View>
 
-            <View style={styles.preview}>
-              <View style={[styles.previewDot, { backgroundColor: newColor }]} />
-              <Text style={styles.previewName}>{newName || 'Vista previa'}</Text>
-            </View>
+          <View style={styles.preview}>
+            <View style={[styles.previewDot, { backgroundColor: newColor }]} />
+            <Body size="sm" weight="semiBold">
+              {newName || 'Vista previa'}
+            </Body>
+          </View>
 
-            <TouchableOpacity
-              style={[styles.createBtn, (!newName.trim() || creating) && { opacity: 0.5 }]}
-              onPress={createCategory}
-              disabled={!newName.trim() || creating}
-            >
-              {creating
-                ? <ActivityIndicator color={Colors.textInverse} size="small" />
-                : <>
-                    <Feather name="plus" size={16} color={Colors.textInverse} />
-                    <Text style={styles.createLbl}>Crear categoría</Text>
-                  </>}
-            </TouchableOpacity>
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
+          <Button
+            label={creating ? 'Creando...' : 'Crear categoria'}
+            variant="primary"
+            onPress={createCategory}
+            loading={creating}
+            disabled={!newName.trim() || creating}
+            leftIcon={<Feather name="plus" size={14} color={Colors.textInverse} />}
+          />
+        </View>
+      </Sheet>
+
+      <ConfirmDialog
+        open={!!archiveTarget}
+        onClose={() => setArchiveTarget(null)}
+        onConfirm={performArchive}
+        title="Archivar categoria"
+        description={`Archivar "${archiveTarget?.name ?? ''}"? Los eventos existentes la conservaran, pero ya no aparecera al crear nuevos.`}
+        confirmLabel="Archivar"
+        confirmVariant="danger"
+      />
+      <ConfirmDialog
+        open={!!hardDelTarget}
+        onClose={() => setHardDelTarget(null)}
+        onConfirm={performHardDelete}
+        title="Eliminar permanentemente"
+        description={`Eliminar "${hardDelTarget?.name ?? ''}" y TODOS los eventos asociados? Esta accion no se puede deshacer.`}
+        confirmLabel="Eliminar todo"
+        confirmVariant="danger"
+      />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
+  pressed: { opacity: 0.7 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
-  header: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    paddingHorizontal: 20, paddingTop: 8, paddingBottom: 8,
-  },
-  iconBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: Colors.bgCard,
-    alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1, borderColor: Colors.border,
-  },
-  title: { color: Colors.textPrimary, fontSize: 17, fontWeight: '700' },
-  subtitle: { color: Colors.textMuted, fontSize: 11, marginTop: 2 },
   addBtn: {
-    width: 40, height: 40, borderRadius: 20,
+    width: 36,
+    height: 36,
+    borderRadius: Radius.lg,
     backgroundColor: Colors.accentPrimary,
-    alignItems: 'center', justifyContent: 'center',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
-  tabs: { flexDirection: 'row', gap: 8, paddingHorizontal: 20, paddingVertical: 10 },
-  tab: {
-    flex: 1, paddingVertical: 10, borderRadius: 12,
-    backgroundColor: Colors.bgCard,
-    borderWidth: 1, borderColor: Colors.border,
-    alignItems: 'center',
-  },
-  tabActive: { backgroundColor: 'rgba(244,163,64,0.15)', borderColor: Colors.accentPrimary },
-  tabLbl: { color: Colors.textSecondary, fontSize: 12, fontWeight: '700' },
-  tabLblActive: { color: Colors.accentPrimary },
+  tabsWrap: { paddingHorizontal: Spacing[5], paddingVertical: Spacing[3] },
 
   card: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing[3],
     backgroundColor: Colors.bgCard,
-    borderRadius: 12, padding: 12,
-    borderWidth: 1, borderColor: Colors.border,
+    borderRadius: Radius['2xl'],
+    paddingHorizontal: Spacing[4],
+    paddingVertical: Spacing[3],
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
   },
   colorDot: { width: 18, height: 18, borderRadius: 9 },
-  catName: { color: Colors.textPrimary, fontSize: 14, fontWeight: '700' },
-  catNameEn: { color: Colors.textMuted, fontSize: 11, marginTop: 2 },
 
   actions: { flexDirection: 'row', gap: 6 },
   actionBtn: {
-    width: 34, height: 34, borderRadius: 8,
+    width: 34,
+    height: 34,
+    borderRadius: Radius.lg,
     backgroundColor: Colors.bgElevated,
-    alignItems: 'center', justifyContent: 'center',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   restoreBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    paddingHorizontal: 10, paddingVertical: 6,
-    borderRadius: 8,
-    backgroundColor: 'rgba(56,199,147,0.12)',
-    borderWidth: 1, borderColor: 'rgba(56,199,147,0.3)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: Spacing[2],
+    paddingVertical: 6,
+    borderRadius: Radius.lg,
+    backgroundColor: 'rgba(111,168,138,0.10)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(111,168,138,0.30)',
   },
-  restoreLbl: { color: Colors.accentSuccess, fontSize: 11, fontWeight: '800' },
 
-  empty: { alignItems: 'center', paddingTop: 80, gap: 8, paddingHorizontal: 40 },
-  emptyTitle: { color: Colors.textPrimary, fontSize: 15, fontWeight: '700', marginTop: 8 },
-  emptyText: { color: Colors.textMuted, fontSize: 12, textAlign: 'center', lineHeight: 18 },
+  empty: { alignItems: 'center', paddingTop: 80, gap: 4, paddingHorizontal: 40 },
 
-  modalBackdrop: {
-    flex: 1, backgroundColor: 'rgba(0,0,0,0.75)',
-    alignItems: 'center', justifyContent: 'center', padding: 20,
-  },
-  modalCard: {
-    width: '100%',
-    backgroundColor: Colors.bgCard,
-    borderRadius: 20, padding: 20,
-    borderWidth: 1, borderColor: Colors.border,
-    gap: 10,
-  },
-  modalHead: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start',
-    marginBottom: 4,
-  },
-  modalTitle: { color: Colors.textPrimary, fontSize: 18, fontWeight: '800' },
-  modalSub: { color: Colors.textMuted, fontSize: 12, marginTop: 2 },
-  modalLabel: {
-    color: Colors.textMuted, fontSize: 10, fontWeight: '700',
-    letterSpacing: 1, marginTop: 6,
-  },
-  modalInput: {
-    backgroundColor: Colors.bgPrimary,
-    borderRadius: 10, borderWidth: 1, borderColor: Colors.border,
-    paddingHorizontal: 14, paddingVertical: 12,
-    color: Colors.textPrimary, fontSize: 14,
-  },
-  palette: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 4 },
+  // Sheet
+  palette: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing[2] },
   paletteDot: {
-    width: 36, height: 36, borderRadius: 18,
-    alignItems: 'center', justifyContent: 'center',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   paletteDotActive: { borderWidth: 3, borderColor: '#fff' },
 
   preview: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    padding: 12, borderRadius: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing[2],
+    padding: Spacing[3],
+    borderRadius: Radius.lg,
     backgroundColor: Colors.bgElevated,
-    marginTop: 8,
   },
   previewDot: { width: 14, height: 14, borderRadius: 7 },
-  previewName: { color: Colors.textPrimary, fontSize: 14, fontWeight: '600' },
-
-  createBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-    height: 50, borderRadius: 14,
-    backgroundColor: Colors.accentPrimary,
-    marginTop: 10,
-  },
-  createLbl: { color: Colors.textInverse, fontSize: 14, fontWeight: '800' },
 });

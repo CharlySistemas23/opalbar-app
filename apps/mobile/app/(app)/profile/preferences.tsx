@@ -128,11 +128,9 @@ export default function Preferences() {
       </View>
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        <FadeIn>
+        <FadeIn style={styles.hero}>
           <Kicker tone="muted">{t ? 'AJUSTES' : 'SETTINGS'}</Kicker>
-          <Heading size="md" style={{ marginTop: Spacing[2] }}>
-            {t ? 'Preferencias' : 'Preferences'}
-          </Heading>
+          <Heading size="md">{t ? 'Preferencias' : 'Preferences'}</Heading>
         </FadeIn>
 
         <Section
@@ -259,6 +257,10 @@ const styles = StyleSheet.create({
   scroll: {
     paddingHorizontal: EditorialSpacing.pageGutter,
     paddingBottom: Spacing[12],
+  },
+  hero: {
+    paddingVertical: Spacing[4],
+    gap: Spacing[2],
   },
   section: {
     marginTop: Spacing[8],

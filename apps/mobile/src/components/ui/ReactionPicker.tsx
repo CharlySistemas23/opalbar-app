@@ -37,7 +37,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import Feather from '@expo/vector-icons/Feather';
 import { Colors } from '@/constants/tokens';
-import { useFeedback } from '@/hooks/useFeedback';
+import { useFeedback, playUiSound } from '@/hooks/useFeedback';
 
 // ── Canonical emoji set (matches Facebook, ordered by frequency of use) ──
 export const REACTION_EMOJIS = ['❤️', '😂', '😮', '😢', '😡', '👍'] as const;
@@ -106,6 +106,7 @@ export function ReactionPicker({
       setPressedIdx(-1);
       enter.value = withTiming(1, { duration: 140, easing: Easing.out(Easing.quad) });
       fb.tap();
+      playUiSound('whoosh');
     } else {
       enter.value = withTiming(0, { duration: 140, easing: Easing.in(Easing.cubic) });
     }

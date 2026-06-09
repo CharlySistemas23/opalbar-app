@@ -1,18 +1,31 @@
-import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, ActivityIndicator, RefreshControl, Modal, Alert } from 'react-native';
+import {
+  View,
+  StyleSheet,
+  FlatList,
+  ActivityIndicator,
+  RefreshControl,
+  Pressable,
+  Alert,
+} from 'react-native';
 import { useCallback, useState } from 'react';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { adminApi } from '@/api/client';
 import { useSafeBack } from '@/hooks/useSafeBack';
-import { Colors } from '@/constants/tokens';
+import { Colors, Radius, Spacing } from '@/constants/tokens';
+import {
+  Body,
+  Button,
+  Caption,
+  Input,
+  Kicker,
+  Sheet,
+  Subhead,
+} from '@/components/ui';
+import { AdminHeader, StatusPill } from '@/components/admin';
 import { UserPicker, type PickedUser } from '@/components/admin/UserPicker';
 
-const AVATAR_COLORS = ['#F4A340', '#60A5FA', '#A855F7', '#38C793', '#E45858', '#EC4899'];
-function colorFor(id: string) {
-  const idx = Math.abs([...id].reduce((a, c) => a + c.charCodeAt(0), 0)) % AVATAR_COLORS.length;
-  return AVATAR_COLORS[idx];
-}
 function userName(u: any) {
   if (!u) return 'Usuario';
   return `${u.profile?.firstName ?? ''} ${u.profile?.lastName ?? ''}`.trim() || u.email || 'Usuario';
@@ -47,12 +60,16 @@ export default function MessagesModerationList() {
     setSending(true);
     try {
       await adminApi.sendMessageAsAdmin({ userId: picked.id, content: body.trim() });
-      Alert.alert('Mensaje enviado', `Llegó como un DM tuyo a ${picked.email}.`);
-      setComposing(false); setPicked(null); setBody('');
+      Alert.alert('Mensaje enviado', `Llego como un DM tuyo a ${picked.email}.`);
+      setComposing(false);
+      setPicked(null);
+      setBody('');
       load();
     } catch (e: any) {
       Alert.alert('Error', e?.response?.data?.message ?? 'No se pudo enviar');
-    } finally { setSending(false); }
+    } finally {
+      setSending(false);
+    }
   }
 
   const load = useCallback(async (q = '') => {
@@ -60,7 +77,10 @@ export default function MessagesModerationList() {
       const r = await adminApi.allThreads(q.trim() || undefined);
       setThreads(r.data?.data ?? r.data ?? []);
     } catch {}
-    finally { setLoading(false); setRefreshing(false); }
+    finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   }, []);
 
   useFocusEffect(useCallback(() => { load(appliedSearch); }, [load, appliedSearch]));
@@ -73,62 +93,78 @@ export default function MessagesModerationList() {
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={goBack} hitSlop={10}>
-          <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
-        </TouchableOpacity>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.title}>Conversaciones</Text>
-          <Text style={styles.subtitle}>{threads.length} hilos · moderación</Text>
-        </View>
-        <TouchableOpacity
-          style={composeStyles.headerBtn}
-          onPress={() => setComposing(true)}
-          hitSlop={10}
-        >
-          <Feather name="send" size={16} color={Colors.accentPrimary} />
-        </TouchableOpacity>
-      </View>
+      <AdminHeader
+        title="Conversaciones"
+        kicker={`${threads.length} hilos · moderacion`}
+        onBack={goBack}
+        right={
+          <Pressable
+            onPress={() => setComposing(true)}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel="Mensaje como plataforma"
+            style={({ pressed }) => [styles.composeBtn, pressed && styles.pressed]}
+          >
+            <Feather name="send" size={14} color={Colors.accentPrimary} />
+          </Pressable>
+        }
+      />
 
-      <View style={styles.searchBox}>
-        <Feather name="search" size={16} color={Colors.textMuted} />
-        <TextInput
-          style={styles.searchInput}
+      <View style={styles.searchWrap}>
+        <Input
           value={search}
           onChangeText={setSearch}
           onSubmitEditing={runSearch}
           placeholder="Buscar por usuario o email..."
-          placeholderTextColor={Colors.textMuted}
+          leftIcon={<Feather name="search" size={16} color={Colors.textMuted} />}
+          rightIcon={
+            search.length > 0 ? <Feather name="x" size={14} color={Colors.textMuted} /> : null
+          }
+          onRightIconPress={
+            search.length > 0
+              ? () => {
+                  setSearch('');
+                  setAppliedSearch('');
+                  load('');
+                }
+              : undefined
+          }
+          rightIconLabel="Limpiar busqueda"
           returnKeyType="search"
         />
-        {search.length > 0 && (
-          <TouchableOpacity onPress={() => { setSearch(''); setAppliedSearch(''); load(''); }} hitSlop={6}>
-            <Feather name="x" size={14} color={Colors.textMuted} />
-          </TouchableOpacity>
-        )}
       </View>
 
       <View style={styles.warn}>
-        <Feather name="shield" size={14} color={Colors.accentPrimary} />
-        <Text style={styles.warnText}>
+        <Feather name="shield" size={13} color={Colors.accentPrimary} />
+        <Caption tone="secondary" size="sm" style={{ flex: 1 }}>
           Todas las acciones quedan registradas. Usa con criterio.
-        </Text>
+        </Caption>
       </View>
 
       {loading ? (
-        <View style={styles.center}><ActivityIndicator color={Colors.accentPrimary} /></View>
+        <View style={styles.center}>
+          <ActivityIndicator color={Colors.accentPrimary} />
+        </View>
       ) : (
         <FlatList
           data={threads}
           keyExtractor={(t) => t.id}
-          contentContainerStyle={{ padding: 16, paddingBottom: 120, gap: 6 }}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(appliedSearch); }} tintColor={Colors.accentPrimary} />}
+          contentContainerStyle={{ padding: Spacing[4], paddingBottom: 120, gap: 6 }}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => { setRefreshing(true); load(appliedSearch); }}
+              tintColor={Colors.accentPrimary}
+            />
+          }
           ListEmptyComponent={
             <View style={styles.empty}>
-              <Feather name="message-circle" size={40} color={Colors.textMuted} />
-              <Text style={styles.emptyText}>
-                {appliedSearch ? `Sin resultados para "${appliedSearch}".` : 'Sin conversaciones todavía.'}
-              </Text>
+              <Feather name="message-circle" size={32} color={Colors.textMuted} />
+              <Caption tone="muted" align="center" style={{ marginTop: Spacing[2] }}>
+                {appliedSearch
+                  ? `Sin resultados para "${appliedSearch}".`
+                  : 'Sin conversaciones todavia.'}
+              </Caption>
             </View>
           }
           renderItem={({ item }) => {
@@ -140,204 +176,225 @@ export default function MessagesModerationList() {
             const lastWasDeleted = !!last?.deletedAt;
             const anyBanned = a?.status === 'BANNED' || b?.status === 'BANNED';
             return (
-              <TouchableOpacity
-                style={styles.card}
-                activeOpacity={0.85}
+              <Pressable
+                style={({ pressed }) => [styles.card, pressed && styles.pressed]}
                 onPress={() => router.push(`/(admin)/manage/messages/${item.id}` as never)}
+                accessibilityRole="button"
+                accessibilityLabel={`Conversacion entre ${nA} y ${nB}`}
               >
                 <View style={styles.avatars}>
-                  <View style={[styles.avatar, { backgroundColor: colorFor(a?.id ?? '') }]}>
-                    <Text style={styles.avatarText}>{nA[0]?.toUpperCase() ?? '?'}</Text>
+                  <View style={styles.avatar}>
+                    <Body weight="bold" tone="inverse">
+                      {nA[0]?.toUpperCase() ?? '?'}
+                    </Body>
                   </View>
-                  <View style={[styles.avatar, styles.avatarBack, { backgroundColor: colorFor(b?.id ?? '') }]}>
-                    <Text style={styles.avatarText}>{nB[0]?.toUpperCase() ?? '?'}</Text>
+                  <View style={[styles.avatar, styles.avatarBack]}>
+                    <Body weight="bold" tone="inverse">
+                      {nB[0]?.toUpperCase() ?? '?'}
+                    </Body>
                   </View>
                 </View>
 
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.pair} numberOfLines={1}>
-                    {nA} <Text style={styles.pairSep}>↔</Text> {nB}
-                  </Text>
-                  <Text style={[styles.preview, lastWasDeleted && styles.previewDeleted]} numberOfLines={1}>
+                  <Subhead numberOfLines={1}>
+                    {nA} <Caption tone="muted">↔</Caption> {nB}
+                  </Subhead>
+                  <Caption
+                    tone={lastWasDeleted ? 'muted' : 'secondary'}
+                    style={lastWasDeleted ? [{ marginTop: 2 }, styles.italic] : { marginTop: 2 }}
+                    numberOfLines={1}
+                  >
                     {last
-                      ? (lastWasDeleted ? '[mensaje eliminado]' : last.content)
+                      ? lastWasDeleted
+                        ? '[mensaje eliminado]'
+                        : last.content
                       : 'Sin mensajes'}
-                  </Text>
+                  </Caption>
                   <View style={styles.metaRow}>
-                    <Text style={styles.metaText}>{item.messageCount} msgs</Text>
-                    {item.lastMessageAt && <Text style={styles.metaText}>· {relTime(item.lastMessageAt)}</Text>}
-                    {anyBanned && (
-                      <View style={styles.bannedBadge}>
-                        <Text style={styles.bannedText}>USER BANEADO</Text>
-                      </View>
+                    <Caption tone="muted" size="sm">{item.messageCount} msgs</Caption>
+                    {item.lastMessageAt && (
+                      <Caption tone="muted" size="sm">· {relTime(item.lastMessageAt)}</Caption>
                     )}
+                    {anyBanned && <StatusPill label="USER BANEADO" tone="danger" />}
                   </View>
                 </View>
 
                 <Feather name="chevron-right" size={16} color={Colors.textMuted} />
-              </TouchableOpacity>
+              </Pressable>
             );
           }}
         />
       )}
 
-      {/* Compose modal */}
-      <Modal visible={composing} transparent animationType="slide" onRequestClose={() => setComposing(false)}>
-        <View style={composeStyles.backdrop}>
-          <View style={composeStyles.sheet}>
-            <View style={composeStyles.header}>
-              <Text style={composeStyles.title}>Mensaje como plataforma</Text>
-              <TouchableOpacity onPress={() => setComposing(false)} hitSlop={10}>
-                <Feather name="x" size={20} color={Colors.textPrimary} />
-              </TouchableOpacity>
-            </View>
-
-            <Text style={composeStyles.lbl}>Destinatario</Text>
+      <Sheet open={composing} onClose={() => setComposing(false)} title="Mensaje como plataforma">
+        <View style={{ gap: Spacing[3] }}>
+          <View>
+            <Kicker style={{ marginBottom: 6 }}>Destinatario</Kicker>
             {picked ? (
-              <TouchableOpacity onPress={() => setPickerOpen(true)} style={composeStyles.pickedRow}>
-                <Feather name="user" size={14} color={Colors.accentSuccess} />
-                <Text style={composeStyles.pickedTxt} numberOfLines={1}>
-                  {`${picked.profile?.firstName ?? ''} ${picked.profile?.lastName ?? ''}`.trim() || picked.email}
-                </Text>
-                <Text style={composeStyles.changeTxt}>cambiar</Text>
-              </TouchableOpacity>
-            ) : (
-              <TouchableOpacity onPress={() => setPickerOpen(true)} style={composeStyles.pickerBtn}>
-                <Feather name="search" size={14} color={Colors.textMuted} />
-                <Text style={composeStyles.pickerBtnTxt}>Buscar usuario…</Text>
-              </TouchableOpacity>
-            )}
-
-            <Text style={[composeStyles.lbl, { marginTop: 14 }]}>Mensaje</Text>
-            <TextInput
-              value={body}
-              onChangeText={setBody}
-              placeholder="Llega como un DM tuyo al usuario."
-              placeholderTextColor={Colors.textMuted}
-              multiline
-              style={composeStyles.input}
-              maxLength={2000}
-            />
-            <Text style={composeStyles.counter}>{body.length}/2000</Text>
-
-            <View style={composeStyles.actions}>
-              <TouchableOpacity style={[composeStyles.btn, composeStyles.btnGhost]} onPress={() => setComposing(false)}>
-                <Text style={composeStyles.btnGhostLbl}>Cancelar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[composeStyles.btn, composeStyles.btnPrimary, (sending || !picked || !body.trim()) && { opacity: 0.5 }]}
-                onPress={send}
-                disabled={sending || !picked || !body.trim()}
+              <Pressable
+                onPress={() => setPickerOpen(true)}
+                style={styles.pickedRow}
+                accessibilityRole="button"
+                accessibilityLabel="Cambiar destinatario"
               >
-                <Feather name="send" size={14} color="#000" />
-                <Text style={composeStyles.btnPrimaryLbl}>  {sending ? 'Enviando…' : 'Enviar'}</Text>
-              </TouchableOpacity>
+                <Feather name="user" size={14} color={Colors.accentSuccess} />
+                <Body size="sm" weight="semiBold" style={{ flex: 1 }} numberOfLines={1}>
+                  {`${picked.profile?.firstName ?? ''} ${picked.profile?.lastName ?? ''}`.trim() ||
+                    picked.email}
+                </Body>
+                <Caption tone="muted" size="sm">cambiar</Caption>
+              </Pressable>
+            ) : (
+              <Pressable
+                onPress={() => setPickerOpen(true)}
+                style={styles.pickerBtn}
+                accessibilityRole="button"
+                accessibilityLabel="Buscar usuario"
+              >
+                <Feather name="search" size={14} color={Colors.textMuted} />
+                <Caption tone="muted">Buscar usuario...</Caption>
+              </Pressable>
+            )}
+          </View>
+
+          <Input
+            label="Mensaje"
+            value={body}
+            onChangeText={setBody}
+            placeholder="Llega como un DM tuyo al usuario."
+            multiline
+            style={{ minHeight: 100 }}
+            maxLength={2000}
+            helper={`${body.length}/2000`}
+          />
+
+          <View style={styles.actions}>
+            <View style={{ flex: 1 }}>
+              <Button label="Cancelar" variant="secondary" onPress={() => setComposing(false)} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Button
+                label={sending ? 'Enviando...' : 'Enviar'}
+                variant="primary"
+                onPress={send}
+                loading={sending}
+                disabled={sending || !picked || !body.trim()}
+                leftIcon={<Feather name="send" size={14} color={Colors.textInverse} />}
+              />
             </View>
           </View>
         </View>
-      </Modal>
+      </Sheet>
 
-      <UserPicker visible={pickerOpen} onClose={() => setPickerOpen(false)} onSelect={(u) => setPicked(u)} title="Destinatario" />
+      <UserPicker
+        visible={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        onSelect={(u) => setPicked(u)}
+        title="Destinatario"
+      />
     </SafeAreaView>
   );
 }
 
-const composeStyles = StyleSheet.create({
-  headerBtn: {
-    width: 36, height: 36, borderRadius: 10,
-    backgroundColor: 'rgba(244,163,64,0.10)',
-    borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(244,163,64,0.45)',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
-  sheet: { backgroundColor: Colors.bgElevated, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20 },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
-  title: { color: Colors.textPrimary, fontSize: 17, fontWeight: '700' },
-  lbl: { color: Colors.textMuted, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 },
-  input: {
-    backgroundColor: Colors.bgCard, borderWidth: 1, borderColor: Colors.borderStrong,
-    borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10,
-    color: Colors.textPrimary, fontSize: 14, minHeight: 100,
-  },
-  counter: { color: Colors.textMuted, fontSize: 11, textAlign: 'right', marginTop: 4 },
-  pickerBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: Colors.bgCard, borderWidth: 1, borderColor: Colors.borderStrong, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 12 },
-  pickerBtnTxt: { color: Colors.textMuted, fontSize: 14 },
-  pickedRow: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(56,199,147,0.10)', borderWidth: 1, borderColor: 'rgba(56,199,147,0.30)', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 12 },
-  pickedTxt: { color: Colors.textPrimary, fontSize: 14, fontWeight: '600', flex: 1 },
-  changeTxt: { color: Colors.textMuted, fontSize: 11 },
-  actions: { flexDirection: 'row', gap: 10, marginTop: 16, paddingTop: 16, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: Colors.border },
-  btn: { flex: 1, paddingVertical: 12, borderRadius: 12, alignItems: 'center', justifyContent: 'center', flexDirection: 'row' },
-  btnGhost: { backgroundColor: Colors.bgCard, borderWidth: 1, borderColor: Colors.borderStrong },
-  btnGhostLbl: { color: Colors.textPrimary, fontSize: 14, fontWeight: '700' },
-  btnPrimary: { backgroundColor: Colors.accentPrimary },
-  btnPrimaryLbl: { color: '#000', fontSize: 14, fontWeight: '700' },
-});
-
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
+  pressed: { opacity: 0.7 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  italic: { fontStyle: 'italic' },
 
-  header: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    paddingHorizontal: 20, paddingTop: 8, paddingBottom: 8,
+  composeBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: Radius.lg,
+    backgroundColor: 'rgba(201,169,97,0.10)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(201,169,97,0.30)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  backBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: Colors.bgCard,
-    alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1, borderColor: Colors.border,
-  },
-  title: { color: Colors.textPrimary, fontSize: 17, fontWeight: '700' },
-  subtitle: { color: Colors.textMuted, fontSize: 11, marginTop: 2 },
 
-  searchBox: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    marginHorizontal: 20, marginTop: 6,
-    paddingHorizontal: 14, height: 40,
-    backgroundColor: Colors.bgCard,
-    borderRadius: 10,
-    borderWidth: 1, borderColor: Colors.border,
-  },
-  searchInput: { flex: 1, color: Colors.textPrimary, fontSize: 13, padding: 0 },
+  searchWrap: { paddingHorizontal: Spacing[5], paddingTop: Spacing[2] },
 
   warn: {
-    flexDirection: 'row', gap: 8, alignItems: 'center',
-    marginHorizontal: 20, marginTop: 10,
-    paddingHorizontal: 12, paddingVertical: 8,
-    backgroundColor: 'rgba(244,163,64,0.1)',
-    borderRadius: 10,
-    borderWidth: 1, borderColor: 'rgba(244,163,64,0.3)',
+    flexDirection: 'row',
+    gap: Spacing[2],
+    alignItems: 'center',
+    marginHorizontal: Spacing[5],
+    marginTop: Spacing[3],
+    paddingHorizontal: Spacing[3],
+    paddingVertical: Spacing[2],
+    backgroundColor: 'rgba(201,169,97,0.06)',
+    borderRadius: Radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(201,169,97,0.20)',
   },
-  warnText: { color: Colors.textSecondary, fontSize: 11, flex: 1 },
 
   card: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing[2],
     backgroundColor: Colors.bgCard,
-    borderRadius: 12, padding: 12,
-    borderWidth: 1, borderColor: Colors.border,
+    borderRadius: Radius['2xl'],
+    paddingHorizontal: Spacing[3],
+    paddingVertical: Spacing[3],
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
   },
   avatars: { flexDirection: 'row', marginRight: 6 },
   avatar: {
-    width: 36, height: 36, borderRadius: 18,
-    alignItems: 'center', justifyContent: 'center',
-    borderWidth: 2, borderColor: Colors.bgCard,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: Colors.accentPrimary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: Colors.bgCard,
   },
-  avatarBack: { marginLeft: -14 },
-  avatarText: { color: Colors.textInverse, fontWeight: '800', fontSize: 13 },
+  avatarBack: { marginLeft: -12, backgroundColor: Colors.accentChampagne },
 
-  pair: { color: Colors.textPrimary, fontSize: 13, fontWeight: '700' },
-  pairSep: { color: Colors.textMuted, fontWeight: '600' },
-  preview: { color: Colors.textSecondary, fontSize: 12, marginTop: 2 },
-  previewDeleted: { color: Colors.textMuted, fontStyle: 'italic' },
-
-  metaRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4, flexWrap: 'wrap' },
-  metaText: { color: Colors.textMuted, fontSize: 10 },
-  bannedBadge: {
-    paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6,
-    backgroundColor: 'rgba(228,88,88,0.15)',
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 4,
+    flexWrap: 'wrap',
   },
-  bannedText: { color: Colors.accentDanger, fontSize: 9, fontWeight: '800', letterSpacing: 0.5 },
 
-  empty: { alignItems: 'center', paddingTop: 60, gap: 10 },
-  emptyText: { color: Colors.textMuted, fontSize: 13, textAlign: 'center', paddingHorizontal: 20 },
+  empty: { alignItems: 'center', paddingTop: 60 },
+
+  // Sheet content
+  pickerBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing[2],
+    backgroundColor: Colors.bgCard,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+    borderRadius: Radius.lg,
+    paddingHorizontal: Spacing[3],
+    paddingVertical: Spacing[3],
+    minHeight: 52,
+  },
+  pickedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing[2],
+    backgroundColor: 'rgba(111,168,138,0.08)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(111,168,138,0.30)',
+    borderRadius: Radius.lg,
+    paddingHorizontal: Spacing[3],
+    paddingVertical: Spacing[3],
+    minHeight: 52,
+  },
+
+  actions: {
+    flexDirection: 'row',
+    gap: Spacing[2],
+    marginTop: Spacing[3],
+    paddingTop: Spacing[3],
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Colors.border,
+  },
 });

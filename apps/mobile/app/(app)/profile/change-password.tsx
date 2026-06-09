@@ -91,12 +91,10 @@ export default function ChangePassword() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          <FadeIn>
+          <FadeIn style={styles.hero}>
             <Kicker tone="muted">{t ? 'SEGURIDAD' : 'SECURITY'}</Kicker>
-            <Heading size="md" style={{ marginTop: Spacing[2] }}>
-              {t ? 'Cambiar contraseña' : 'Change password'}
-            </Heading>
-            <Body tone="secondary" style={{ marginTop: Spacing[3] }}>
+            <Heading size="md">{t ? 'Cambiar contraseña' : 'Change password'}</Heading>
+            <Body tone="secondary" style={{ marginTop: Spacing[2] }}>
               {t
                 ? 'Confirma tu contraseña actual y elige una nueva con al menos 8 caracteres.'
                 : 'Confirm your current password and pick a new one with at least 8 characters.'}
@@ -172,11 +170,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   scroll: {
-    paddingHorizontal: EditorialSpacing.pageGutter,
     paddingBottom: Spacing[8],
   },
+  hero: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingVertical: Spacing[4],
+    gap: Spacing[2],
+  },
   form: {
-    marginTop: Spacing[8],
+    marginTop: Spacing[6],
+    paddingHorizontal: EditorialSpacing.pageGutter,
     gap: Spacing[5],
   },
   footer: {

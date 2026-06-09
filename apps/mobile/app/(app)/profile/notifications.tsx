@@ -303,9 +303,7 @@ export default function Notifications() {
               ? 'BANDEJA'
               : 'INBOX'}
         </Kicker>
-        <Heading size="md" style={{ marginTop: Spacing[2] }}>
-          {es ? 'Notificaciones' : 'Notifications'}
-        </Heading>
+        <Heading size="md">{es ? 'Notificaciones' : 'Notifications'}</Heading>
       </View>
 
       {loading ? (
@@ -531,7 +529,8 @@ const styles = StyleSheet.create({
 
   titleBlock: {
     paddingHorizontal: EditorialSpacing.pageGutter,
-    paddingBottom: Spacing[6],
+    paddingVertical: Spacing[4],
+    gap: Spacing[2],
   },
 
   sectionHeader: {

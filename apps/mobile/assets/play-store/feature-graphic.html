@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<title>OPAL BAR — Feature Graphic 1024×500</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  body { width: 1024px; height: 500px; }
+
+  .canvas {
+    position: relative;
+    width: 1024px;
+    height: 500px;
+    overflow: hidden;
+    background:
+      radial-gradient(ellipse 700px 400px at 78% 50%, rgba(255, 0, 200, 0.22) 0%, rgba(255, 0, 200, 0) 60%),
+      radial-gradient(ellipse 600px 400px at 18% 50%, rgba(0, 200, 255, 0.18) 0%, rgba(0, 200, 255, 0) 65%),
+      radial-gradient(ellipse 500px 300px at 50% 110%, rgba(255, 200, 0, 0.14) 0%, rgba(0,0,0,0) 60%),
+      linear-gradient(135deg, #0a0014 0%, #1a0033 35%, #14001f 70%, #050010 100%);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  }
+
+  /* Estrellas decorativas */
+  .stars {
+    position: absolute; inset: 0;
+    background-image:
+      radial-gradient(1.5px 1.5px at 12% 18%, #fff 50%, transparent 100%),
+      radial-gradient(1px 1px at 28% 72%, #fff 50%, transparent 100%),
+      radial-gradient(1.5px 1.5px at 40% 22%, #ffe066 50%, transparent 100%),
+      radial-gradient(1px 1px at 55% 80%, #fff 50%, transparent 100%),
+      radial-gradient(1.5px 1.5px at 68% 30%, #ff66ee 50%, transparent 100%),
+      radial-gradient(1px 1px at 82% 65%, #66eeff 50%, transparent 100%),
+      radial-gradient(1.5px 1.5px at 92% 28%, #fff 50%, transparent 100%),
+      radial-gradient(1px 1px at 6% 55%, #ff66cc 50%, transparent 100%),
+      radial-gradient(1.5px 1.5px at 35% 88%, #fff 50%, transparent 100%);
+    opacity: 0.85;
+    pointer-events: none;
+  }
+
+  /* Aro de neón detrás del icono */
+  .icon-wrap {
+    position: absolute;
+    left: 60px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 320px; height: 320px;
+    display: grid; place-items: center;
+  }
+  .icon-glow {
+    position: absolute; inset: -20px;
+    border-radius: 50%;
+    background:
+      conic-gradient(from 0deg,
+        #ff00aa 0deg,
+        #ff7700 60deg,
+        #ffe600 120deg,
+        #00ff99 180deg,
+        #00ccff 240deg,
+        #aa00ff 300deg,
+        #ff00aa 360deg);
+    filter: blur(40px);
+    opacity: 0.55;
+    animation: spin 12s linear infinite;
+  }
+  .icon {
+    position: relative;
+    width: 280px; height: 280px;
+    border-radius: 60px;
+    box-shadow:
+      0 0 60px rgba(255, 0, 170, 0.45),
+      0 0 120px rgba(170, 0, 255, 0.30),
+      0 20px 60px rgba(0,0,0,0.6);
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Texto */
+  .text {
+    position: absolute;
+    left: 440px; top: 0;
+    width: 540px; height: 500px;
+    display: flex; flex-direction: column;
+    justify-content: center;
+    color: #fff;
+  }
+  .brand {
+    font-size: 92px;
+    font-weight: 900;
+    letter-spacing: 4px;
+    line-height: 1;
+    margin: 0;
+    background: linear-gradient(90deg, #ff00cc 0%, #ff66ee 25%, #ffe066 55%, #66eeff 85%, #aa44ff 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    filter: drop-shadow(0 0 20px rgba(255, 0, 170, 0.4));
+  }
+  .tagline {
+    margin: 18px 0 0;
+    font-size: 28px;
+    font-weight: 600;
+    color: #fff;
+    letter-spacing: 0.5px;
+    line-height: 1.25;
+    text-shadow: 0 2px 12px rgba(0,0,0,0.8), 0 0 30px rgba(255, 100, 220, 0.4);
+  }
+  .city {
+    margin-top: 22px;
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: 6px;
+    color: #ffd966;
+    text-transform: uppercase;
+    text-shadow: 0 0 20px rgba(255, 200, 80, 0.6);
+  }
+  .pills {
+    margin-top: 28px;
+    display: flex; gap: 14px;
+  }
+  .pill {
+    padding: 10px 20px;
+    border-radius: 999px;
+    border: 1.5px solid rgba(255, 100, 220, 0.6);
+    background: rgba(255, 100, 220, 0.10);
+    color: #fff;
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    backdrop-filter: blur(8px);
+    box-shadow: 0 0 24px rgba(255, 100, 220, 0.25);
+  }
+  .pill.cyan {
+    border-color: rgba(80, 220, 255, 0.6);
+    background: rgba(80, 220, 255, 0.10);
+    box-shadow: 0 0 24px rgba(80, 220, 255, 0.25);
+  }
+  .pill.gold {
+    border-color: rgba(255, 215, 100, 0.7);
+    background: rgba(255, 215, 100, 0.10);
+    box-shadow: 0 0 24px rgba(255, 215, 100, 0.25);
+  }
+</style>
+</head>
+<body>
+  <div class="canvas">
+    <div class="stars"></div>
+    <div class="icon-wrap">
+      <div class="icon-glow"></div>
+      <img class="icon" src="icon.png" alt="OPAL BAR" />
+    </div>
+    <div class="text">
+      <h1 class="brand">OPAL BAR</h1>
+      <p class="tagline">Reservas, eventos y comunidad<br/>de la noche premium.</p>
+      <div class="city">Puerto Vallarta · México</div>
+      <div class="pills">
+        <span class="pill">Mesas VIP</span>
+        <span class="pill cyan">Eventos</span>
+        <span class="pill gold">Beneficios</span>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

@@ -11,7 +11,8 @@ export default function RegistrationComplete() {
     <AuthStatusScreen
       icon="check-circle"
       variant="success"
-      title={t ? '¡Cuenta creada!' : 'Account created!'}
+      kicker={t ? 'CUENTA VERIFICADA' : 'ACCOUNT VERIFIED'}
+      title={t ? 'Bienvenido\nal club.' : 'Welcome to\nthe club.'}
       message={
         t
           ? 'Tu cuenta ha sido verificada exitosamente. Ya puedes acceder a todos los beneficios de OPALBAR.'

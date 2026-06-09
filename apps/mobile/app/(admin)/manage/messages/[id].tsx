@@ -1,4 +1,11 @@
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
+import {
+  View,
+  StyleSheet,
+  FlatList,
+  ActivityIndicator,
+  Pressable,
+  Alert,
+} from 'react-native';
 import { useCallback, useState } from 'react';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -6,13 +13,15 @@ import { Feather } from '@expo/vector-icons';
 import { adminApi } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { useSafeBack } from '@/hooks/useSafeBack';
-import { Colors } from '@/constants/tokens';
+import { Colors, Radius, Spacing } from '@/constants/tokens';
+import {
+  Body,
+  Caption,
+  ConfirmDialog,
+  Subhead,
+} from '@/components/ui';
+import { AdminHeader, StatusPill } from '@/components/admin';
 
-const AVATAR_COLORS = ['#F4A340', '#60A5FA', '#A855F7', '#38C793', '#E45858', '#EC4899'];
-function colorFor(id: string) {
-  const idx = Math.abs([...id].reduce((a, c) => a + c.charCodeAt(0), 0)) % AVATAR_COLORS.length;
-  return AVATAR_COLORS[idx];
-}
 function userName(u: any) {
   if (!u) return 'Usuario';
   return `${u.profile?.firstName ?? ''} ${u.profile?.lastName ?? ''}`.trim() || u.email || 'Usuario';
@@ -25,6 +34,7 @@ export default function ThreadModerationView() {
   const [thread, setThread] = useState<any>(null);
   const [messages, setMessages] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [confirmDel, setConfirmDel] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -39,60 +49,60 @@ export default function ThreadModerationView() {
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  function confirmDelete(msgId: string) {
-    Alert.alert('Eliminar mensaje', '¿Eliminar este mensaje permanentemente? Quedará registro de moderación.', [
-      { text: 'Cancelar', style: 'cancel' },
-      {
-        text: 'Eliminar',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await adminApi.deleteMessage(msgId);
-            load();
-          } catch (err) { Alert.alert('Error', apiError(err)); }
-        },
-      },
-    ]);
+  async function performDelete() {
+    if (!confirmDel) return;
+    try {
+      await adminApi.deleteMessage(confirmDel);
+      setConfirmDel(null);
+      load();
+    } catch (err) {
+      Alert.alert('Error', apiError(err));
+      setConfirmDel(null);
+    }
   }
 
   function viewUser(userId: string) {
     router.push(`/(admin)/users/${userId}` as never);
   }
 
-  if (loading) return <View style={styles.center}><ActivityIndicator color={Colors.accentPrimary} /></View>;
-  if (!thread) return <View style={styles.center}><Text style={{ color: Colors.textMuted }}>Hilo no encontrado</Text></View>;
+  if (loading)
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator color={Colors.accentPrimary} />
+      </View>
+    );
+  if (!thread)
+    return (
+      <View style={styles.center}>
+        <Caption tone="muted">Hilo no encontrado</Caption>
+      </View>
+    );
 
   const a = thread.userA;
   const b = thread.userB;
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={goBack} hitSlop={10}>
-          <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
-        </TouchableOpacity>
-        <View style={{ flex: 1, alignItems: 'center' }}>
-          <Text style={styles.title}>Conversación</Text>
-          <Text style={styles.subtitle}>Modo moderación</Text>
-        </View>
-        <View style={{ width: 40 }} />
-      </View>
+      <AdminHeader title="Conversacion" kicker="Modo moderacion" onBack={goBack} />
 
-      {/* Participants */}
       <View style={styles.participants}>
         <ParticipantCard user={a} onPress={() => viewUser(a.id)} />
-        <View style={styles.arrowBox}><Feather name="repeat" size={14} color={Colors.textMuted} /></View>
+        <View style={styles.arrowBox}>
+          <Feather name="repeat" size={14} color={Colors.textMuted} />
+        </View>
         <ParticipantCard user={b} onPress={() => viewUser(b.id)} />
       </View>
 
       <FlatList
         data={messages}
         keyExtractor={(m) => m.id}
-        contentContainerStyle={{ padding: 16, gap: 10, paddingBottom: 40 }}
+        contentContainerStyle={{ padding: Spacing[4], gap: Spacing[2], paddingBottom: 40 }}
         ListEmptyComponent={
           <View style={styles.empty}>
-            <Feather name="message-circle" size={40} color={Colors.textMuted} />
-            <Text style={styles.emptyText}>Sin mensajes en este hilo.</Text>
+            <Feather name="message-circle" size={32} color={Colors.textMuted} />
+            <Caption tone="muted" style={{ marginTop: Spacing[2] }}>
+              Sin mensajes en este hilo.
+            </Caption>
           </View>
         }
         renderItem={({ item }) => {
@@ -100,49 +110,88 @@ export default function ThreadModerationView() {
           const sender = fromA ? a : b;
           const deleted = !!item.deletedAt;
           return (
-            <TouchableOpacity
-              style={[styles.msgRow, fromA ? styles.msgLeft : styles.msgRight]}
-              onLongPress={() => !deleted && confirmDelete(item.id)}
+            <Pressable
+              style={({ pressed }) => [
+                styles.msgRow,
+                fromA ? styles.msgLeft : styles.msgRight,
+                pressed && styles.pressed,
+              ]}
+              onLongPress={() => !deleted && setConfirmDel(item.id)}
               delayLongPress={350}
-              activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityHint="Mantener presionado para eliminar"
             >
-              <View style={[styles.msgAvatar, { backgroundColor: colorFor(sender?.id ?? '') }]}>
-                <Text style={styles.msgAvatarText}>{userName(sender)[0]?.toUpperCase() ?? '?'}</Text>
+              <View style={styles.msgAvatar}>
+                <Caption tone="inverse" size="sm" style={{ fontWeight: '700' }}>
+                  {userName(sender)[0]?.toUpperCase() ?? '?'}
+                </Caption>
               </View>
-              <View style={[styles.bubble, fromA ? styles.bubbleLeft : styles.bubbleRight, deleted && styles.bubbleDeleted]}>
-                <Text style={styles.bubbleSender}>{userName(sender)}</Text>
-                <Text style={[styles.bubbleText, deleted && styles.bubbleTextDeleted]}>
+              <View
+                style={[
+                  styles.bubble,
+                  fromA ? styles.bubbleLeft : styles.bubbleRight,
+                  deleted && styles.bubbleDeleted,
+                ]}
+              >
+                <Caption tone="muted" size="sm" style={{ fontWeight: '700' }}>
+                  {userName(sender)}
+                </Caption>
+                <Body
+                  size="sm"
+                  tone={deleted ? 'muted' : 'primary'}
+                  style={deleted ? styles.italic : undefined}
+                >
                   {item.content}
-                </Text>
+                </Body>
                 <View style={styles.bubbleFoot}>
-                  <Text style={styles.bubbleTime}>
+                  <Caption tone="muted" size="sm">
                     {new Date(item.createdAt).toLocaleString('es', {
-                      day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
+                      day: 'numeric',
+                      month: 'short',
+                      hour: '2-digit',
+                      minute: '2-digit',
                     })}
-                  </Text>
+                  </Caption>
                   {deleted ? (
                     <View style={styles.deletedBadge}>
                       <Feather name="trash-2" size={10} color={Colors.accentDanger} />
-                      <Text style={styles.deletedText}>Eliminado</Text>
+                      <Caption tone="danger" size="sm" style={{ fontWeight: '700' }}>
+                        Eliminado
+                      </Caption>
                     </View>
                   ) : (
-                    <TouchableOpacity onPress={() => confirmDelete(item.id)} hitSlop={6}>
+                    <Pressable
+                      onPress={() => setConfirmDel(item.id)}
+                      hitSlop={6}
+                      accessibilityRole="button"
+                      accessibilityLabel="Eliminar mensaje"
+                    >
                       <Feather name="trash-2" size={13} color={Colors.textMuted} />
-                    </TouchableOpacity>
+                    </Pressable>
                   )}
                 </View>
               </View>
-            </TouchableOpacity>
+            </Pressable>
           );
         }}
       />
 
       <View style={styles.footer}>
         <Feather name="info" size={12} color={Colors.textMuted} />
-        <Text style={styles.footerText}>
-          Mantén presionado un mensaje para eliminarlo.
-        </Text>
+        <Caption tone="muted" size="sm">
+          Manten presionado un mensaje para eliminarlo.
+        </Caption>
       </View>
+
+      <ConfirmDialog
+        open={!!confirmDel}
+        onClose={() => setConfirmDel(null)}
+        onConfirm={performDelete}
+        title="Eliminar mensaje"
+        description="Eliminar este mensaje permanentemente? Quedara registro de moderacion."
+        confirmLabel="Eliminar"
+        confirmVariant="danger"
+      />
     </SafeAreaView>
   );
 }
@@ -151,100 +200,123 @@ function ParticipantCard({ user, onPress }: { user: any; onPress: () => void }) 
   const name = userName(user);
   const banned = user?.status === 'BANNED';
   return (
-    <TouchableOpacity style={styles.pcard} onPress={onPress} activeOpacity={0.85}>
-      <View style={[styles.pAvatar, { backgroundColor: colorFor(user?.id ?? '') }]}>
-        <Text style={styles.pAvatarText}>{name[0]?.toUpperCase() ?? '?'}</Text>
+    <Pressable
+      style={({ pressed }) => [styles.pcard, pressed && styles.pressed]}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`Ver perfil de ${name}`}
+    >
+      <View style={styles.pAvatar}>
+        <Body tone="inverse" weight="bold">
+          {name[0]?.toUpperCase() ?? '?'}
+        </Body>
       </View>
-      <Text style={styles.pName} numberOfLines={1}>{name}</Text>
-      <Text style={styles.pEmail} numberOfLines={1}>{user?.email ?? '—'}</Text>
+      <Subhead numberOfLines={1} style={{ marginTop: 4 }}>
+        {name}
+      </Subhead>
+      <Caption tone="muted" size="sm" numberOfLines={1}>
+        {user?.email ?? '—'}
+      </Caption>
       {banned && (
-        <View style={styles.pBanned}>
-          <Text style={styles.pBannedText}>BANEADO</Text>
+        <View style={{ marginTop: 4 }}>
+          <StatusPill label="BANEADO" tone="danger" />
         </View>
       )}
-    </TouchableOpacity>
+    </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.bgPrimary },
-
-  header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 20, paddingTop: 8, paddingBottom: 8,
+  pressed: { opacity: 0.7 },
+  italic: { fontStyle: 'italic' },
+  center: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.bgPrimary,
   },
-  backBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: Colors.bgCard,
-    alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1, borderColor: Colors.border,
-  },
-  title: { color: Colors.textPrimary, fontSize: 15, fontWeight: '700' },
-  subtitle: { color: Colors.accentPrimary, fontSize: 10, fontWeight: '700', letterSpacing: 0.5, marginTop: 2 },
 
   participants: {
-    flexDirection: 'row', gap: 10,
-    paddingHorizontal: 16, paddingVertical: 12,
+    flexDirection: 'row',
+    gap: Spacing[2],
+    paddingHorizontal: Spacing[4],
+    paddingVertical: Spacing[3],
     alignItems: 'center',
-    borderBottomWidth: 1, borderBottomColor: Colors.border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.border,
   },
   pcard: {
-    flex: 1, alignItems: 'center',
+    flex: 1,
+    alignItems: 'center',
     backgroundColor: Colors.bgCard,
-    borderRadius: 12, padding: 10,
-    borderWidth: 1, borderColor: Colors.border,
-    gap: 4,
+    borderRadius: Radius['2xl'],
+    paddingHorizontal: Spacing[3],
+    paddingVertical: Spacing[3],
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
   },
-  pAvatar: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
-  pAvatarText: { color: Colors.textInverse, fontWeight: '800', fontSize: 14 },
-  pName: { color: Colors.textPrimary, fontSize: 12, fontWeight: '700' },
-  pEmail: { color: Colors.textMuted, fontSize: 10 },
-  pBanned: {
-    paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6,
-    backgroundColor: 'rgba(228,88,88,0.15)',
+  pAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: Colors.accentPrimary,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  pBannedText: { color: Colors.accentDanger, fontSize: 8, fontWeight: '800', letterSpacing: 0.5 },
   arrowBox: {
-    width: 28, height: 28, borderRadius: 14,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     backgroundColor: Colors.bgElevated,
-    alignItems: 'center', justifyContent: 'center',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
-  msgRow: { flexDirection: 'row', gap: 8, alignItems: 'flex-end', maxWidth: '90%' },
+  msgRow: { flexDirection: 'row', gap: Spacing[2], alignItems: 'flex-end', maxWidth: '90%' },
   msgLeft: { alignSelf: 'flex-start' },
   msgRight: { alignSelf: 'flex-end', flexDirection: 'row-reverse' },
-  msgAvatar: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  msgAvatarText: { color: Colors.textInverse, fontWeight: '800', fontSize: 11 },
+  msgAvatar: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: Colors.accentPrimary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
   bubble: {
     backgroundColor: Colors.bgCard,
-    borderRadius: 14, padding: 10,
-    borderWidth: 1, borderColor: Colors.border,
-    gap: 4, maxWidth: 260,
+    borderRadius: Radius['2xl'],
+    padding: Spacing[3],
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+    gap: 4,
+    maxWidth: 260,
   },
-  bubbleLeft: { borderBottomLeftRadius: 4 },
-  bubbleRight: { borderBottomRightRadius: 4, backgroundColor: Colors.bgElevated },
-  bubbleDeleted: { opacity: 0.6, borderColor: 'rgba(228,88,88,0.4)' },
-  bubbleSender: { color: Colors.textMuted, fontSize: 10, fontWeight: '700' },
-  bubbleText: { color: Colors.textPrimary, fontSize: 13, lineHeight: 18 },
-  bubbleTextDeleted: { color: Colors.textMuted, fontStyle: 'italic' },
+  bubbleLeft: { borderBottomLeftRadius: Radius.sm },
+  bubbleRight: { borderBottomRightRadius: Radius.sm, backgroundColor: Colors.bgElevated },
+  bubbleDeleted: { opacity: 0.6, borderColor: 'rgba(196,104,104,0.40)' },
   bubbleFoot: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    gap: 8, marginTop: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing[2],
+    marginTop: 2,
   },
-  bubbleTime: { color: Colors.textMuted, fontSize: 10 },
   deletedBadge: { flexDirection: 'row', gap: 4, alignItems: 'center' },
-  deletedText: { color: Colors.accentDanger, fontSize: 9, fontWeight: '800' },
 
   footer: {
-    flexDirection: 'row', gap: 6, alignItems: 'center', justifyContent: 'center',
-    paddingHorizontal: 20, paddingVertical: 10,
-    borderTopWidth: 1, borderTopColor: Colors.border,
+    flexDirection: 'row',
+    gap: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: Spacing[5],
+    paddingVertical: Spacing[2],
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Colors.border,
     backgroundColor: Colors.bgPrimary,
   },
-  footerText: { color: Colors.textMuted, fontSize: 11 },
 
-  empty: { alignItems: 'center', paddingTop: 60, gap: 10 },
-  emptyText: { color: Colors.textMuted, fontSize: 13 },
+  empty: { alignItems: 'center', paddingTop: 60 },
 });

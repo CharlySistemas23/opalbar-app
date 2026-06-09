@@ -21,7 +21,7 @@ import Animated, {
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Colors } from '@/constants/tokens';
 import { Pressy } from './Pressy';
-import { useFeedback } from '@/hooks/useFeedback';
+import { useFeedback, playUiSound } from '@/hooks/useFeedback';
 
 interface LikeButtonProps {
   liked: boolean;
@@ -75,6 +75,7 @@ export function LikeButton({
     } else {
       heart.value = withSpring(0, { damping: 12, stiffness: 220 });
       fb.tap();
+      playUiSound('tick');
     }
     onToggle(next);
   };

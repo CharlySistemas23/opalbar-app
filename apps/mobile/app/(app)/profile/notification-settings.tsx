@@ -16,6 +16,7 @@ import { Feather } from '@expo/vector-icons';
 import { usersApi } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { useAppStore } from '@/stores/app.store';
+import { useFeedback } from '@/hooks/useFeedback';
 import { Colors, EditorialSpacing, Spacing } from '@/constants/tokens';
 import { HitSlop, Roles } from '@/constants/a11y';
 import {
@@ -35,6 +36,7 @@ export default function NotificationSettings() {
     soundsEnabled, setSoundsEnabled,
   } = useAppStore();
   const t = language === 'es';
+  const fb = useFeedback();
 
   const [settings, setSettings] = useState({
     events: true,
@@ -47,6 +49,7 @@ export default function NotificationSettings() {
   async function toggle(key: keyof typeof settings) {
     const previous = settings[key];
     const next = !previous;
+    fb.toggle(next);
     setSettings((prev) => ({ ...prev, [key]: next }));
     try {
       await usersApi.updateNotifications({ ...settings, [key]: next });
@@ -84,11 +87,9 @@ export default function NotificationSettings() {
       </View>
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        <FadeIn>
+        <FadeIn style={styles.hero}>
           <Kicker tone="muted">{t ? 'AJUSTES' : 'SETTINGS'}</Kicker>
-          <Heading size="md" style={{ marginTop: Spacing[2] }}>
-            {t ? 'Notificaciones' : 'Notifications'}
-          </Heading>
+          <Heading size="md">{t ? 'Notificaciones' : 'Notifications'}</Heading>
         </FadeIn>
 
         {/* ── Preferencias ── */}
@@ -130,7 +131,7 @@ export default function NotificationSettings() {
               rightSlot={
                 <Switch
                   value={hapticsEnabled}
-                  onValueChange={setHapticsEnabled}
+                  onValueChange={(v) => { fb.toggle(v); setHapticsEnabled(v); }}
                   trackColor={{ false: Colors.border, true: Colors.accentPrimary }}
                   thumbColor={Colors.textInverse}
                   accessibilityLabel={t ? 'Vibración' : 'Haptics'}
@@ -176,6 +177,10 @@ const styles = StyleSheet.create({
   scroll: {
     paddingHorizontal: EditorialSpacing.pageGutter,
     paddingBottom: Spacing[12],
+  },
+  hero: {
+    paddingVertical: Spacing[4],
+    gap: Spacing[2],
   },
   section: {
     marginTop: Spacing[8],

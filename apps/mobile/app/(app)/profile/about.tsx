@@ -8,7 +8,7 @@
 //   · Copyright caption at the foot
 // ─────────────────────────────────────────────
 import { useState } from 'react';
-import { ActivityIndicator, Alert, Linking, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Linking, ScrollView, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
@@ -60,10 +60,7 @@ export default function About() {
       if (!can) throw new Error('cannot open');
       await Linking.openURL(url);
     } catch {
-      Alert.alert(
-        t ? 'No se pudo abrir' : 'Could not open',
-        t ? 'Intenta más tarde.' : 'Please try again later.',
-      );
+      toast(t ? 'No se pudo abrir. Intenta más tarde.' : 'Could not open. Try again later.', 'danger');
     }
   }
 

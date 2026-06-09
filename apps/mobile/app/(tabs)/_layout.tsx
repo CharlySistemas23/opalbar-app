@@ -25,6 +25,7 @@ import { Durations } from '@/constants/motion';
 import { Roles } from '@/constants/a11y';
 import { useAppStore } from '@/stores/app.store';
 import { Pressy } from '@/components/ui/Pressy';
+import { playUiSound } from '@/hooks/useFeedback';
 
 interface TabDef {
   route: string;
@@ -63,6 +64,8 @@ function NoirTopBar({ state, navigation }: any) {
               canPreventDefault: true,
             });
             if (!focused && !event.defaultPrevented) {
+              // Pressy already fires the 'select' haptic; add the audible tick.
+              playUiSound('tick');
               navigation.navigate(route.name, route.params);
             }
           };

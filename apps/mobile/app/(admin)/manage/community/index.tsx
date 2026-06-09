@@ -1,4 +1,12 @@
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, RefreshControl, Alert } from 'react-native';
+import {
+  View,
+  StyleSheet,
+  FlatList,
+  ActivityIndicator,
+  RefreshControl,
+  Alert,
+  Pressable,
+} from 'react-native';
 import { useCallback, useState } from 'react';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -7,7 +15,11 @@ import { adminApi } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { useFeedback } from '@/hooks/useFeedback';
 import { useSafeBack } from '@/hooks/useSafeBack';
-import { Colors } from '@/constants/tokens';
+import { Colors, Radius, Spacing } from '@/constants/tokens';
+import { Body, Button, Caption, ConfirmDialog, Sheet, Subhead } from '@/components/ui';
+import { AdminHeader } from '@/components/admin';
+
+const REJECT_REASONS = ['Spam', 'Lenguaje ofensivo', 'Fuera de tema'];
 
 export default function CommunityAdmin() {
   const router = useRouter();
@@ -15,10 +27,12 @@ export default function CommunityAdmin() {
   const [posts, setPosts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  // When selectMode is on, tapping a row toggles selection instead of opening detail.
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
+  const [rejectId, setRejectId] = useState<string | null>(null);
+  const [bulkRejectOpen, setBulkRejectOpen] = useState(false);
+  const [confirmBulkApprove, setConfirmBulkApprove] = useState(false);
   const fb = useFeedback();
 
   const load = useCallback(async () => {
@@ -56,70 +70,48 @@ export default function CommunityAdmin() {
       await adminApi.approvePost(id);
       setPosts((p) => p.filter((x) => x.id !== id));
       fb.success();
-    } catch (err) { fb.error(); Alert.alert('Error', apiError(err)); }
+    } catch (err) {
+      fb.error();
+      Alert.alert('Error', apiError(err));
+    }
   }
 
-  function reject(id: string) {
-    Alert.alert('Rechazar post', '¿Motivo?', [
-      { text: 'Cancelar', style: 'cancel' },
-      { text: 'Spam', onPress: () => doReject(id, 'Spam') },
-      { text: 'Lenguaje ofensivo', onPress: () => doReject(id, 'Lenguaje ofensivo') },
-      { text: 'Fuera de tema', onPress: () => doReject(id, 'Fuera de tema') },
-    ]);
-  }
   async function doReject(id: string, reason: string) {
     try {
       await adminApi.rejectPost(id, reason);
       setPosts((p) => p.filter((x) => x.id !== id));
       fb.success();
-    } catch (err) { fb.error(); Alert.alert('Error', apiError(err)); }
+    } catch (err) {
+      fb.error();
+      Alert.alert('Error', apiError(err));
+    }
   }
 
-  async function bulkApprove() {
+  async function performBulkApprove() {
+    setConfirmBulkApprove(false);
     if (selected.size === 0 || busy) return;
-    Alert.alert(
-      `Aprobar ${selected.size} post${selected.size > 1 ? 's' : ''}`,
-      '¿Publicar todos los seleccionados?',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Aprobar',
-          onPress: async () => {
-            setBusy(true);
-            try {
-              const ids = Array.from(selected);
-              const r = await adminApi.bulkApprovePosts(ids);
-              const data = r.data?.data ?? r.data;
-              setPosts((p) => p.filter((x) => !selected.has(x.id)));
-              exitSelectMode();
-              fb.success();
-              Alert.alert('Listo', `${data.processed ?? ids.length} aprobados${data.skipped ? ` · ${data.skipped} omitidos` : ''}.`);
-            } catch (err) {
-              fb.error();
-              Alert.alert('Error', apiError(err));
-            } finally {
-              setBusy(false);
-            }
-          },
-        },
-      ],
-    );
+    setBusy(true);
+    try {
+      const ids = Array.from(selected);
+      const r = await adminApi.bulkApprovePosts(ids);
+      const data = r.data?.data ?? r.data;
+      setPosts((p) => p.filter((x) => !selected.has(x.id)));
+      exitSelectMode();
+      fb.success();
+      Alert.alert(
+        'Listo',
+        `${data.processed ?? ids.length} aprobados${data.skipped ? ` · ${data.skipped} omitidos` : ''}.`,
+      );
+    } catch (err) {
+      fb.error();
+      Alert.alert('Error', apiError(err));
+    } finally {
+      setBusy(false);
+    }
   }
 
-  function bulkReject() {
-    if (selected.size === 0 || busy) return;
-    Alert.alert(
-      `Rechazar ${selected.size} post${selected.size > 1 ? 's' : ''}`,
-      '¿Motivo?',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        { text: 'Spam', onPress: () => doBulkReject('Spam') },
-        { text: 'Lenguaje ofensivo', onPress: () => doBulkReject('Lenguaje ofensivo') },
-        { text: 'Fuera de tema', onPress: () => doBulkReject('Fuera de tema') },
-      ],
-    );
-  }
   async function doBulkReject(reason: string) {
+    setBulkRejectOpen(false);
     setBusy(true);
     try {
       const ids = Array.from(selected);
@@ -128,7 +120,10 @@ export default function CommunityAdmin() {
       setPosts((p) => p.filter((x) => !selected.has(x.id)));
       exitSelectMode();
       fb.success();
-      Alert.alert('Listo', `${data.processed ?? ids.length} rechazados${data.skipped ? ` · ${data.skipped} omitidos` : ''}.`);
+      Alert.alert(
+        'Listo',
+        `${data.processed ?? ids.length} rechazados${data.skipped ? ` · ${data.skipped} omitidos` : ''}.`,
+      );
     } catch (err) {
       fb.error();
       Alert.alert('Error', apiError(err));
@@ -139,50 +134,70 @@ export default function CommunityAdmin() {
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
-      <View style={styles.header}>
-        {selectMode ? (
-          <>
-            <TouchableOpacity style={styles.backBtn} onPress={exitSelectMode} hitSlop={10}>
-              <Feather name="x" size={20} color={Colors.textPrimary} />
-            </TouchableOpacity>
-            <Text style={styles.title}>{selected.size} seleccionado{selected.size === 1 ? '' : 's'}</Text>
-            <TouchableOpacity style={styles.backBtn} onPress={selectAll} hitSlop={10}>
-              <Feather name="check-square" size={18} color={Colors.textPrimary} />
-            </TouchableOpacity>
-          </>
-        ) : (
-          <>
-            <TouchableOpacity style={styles.backBtn} onPress={goBack} hitSlop={10}>
-              <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
-            </TouchableOpacity>
-            <Text style={styles.title}>Posts pendientes</Text>
+      {selectMode ? (
+        <AdminHeader
+          title={`${selected.size} seleccionado${selected.size === 1 ? '' : 's'}`}
+          kicker="Moderacion"
+          onBack={exitSelectMode}
+          right={
+            <Pressable
+              onPress={selectAll}
+              hitSlop={10}
+              accessibilityRole="button"
+              accessibilityLabel="Seleccionar todo"
+              style={({ pressed }) => [styles.iconBtn, pressed && styles.pressed]}
+            >
+              <Feather name="check-square" size={16} color={Colors.textPrimary} />
+            </Pressable>
+          }
+        />
+      ) : (
+        <AdminHeader
+          title="Posts pendientes"
+          kicker="Moderacion"
+          onBack={goBack}
+          right={
             <View style={styles.counter}>
-              <Text style={styles.counterText}>{posts.length}</Text>
+              <Caption tone="accent" style={{ fontWeight: '700' }}>
+                {posts.length}
+              </Caption>
             </View>
-          </>
-        )}
-      </View>
+          }
+        />
+      )}
 
       {loading ? (
-        <View style={styles.center}><ActivityIndicator color={Colors.accentPrimary} /></View>
+        <View style={styles.center}>
+          <ActivityIndicator color={Colors.accentPrimary} />
+        </View>
       ) : (
         <FlatList
           data={posts}
           keyExtractor={(p) => p.id}
-          contentContainerStyle={{ padding: 20, paddingBottom: selectMode ? 120 : 40, gap: 10 }}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={Colors.accentPrimary} />}
+          contentContainerStyle={{
+            padding: Spacing[5],
+            paddingBottom: selectMode ? 120 : 40,
+            gap: Spacing[2],
+          }}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => { setRefreshing(true); load(); }}
+              tintColor={Colors.accentPrimary}
+            />
+          }
           ListEmptyComponent={
             <View style={styles.empty}>
-              <Feather name="check-circle" size={48} color={Colors.accentSuccess} />
-              <Text style={styles.emptyTitle}>Todo al día</Text>
-              <Text style={styles.emptySub}>No hay posts pendientes de moderación.</Text>
+              <Feather name="check-circle" size={36} color={Colors.accentSuccess} />
+              <Subhead style={{ marginTop: Spacing[2] }}>Todo al dia</Subhead>
+              <Caption tone="muted">No hay posts pendientes de moderacion.</Caption>
             </View>
           }
           renderItem={({ item }) => {
             const checked = selected.has(item.id);
             return (
               <View style={[styles.card, checked && styles.cardSelected]}>
-                <TouchableOpacity
+                <Pressable
                   onPress={() => {
                     if (selectMode) toggleSelect(item.id);
                     else router.push(`/(admin)/manage/community/${item.id}` as never);
@@ -195,49 +210,65 @@ export default function CommunityAdmin() {
                     }
                   }}
                   delayLongPress={250}
-                  activeOpacity={0.85}
-                  style={{ gap: 8 }}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Post de ${item.user?.profile?.firstName ?? 'usuario'}`}
+                  style={{ gap: Spacing[2] }}
                 >
                   <View style={styles.cardHead}>
                     {selectMode ? (
                       <View style={[styles.checkbox, checked && styles.checkboxOn]}>
-                        {checked ? <Feather name="check" size={14} color={Colors.textInverse} /> : null}
+                        {checked ? (
+                          <Feather name="check" size={14} color={Colors.textInverse} />
+                        ) : null}
                       </View>
                     ) : null}
                     <View style={styles.avatar}>
-                      <Text style={styles.avatarText}>
+                      <Body tone="inverse" weight="bold">
                         {(item.user?.profile?.firstName?.[0] ?? '?').toUpperCase()}
-                      </Text>
+                      </Body>
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={styles.authorName}>
+                      <Subhead>
                         {item.user?.profile?.firstName} {item.user?.profile?.lastName}
-                      </Text>
-                      <Text style={styles.meta}>
-                        hace {relTime(item.createdAt)} · score: {item.moderationScore?.toFixed?.(2) ?? '—'}
-                      </Text>
+                      </Subhead>
+                      <Caption tone="muted" style={{ marginTop: 2 }}>
+                        hace {relTime(item.createdAt)} · score:{' '}
+                        {item.moderationScore?.toFixed?.(2) ?? '—'}
+                      </Caption>
                     </View>
                   </View>
                   {item.content ? (
-                    <Text style={styles.body} numberOfLines={3}>{item.content}</Text>
+                    <Body size="sm" numberOfLines={3}>
+                      {item.content}
+                    </Body>
                   ) : null}
                   {item.imageUrl ? (
                     <View style={styles.imgBadge}>
                       <Feather name="image" size={12} color={Colors.textMuted} />
-                      <Text style={styles.imgBadgeText}>Incluye imagen</Text>
+                      <Caption tone="muted" size="sm">Incluye imagen</Caption>
                     </View>
                   ) : null}
-                </TouchableOpacity>
+                </Pressable>
                 {!selectMode ? (
                   <View style={styles.actions}>
-                    <TouchableOpacity style={styles.rejectBtn} onPress={() => reject(item.id)} activeOpacity={0.85}>
-                      <Feather name="x" size={16} color={Colors.accentDanger} />
-                      <Text style={styles.rejectLbl}>Rechazar</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.approveBtn} onPress={() => approve(item.id)} activeOpacity={0.85}>
-                      <Feather name="check" size={16} color={Colors.textInverse} />
-                      <Text style={styles.approveLbl}>Aprobar</Text>
-                    </TouchableOpacity>
+                    <View style={{ flex: 1 }}>
+                      <Button
+                        label="Rechazar"
+                        variant="danger"
+                        size="sm"
+                        onPress={() => setRejectId(item.id)}
+                        leftIcon={<Feather name="x" size={14} color={Colors.accentDanger} />}
+                      />
+                    </View>
+                    <View style={{ flex: 1.3 }}>
+                      <Button
+                        label="Aprobar"
+                        variant="primary"
+                        size="sm"
+                        onPress={() => approve(item.id)}
+                        leftIcon={<Feather name="check" size={14} color={Colors.textInverse} />}
+                      />
+                    </View>
                   </View>
                 ) : null}
               </View>
@@ -248,32 +279,76 @@ export default function CommunityAdmin() {
 
       {selectMode ? (
         <View style={styles.bulkBar}>
-          <TouchableOpacity
-            style={[styles.rejectBtn, styles.bulkBtn, selected.size === 0 && { opacity: 0.4 }]}
-            onPress={bulkReject}
-            disabled={selected.size === 0 || busy}
-          >
-            {busy
-              ? <ActivityIndicator size="small" color={Colors.accentDanger} />
-              : <>
-                  <Feather name="x" size={16} color={Colors.accentDanger} />
-                  <Text style={styles.rejectLbl}>Rechazar ({selected.size})</Text>
-                </>}
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.approveBtn, styles.bulkBtn, selected.size === 0 && { opacity: 0.4 }]}
-            onPress={bulkApprove}
-            disabled={selected.size === 0 || busy}
-          >
-            {busy
-              ? <ActivityIndicator size="small" color={Colors.textInverse} />
-              : <>
-                  <Feather name="check" size={16} color={Colors.textInverse} />
-                  <Text style={styles.approveLbl}>Aprobar ({selected.size})</Text>
-                </>}
-          </TouchableOpacity>
+          <View style={{ flex: 1 }}>
+            <Button
+              label={`Rechazar (${selected.size})`}
+              variant="danger"
+              onPress={() => setBulkRejectOpen(true)}
+              disabled={selected.size === 0 || busy}
+              loading={busy}
+              leftIcon={<Feather name="x" size={14} color={Colors.accentDanger} />}
+            />
+          </View>
+          <View style={{ flex: 1.3 }}>
+            <Button
+              label={`Aprobar (${selected.size})`}
+              variant="primary"
+              onPress={() => setConfirmBulkApprove(true)}
+              disabled={selected.size === 0 || busy}
+              loading={busy}
+              leftIcon={<Feather name="check" size={14} color={Colors.textInverse} />}
+            />
+          </View>
         </View>
       ) : null}
+
+      {/* Single reject sheet */}
+      <Sheet
+        open={!!rejectId}
+        onClose={() => setRejectId(null)}
+        title="Motivo de rechazo"
+      >
+        <View style={{ gap: Spacing[2] }}>
+          {REJECT_REASONS.map((r) => (
+            <Button
+              key={r}
+              label={r}
+              variant="secondary"
+              onPress={() => {
+                const id = rejectId!;
+                setRejectId(null);
+                doReject(id, r);
+              }}
+            />
+          ))}
+        </View>
+      </Sheet>
+
+      <Sheet
+        open={bulkRejectOpen}
+        onClose={() => setBulkRejectOpen(false)}
+        title={`Rechazar ${selected.size} post${selected.size > 1 ? 's' : ''}`}
+      >
+        <View style={{ gap: Spacing[2] }}>
+          {REJECT_REASONS.map((r) => (
+            <Button
+              key={r}
+              label={r}
+              variant="secondary"
+              onPress={() => doBulkReject(r)}
+            />
+          ))}
+        </View>
+      </Sheet>
+
+      <ConfirmDialog
+        open={confirmBulkApprove}
+        onClose={() => setConfirmBulkApprove(false)}
+        onConfirm={performBulkApprove}
+        title={`Aprobar ${selected.size} post${selected.size > 1 ? 's' : ''}`}
+        description="Publicar todos los seleccionados?"
+        confirmLabel="Aprobar"
+      />
     </SafeAreaView>
   );
 }
@@ -289,47 +364,53 @@ function relTime(d?: string) {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
+  pressed: { opacity: 0.7 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
-  header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 20, paddingTop: 8, paddingBottom: 8,
-  },
-  backBtn: {
-    width: 40, height: 40, borderRadius: 20,
+  iconBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: Radius.lg,
     backgroundColor: Colors.bgCard,
-    alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1, borderColor: Colors.border,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  title: { color: Colors.textPrimary, fontSize: 17, fontWeight: '700' },
   counter: {
-    minWidth: 40, height: 28, borderRadius: 14,
-    backgroundColor: 'rgba(244,163,64,0.2)',
+    minWidth: 40,
+    height: 28,
+    borderRadius: Radius.full,
+    backgroundColor: 'rgba(201,169,97,0.14)',
     paddingHorizontal: 10,
-    alignItems: 'center', justifyContent: 'center',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  counterText: { color: Colors.accentPrimary, fontSize: 13, fontWeight: '800' },
 
-  empty: { alignItems: 'center', paddingTop: 80, gap: 8 },
-  emptyTitle: { color: Colors.textPrimary, fontSize: 16, fontWeight: '700', marginTop: 8 },
-  emptySub: { color: Colors.textMuted, fontSize: 13 },
+  empty: { alignItems: 'center', paddingTop: 80, gap: 4 },
 
   card: {
     backgroundColor: Colors.bgCard,
-    borderRadius: 14,
-    padding: 14,
-    borderWidth: 1, borderColor: Colors.border,
-    gap: 12,
+    borderRadius: Radius['2xl'],
+    paddingHorizontal: Spacing[4],
+    paddingVertical: Spacing[3],
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+    gap: Spacing[3],
   },
   cardSelected: {
     borderColor: Colors.accentPrimary,
-    backgroundColor: 'rgba(244,163,64,0.08)',
+    backgroundColor: 'rgba(201,169,97,0.06)',
   },
-  cardHead: { flexDirection: 'row', gap: 10, alignItems: 'center' },
+  cardHead: { flexDirection: 'row', gap: Spacing[2], alignItems: 'center' },
   checkbox: {
-    width: 22, height: 22, borderRadius: 6,
-    borderWidth: 1.5, borderColor: Colors.border,
-    alignItems: 'center', justifyContent: 'center',
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: Colors.bgElevated,
   },
   checkboxOn: {
@@ -337,43 +418,29 @@ const styles = StyleSheet.create({
     borderColor: Colors.accentPrimary,
   },
   avatar: {
-    width: 36, height: 36, borderRadius: 18,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: Colors.accentPrimary,
-    alignItems: 'center', justifyContent: 'center',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  avatarText: { color: Colors.textInverse, fontWeight: '800', fontSize: 13 },
-  authorName: { color: Colors.textPrimary, fontSize: 13, fontWeight: '700' },
-  meta: { color: Colors.textMuted, fontSize: 11, marginTop: 2 },
 
-  body: { color: Colors.textPrimary, fontSize: 13, lineHeight: 19 },
   imgBadge: { flexDirection: 'row', gap: 6, alignItems: 'center' },
-  imgBadgeText: { color: Colors.textMuted, fontSize: 11 },
 
-  actions: { flexDirection: 'row', gap: 8, paddingTop: 4 },
-  rejectBtn: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
-    height: 40, borderRadius: 10,
-    backgroundColor: 'rgba(228,88,88,0.1)',
-    borderWidth: 1, borderColor: 'rgba(228,88,88,0.3)',
-  },
-  rejectLbl: { color: Colors.accentDanger, fontSize: 13, fontWeight: '700' },
-  approveBtn: {
-    flex: 1.3, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
-    height: 40, borderRadius: 10,
-    backgroundColor: Colors.accentSuccess,
-  },
-  approveLbl: { color: Colors.textInverse, fontSize: 13, fontWeight: '800' },
+  actions: { flexDirection: 'row', gap: Spacing[2], paddingTop: 4 },
 
   bulkBar: {
     position: 'absolute',
-    bottom: 0, left: 0, right: 0,
+    bottom: 0,
+    left: 0,
+    right: 0,
     flexDirection: 'row',
-    gap: 8,
-    padding: 16,
-    paddingBottom: 24,
+    gap: Spacing[2],
+    padding: Spacing[4],
+    paddingBottom: Spacing[6],
     backgroundColor: Colors.bgPrimary,
-    borderTopWidth: 1,
+    borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: Colors.border,
   },
-  bulkBtn: { height: 48, borderRadius: 12 },
 });

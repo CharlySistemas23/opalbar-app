@@ -90,7 +90,7 @@ export default function AdminFlags() {
       </View>
 
       <View style={styles.warn}>
-        <Feather name="alert-triangle" size={16} color="#F59E0B" />
+        <Feather name="alert-triangle" size={16} color={Colors.accentPrimary} />
         <Text style={styles.warnText}>
           Cambios aplican en caliente a todos los clientes. Usa con precaución en producción.
         </Text>
@@ -220,7 +220,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(245,158,11,0.12)',
     borderRadius: 12, borderWidth: 1, borderColor: 'rgba(245,158,11,0.3)',
   },
-  warnText: { flex: 1, color: '#F59E0B', fontSize: 12, lineHeight: 17, fontWeight: '600' },
+  warnText: { flex: 1, color: Colors.accentPrimary, fontSize: 12, lineHeight: 17, fontWeight: '600' },
 
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 10 },
   errorText: { color: Colors.textSecondary, fontSize: 13, textAlign: 'center' },

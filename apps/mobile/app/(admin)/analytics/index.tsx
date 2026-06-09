@@ -93,9 +93,9 @@ const DOW_LABEL = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 
 const ENGAGEMENT_LABEL: Record<string, { label: string; color: string }> = {
   inactive: { label: 'Sin posts', color: '#6B6B78' },
-  casual: { label: '1–2 posts', color: '#60A5FA' },
+  casual: { label: '1–2 posts', color: Colors.accentInfo },
   engaged: { label: '3–9 posts', color: Colors.accentPrimary },
-  super: { label: '10+ posts', color: '#EC4899' },
+  super: { label: '10+ posts', color: Colors.accentChampagne },
 };
 
 export default function AdminAnalytics() {
@@ -179,13 +179,13 @@ export default function AdminAnalytics() {
                 label="Activos 7 días"
                 value={insights.totals.activeLast7d}
                 icon="zap"
-                color="#60A5FA"
+                color={Colors.accentInfo}
               />
               <KpiTile
                 label="Puntos prom."
                 value={insights.totals.averagePoints}
                 icon="award"
-                color="#EC4899"
+                color={Colors.accentChampagne}
               />
             </View>
 
@@ -289,7 +289,7 @@ export default function AdminAnalytics() {
                       label={DISCOVERY_LABEL[row.key] ?? row.key}
                       count={row.count}
                       max={Math.max(...insights.discoveryBreakdown.map((r) => r.count))}
-                      color="#A855F7"
+                      color={Colors.accentChampagne}
                     />
                   ))
               )}
@@ -305,7 +305,7 @@ export default function AdminAnalytics() {
                     label={row.city}
                     count={row.count}
                     max={insights.topCities[0].count}
-                    color="#60A5FA"
+                    color={Colors.accentInfo}
                   />
                 ))}
               </Card>
@@ -570,7 +570,7 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 8,
-    backgroundColor: 'rgba(244,163,64,0.15)',
+    backgroundColor: 'rgba(201,169,97,0.14)',
     alignItems: 'center',
     justifyContent: 'center',
   },

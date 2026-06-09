@@ -27,6 +27,7 @@ import {
 
 import { Colors, EditorialSpacing, Radius, Shadows, Spacing, TypePresets } from '@/constants/tokens';
 import { A11yDefaults, HitSlop, Roles } from '@/constants/a11y';
+import { playUiSound } from '@/hooks/useFeedback';
 import { FadeIn } from './FadeIn';
 
 interface Props {
@@ -54,7 +55,10 @@ export function Modal({
   testID,
 }: Props) {
   useEffect(() => {
-    if (open && title) AccessibilityInfo.announceForAccessibility(title);
+    if (open) {
+      playUiSound('whoosh');
+      if (title) AccessibilityInfo.announceForAccessibility(title);
+    }
   }, [open, title]);
 
   const maxWidth = size === 'sm' ? 320 : size === 'lg' ? 520 : 400;
@@ -95,7 +99,10 @@ export function Modal({
                 )}
                 {!hideClose ? (
                   <Pressable
-                    onPress={onClose}
+                    onPress={() => {
+                      playUiSound('tick');
+                      onClose();
+                    }}
                     hitSlop={HitSlop.expand}
                     accessibilityRole={Roles.button}
                     accessibilityLabel="Cerrar"

@@ -22,19 +22,19 @@
 //  · Borders barely visible — depth comes from typography and spacing,
 //    not from outlining.
 export const Colors = {
-  // Backgrounds — true black absolute
-  bgPrimary: '#000000',
-  bgCard: '#0A0808',
-  bgElevated: '#141210',
-  bgSubtle: 'rgba(234,226,208,0.018)',
-  bgOverlay: 'rgba(0,0,0,0.86)',
+  // Backgrounds — warm paper-dark family (matches Figma 2026-06-09)
+  bgPrimary: '#100E0C',
+  bgCard: '#171411',
+  bgElevated: '#1F1B17',
+  bgSubtle: 'rgba(246,241,231,0.025)',
+  bgOverlay: 'rgba(8,7,6,0.78)',
 
-  // Text — bone scale, premium not pure white
-  textPrimary: '#EAE2D0',
-  textSecondary: '#9B9587',
-  textMuted: '#6B6760',
-  textDisabled: '#403E3A',
-  textInverse: '#000000',
+  // Text — warm parchment scale (matches Figma)
+  textPrimary: '#F6F1E7',
+  textSecondary: '#B8B1A2',
+  textMuted: '#827C71',
+  textDisabled: '#56524A',
+  textInverse: '#100E0C',
 
   // Accent — brushed gold (matte). Was amber → now jewelry-grade gold.
   accentPrimary: '#C9A961',
@@ -55,14 +55,14 @@ export const Colors = {
   levelOro: '#C9A961',
   levelDiamante: '#9FB6BE',
 
-  // Borders & separators — barely visible
-  border: 'rgba(234,226,208,0.05)',
-  borderStrong: 'rgba(234,226,208,0.09)',
-  borderSubtle: 'rgba(234,226,208,0.025)',
-  highlightTop: 'rgba(234,226,208,0.04)',
+  // Borders & separators — warm parchment tint (matches Figma)
+  border: 'rgba(246,241,231,0.06)',
+  borderStrong: 'rgba(246,241,231,0.10)',
+  borderSubtle: 'rgba(246,241,231,0.035)',
+  highlightTop: 'rgba(246,241,231,0.05)',
 
   // Legacy alias
-  borderLight: 'rgba(234,226,208,0.09)',
+  borderLight: 'rgba(246,241,231,0.10)',
 
   // Misc
   white: '#FFFFFF',

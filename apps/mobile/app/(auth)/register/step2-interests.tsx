@@ -1,26 +1,48 @@
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  ActivityIndicator,
-  Pressable,
-} from 'react-native';
+// ─────────────────────────────────────────────
+//  Onboarding · Step 2 — Interests (Editorial Premium)
+//
+//  Layout = Figma canonical:
+//   · Progress 2/4 + Kicker + Display headline + Lead
+//   · Two semantic groups (Copeo + Shows + fallback Otros)
+//   · Group header: Label kicker + Caption lead
+//   · 2-col grid of category cards on bgCard hairline border;
+//     active uses accent border + bgElevated fill (no neon glow)
+//   · Sticky footer: selection note + primary CTA
+//
+//  Lógica intacta: eventsApi.categories + usersApi.updateInterests + flow.
+// ─────────────────────────────────────────────
 import { useEffect, useMemo, useState } from 'react';
+import {
+  ActivityIndicator,
+  ScrollView,
+  StyleSheet,
+  View,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+
 import { usersApi, eventsApi } from '@/api/client';
 import { useAppStore } from '@/stores/app.store';
-import { Colors } from '@/constants/tokens';
+import {
+  Colors,
+  EditorialSpacing,
+  Radius,
+  Spacing,
+} from '@/constants/tokens';
 import { useFeedback } from '@/hooks/useFeedback';
-
-// ─────────────────────────────────────────────
-//  Onboarding step 2 — Interest categories
-//  · Grouped in two sections: Copeo + Shows
-//  · Richer 2-col card grid with color tint
-//  · Sticky "N seleccionadas" banner
-// ─────────────────────────────────────────────
+import {
+  Body,
+  Button,
+  Caption,
+  Display,
+  FadeIn,
+  Kicker,
+  Label,
+  Lead,
+  Pressy,
+  Subhead,
+} from '@/components/ui';
 
 type FeatherIcon = React.ComponentProps<typeof Feather>['name'];
 
@@ -47,7 +69,6 @@ const ICON_MAP: Record<string, FeatherIcon> = {
   tag: 'tag',
 };
 
-// Slugs that belong to each group (everything else lands in "Otros")
 const COPEO_SLUGS = new Set([
   'mixologia',
   'cata-mezcal',
@@ -106,7 +127,6 @@ export default function Step2Interests() {
   function toggle(id: string) {
     setSelected((prev) => {
       const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
-      // Haptic feedback: success tick when we hit the minimum, select for others
       if (next.length === MIN_SUGGESTED && prev.length < MIN_SUGGESTED) {
         fb.success();
       } else {
@@ -123,14 +143,18 @@ export default function Step2Interests() {
       if (selected.length > 0) {
         await usersApi.updateInterests({ categoryIds: selected });
       }
-    } catch {}
-    finally {
+    } catch {
+      /* non-blocking */
+    } finally {
       setLoading(false);
       router.replace('/(auth)/onboarding/permissions' as never);
     }
   }
 
-  const canContinue = selected.length >= 1 || !loading;
+  const meetsMin = selected.length >= MIN_SUGGESTED;
+  const ctaLabel = selected.length > 0
+    ? t ? 'Continuar' : 'Continue'
+    : t ? 'Omitir' : 'Skip';
 
   return (
     <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
@@ -143,83 +167,77 @@ export default function Step2Interests() {
       </View>
 
       <ScrollView
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.kicker}>{t ? 'Paso 2 de 4' : 'Step 2 of 4'}</Text>
-        <Text style={styles.title}>
-          {t ? '¿Qué te\nenciende?' : 'What lights\nyou up?'}
-        </Text>
-        <Text style={styles.subtitle}>
-          {t
-            ? `Elige al menos ${MIN_SUGGESTED} para que te mostremos las noches perfectas para ti.`
-            : `Pick at least ${MIN_SUGGESTED} so we can curate the perfect nights for you.`}
-        </Text>
+        <FadeIn>
+          <Kicker tone="champagne">{t ? 'PASO 2 DE 4' : 'STEP 2 OF 4'}</Kicker>
+        </FadeIn>
+        <FadeIn delay={80} style={{ marginTop: Spacing[3] }}>
+          <Display size="md">
+            {t ? '¿Qué te\nenciende?' : 'What lights\nyou up?'}
+          </Display>
+        </FadeIn>
+        <FadeIn delay={180} style={{ marginTop: Spacing[4], maxWidth: 360 }}>
+          <Lead tone="secondary">
+            {t
+              ? `Elige al menos ${MIN_SUGGESTED} para curarte las noches perfectas.`
+              : `Pick at least ${MIN_SUGGESTED} so we can curate the perfect nights for you.`}
+          </Lead>
+        </FadeIn>
 
         {loadingCats ? (
-          <ActivityIndicator color={Colors.accentPrimary} style={{ marginTop: 40 }} />
+          <View style={styles.loader}>
+            <ActivityIndicator color={Colors.accentPrimary} />
+          </View>
         ) : (
           <>
-            {/* ── Copeo ───────────────────────────── */}
             {groups.copeo.length > 0 && (
-              <View style={styles.groupBlock}>
-                <View style={styles.groupHeaderRow}>
-                  <View style={styles.groupIconDot}>
-                    <Feather name="coffee" size={12} color={Colors.accentPrimary} />
-                  </View>
-                  <Text style={styles.groupTitle}>
-                    {t ? 'Bar por copeo' : 'Drinks by the glass'}
-                  </Text>
+              <FadeIn delay={240} style={styles.groupBlock}>
+                <View style={styles.groupHeader}>
+                  <Label tone="primary">
+                    {t ? 'BAR POR COPEO' : 'DRINKS BY THE GLASS'}
+                  </Label>
                 </View>
-                <Text style={styles.groupSub}>
+                <Caption tone="muted" style={styles.groupSub}>
                   {t
                     ? 'Catas, mixología y descubrir nuevas bebidas'
                     : 'Tastings, mixology and new drinks'}
-                </Text>
+                </Caption>
                 <CategoryGrid
                   items={groups.copeo}
                   selected={selected}
                   onToggle={toggle}
                   t={t}
                 />
-              </View>
+              </FadeIn>
             )}
 
-            {/* ── Shows ───────────────────────────── */}
             {groups.shows.length > 0 && (
-              <View style={styles.groupBlock}>
-                <View style={styles.groupHeaderRow}>
-                  <View style={styles.groupIconDot}>
-                    <Feather name="star" size={12} color={Colors.accentWarning} />
-                  </View>
-                  <Text style={styles.groupTitle}>
-                    {t ? 'Noches con show' : 'Nights with shows'}
-                  </Text>
+              <FadeIn delay={320} style={styles.groupBlock}>
+                <View style={styles.groupHeader}>
+                  <Label tone="primary">
+                    {t ? 'NOCHES CON SHOW' : 'NIGHTS WITH SHOWS'}
+                  </Label>
                 </View>
-                <Text style={styles.groupSub}>
+                <Caption tone="muted" style={styles.groupSub}>
                   {t
                     ? 'En vivo, DJ, comedia y todo lo que se mueve'
                     : 'Live music, DJ, comedy and everything that moves'}
-                </Text>
+                </Caption>
                 <CategoryGrid
                   items={groups.shows}
                   selected={selected}
                   onToggle={toggle}
                   t={t}
                 />
-              </View>
+              </FadeIn>
             )}
 
-            {/* ── Otros (fallback) ─────────────────── */}
             {groups.other.length > 0 && (
-              <View style={styles.groupBlock}>
-                <View style={styles.groupHeaderRow}>
-                  <View style={styles.groupIconDot}>
-                    <Feather name="plus" size={12} color={Colors.textMuted} />
-                  </View>
-                  <Text style={styles.groupTitle}>
-                    {t ? 'Otros' : 'Others'}
-                  </Text>
+              <FadeIn delay={400} style={styles.groupBlock}>
+                <View style={styles.groupHeader}>
+                  <Label tone="primary">{t ? 'OTROS' : 'OTHERS'}</Label>
                 </View>
                 <CategoryGrid
                   items={groups.other}
@@ -227,28 +245,20 @@ export default function Step2Interests() {
                   onToggle={toggle}
                   t={t}
                 />
-              </View>
+              </FadeIn>
             )}
           </>
         )}
       </ScrollView>
 
-      {/* Sticky footer */}
       <View style={styles.footer}>
         <View style={styles.selectionNote}>
           <Feather
-            name={selected.length >= MIN_SUGGESTED ? 'check-circle' : 'info'}
+            name={meetsMin ? 'check-circle' : 'info'}
             size={14}
-            color={
-              selected.length >= MIN_SUGGESTED ? Colors.accentSuccess : Colors.textMuted
-            }
+            color={meetsMin ? Colors.accentSuccess : Colors.textMuted}
           />
-          <Text
-            style={[
-              styles.selectionNoteText,
-              selected.length >= MIN_SUGGESTED && { color: Colors.accentSuccess },
-            ]}
-          >
+          <Caption tone={meetsMin ? 'success' : 'muted'}>
             {selected.length === 0
               ? t
                 ? `Elige al menos ${MIN_SUGGESTED}`
@@ -256,38 +266,22 @@ export default function Step2Interests() {
               : t
                 ? `${selected.length} ${selected.length === 1 ? 'seleccionada' : 'seleccionadas'}`
                 : `${selected.length} selected`}
-          </Text>
+          </Caption>
         </View>
-        <Pressable
-          style={({ pressed }) => [
-            styles.primaryBtn,
-            (loading || !canContinue) && { opacity: 0.6 },
-            pressed && styles.pressed,
-          ]}
+        <Button
+          label={ctaLabel}
           onPress={handleDone}
-          disabled={loading}
-        >
-          {loading ? (
-            <ActivityIndicator color={Colors.textInverse} />
-          ) : (
-            <>
-              <Text style={styles.primaryBtnLabel}>
-                {selected.length > 0
-                  ? t ? 'Continuar' : 'Continue'
-                  : t ? 'Omitir' : 'Skip'}
-              </Text>
-              <Feather name="arrow-right" size={18} color={Colors.textInverse} />
-            </>
-          )}
-        </Pressable>
+          loading={loading}
+          variant="primary"
+          size="lg"
+          fullWidth
+          rightIcon={<Feather name="arrow-right" size={18} color={Colors.textInverse} />}
+        />
       </View>
     </SafeAreaView>
   );
 }
 
-// ─────────────────────────────────────────────
-//  Grid sub-component
-// ─────────────────────────────────────────────
 function CategoryGrid({
   items,
   selected,
@@ -304,65 +298,53 @@ function CategoryGrid({
       {items.map((cat) => {
         const active = selected.includes(cat.id);
         const iconName = ICON_MAP[cat.icon || ''] || 'tag';
-        const tint = cat.color || Colors.accentPrimary;
         const label = t ? cat.name : cat.nameEn ?? cat.name;
 
         return (
-          <Pressable
+          <Pressy
             key={cat.id}
-            style={({ pressed }) => [
-              styles.card,
-              {
-                backgroundColor: active ? tint + '18' : Colors.bgCard,
-                borderColor: active ? tint : Colors.border,
-              },
-              pressed && styles.pressed,
-            ]}
+            accessibilityRole="button"
+            accessibilityLabel={label}
+            accessibilityState={{ selected: active }}
+            haptic="select"
             onPress={() => onToggle(cat.id)}
+            style={[styles.card, active && styles.cardActive]}
           >
-            <View style={[styles.cardGlow, { backgroundColor: tint + '22' }]} />
             <View
-              style={[
-                styles.cardIconBox,
-                { backgroundColor: active ? tint + '38' : tint + '1A' },
-              ]}
+              style={[styles.cardIcon, active && styles.cardIconActive]}
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
             >
-              <Feather name={iconName} size={22} color={tint} />
+              <Feather
+                name={iconName}
+                size={18}
+                color={active ? Colors.accentPrimary : Colors.textSecondary}
+              />
             </View>
-            <Text
-              style={[
-                styles.cardLabel,
-                active && { color: Colors.textPrimary, fontWeight: '800' },
-              ]}
-              numberOfLines={2}
-            >
+            <Subhead tone={active ? 'primary' : 'secondary'} numberOfLines={2}>
               {label}
-            </Text>
-            {active && (
-              <View style={[styles.checkBadge, { backgroundColor: tint }]}>
-                <Feather name="check" size={12} color={Colors.textInverse} />
+            </Subhead>
+            {active ? (
+              <View style={styles.checkBadge}>
+                <Feather name="check" size={11} color={Colors.textInverse} />
               </View>
-            )}
-          </Pressable>
+            ) : null}
+          </Pressy>
         );
       })}
     </View>
   );
 }
 
-// ─────────────────────────────────────────────
-//  Styles
-// ─────────────────────────────────────────────
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
-  pressed: { opacity: 0.85 },
 
   stepRow: {
     flexDirection: 'row',
     gap: 6,
-    paddingHorizontal: 24,
-    paddingTop: 20,
-    paddingBottom: 16,
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[5],
+    paddingBottom: Spacing[3],
   },
   stepDot: {
     flex: 1,
@@ -372,144 +354,89 @@ const styles = StyleSheet.create({
   },
   stepDotActive: { backgroundColor: Colors.accentPrimary },
 
-  scrollContent: { paddingHorizontal: 20, paddingBottom: 24 },
-
-  kicker: {
-    color: Colors.textMuted,
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.7,
-    textTransform: 'uppercase',
-    paddingHorizontal: 4,
-  },
-  title: {
-    color: Colors.textPrimary,
-    fontSize: 30,
-    fontWeight: '800',
-    marginTop: 8,
-    lineHeight: 36,
-    letterSpacing: -0.5,
-    paddingHorizontal: 4,
-  },
-  subtitle: {
-    color: Colors.textSecondary,
-    fontSize: 14,
-    lineHeight: 21,
-    marginTop: 10,
-    paddingHorizontal: 4,
+  scroll: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[6],
+    paddingBottom: Spacing[8],
   },
 
-  // Group header
+  loader: {
+    marginTop: Spacing[10],
+    alignItems: 'center',
+  },
+
   groupBlock: {
-    marginTop: 28,
+    marginTop: Spacing[8],
+    gap: Spacing[3],
   },
-  groupHeaderRow: {
+  groupHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 4,
-  },
-  groupIconDot: {
-    width: 22,
-    height: 22,
-    borderRadius: 7,
-    backgroundColor: Colors.bgElevated,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  groupTitle: {
-    color: Colors.textPrimary,
-    fontSize: 16,
-    fontWeight: '800',
-    letterSpacing: -0.2,
+    justifyContent: 'space-between',
   },
   groupSub: {
-    color: Colors.textMuted,
-    fontSize: 12,
-    marginTop: 4,
-    paddingHorizontal: 4,
-    marginBottom: 14,
+    marginTop: -Spacing[1],
+    marginBottom: Spacing[2],
   },
 
-  // Grid
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
+    gap: Spacing[2],
   },
   card: {
-    width: '48%',
+    width: '48.5%',
     minHeight: 112,
-    padding: 14,
-    borderRadius: 16,
-    borderWidth: StyleSheet.hairlineWidth,
+    padding: Spacing[3],
+    borderRadius: Radius.lg,
+    backgroundColor: Colors.bgCard,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    gap: Spacing[3],
     position: 'relative',
-    overflow: 'hidden',
-    justifyContent: 'space-between',
   },
-  cardGlow: {
-    position: 'absolute',
-    top: -40,
-    right: -40,
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    opacity: 0.4,
+  cardActive: {
+    backgroundColor: Colors.bgElevated,
+    borderColor: Colors.accentPrimary,
   },
-  cardIconBox: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
+  cardIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.bgElevated,
+    borderWidth: 1,
+    borderColor: Colors.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  cardLabel: {
-    color: Colors.textSecondary,
-    fontSize: 13,
-    fontWeight: '700',
-    marginTop: 14,
-    letterSpacing: -0.1,
+  cardIconActive: {
+    backgroundColor: 'rgba(201,169,97,0.10)',
+    borderColor: 'rgba(201,169,97,0.35)',
   },
   checkBadge: {
     position: 'absolute',
-    top: 10,
-    right: 10,
-    width: 22,
-    height: 22,
-    borderRadius: 11,
+    top: Spacing[2],
+    right: Spacing[2],
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: Colors.accentPrimary,
     alignItems: 'center',
     justifyContent: 'center',
   },
 
-  // Footer
   footer: {
-    paddingHorizontal: 20,
-    paddingBottom: 16,
-    paddingTop: 12,
-    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingBottom: Spacing[4],
+    paddingTop: Spacing[3],
+    gap: Spacing[3],
+    borderTopWidth: 1,
     borderTopColor: Colors.border,
-    backgroundColor: Colors.bgPrimary,
-    gap: 10,
   },
   selectionNote: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: Spacing[2],
     justifyContent: 'center',
   },
-  selectionNoteText: {
-    color: Colors.textMuted,
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  primaryBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    height: 54,
-    borderRadius: 14,
-    backgroundColor: Colors.accentPrimary,
-  },
-  primaryBtnLabel: { color: Colors.textInverse, fontSize: 15, fontWeight: '800' },
 });

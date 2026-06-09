@@ -208,12 +208,10 @@ export default function EditProfile() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          <FadeIn>
+          <FadeIn style={styles.hero}>
             <Kicker tone="muted">{t ? 'PERFIL' : 'PROFILE'}</Kicker>
-            <Heading size="md" style={{ marginTop: Spacing[2] }}>
-              {t ? 'Editar perfil' : 'Edit profile'}
-            </Heading>
-            <Lead tone="secondary" style={{ marginTop: Spacing[3] }}>
+            <Heading size="md">{t ? 'Editar perfil' : 'Edit profile'}</Heading>
+            <Lead tone="secondary" style={{ marginTop: Spacing[2] }}>
               {t
                 ? 'Tu identidad pública en OPALBAR.'
                 : 'Your public identity on OPALBAR.'}
@@ -480,6 +478,10 @@ const styles = StyleSheet.create({
   scroll: {
     paddingHorizontal: EditorialSpacing.pageGutter,
     paddingBottom: Spacing[8],
+  },
+  hero: {
+    paddingVertical: Spacing[4],
+    gap: Spacing[2],
   },
   avatarBlock: {
     alignItems: 'center',

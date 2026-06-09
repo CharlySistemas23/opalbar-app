@@ -107,8 +107,8 @@ export default function AdminStaff() {
           <Text style={[styles.statValue, { color: Colors.accentPrimary }]}>{counts.SUPER_ADMIN}</Text>
           <Text style={styles.statLbl}>Super admin</Text>
         </View>
-        <View style={[styles.statCard, { borderColor: '#60A5FA' + '40' }]}>
-          <Text style={[styles.statValue, { color: '#60A5FA' }]}>{counts.ADMIN}</Text>
+        <View style={[styles.statCard, { borderColor: Colors.accentInfo + '40' }]}>
+          <Text style={[styles.statValue, { color: Colors.accentInfo }]}>{counts.ADMIN}</Text>
           <Text style={styles.statLbl}>Admin</Text>
         </View>
         <View style={[styles.statCard, { borderColor: Colors.accentSuccess + '40' }]}>
@@ -281,7 +281,7 @@ export default function AdminStaff() {
 
 function roleInfo(role: StaffUser['role']) {
   if (role === 'SUPER_ADMIN') return { label: 'Super admin', color: Colors.accentPrimary, icon: 'star' as const };
-  if (role === 'ADMIN') return { label: 'Admin', color: '#60A5FA', icon: 'shield' as const };
+  if (role === 'ADMIN') return { label: 'Admin', color: Colors.accentInfo, icon: 'shield' as const };
   if (role === 'MODERATOR') return { label: 'Moderador', color: Colors.accentSuccess, icon: 'check-circle' as const };
   return { label: 'Usuario', color: Colors.textMuted, icon: 'user' as const };
 }

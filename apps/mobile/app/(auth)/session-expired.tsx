@@ -23,7 +23,8 @@ export default function SessionExpired() {
     <AuthStatusScreen
       icon="clock"
       variant="warning"
-      title={t ? 'Tu sesión ha expirado' : 'Your session expired'}
+      kicker={t ? 'SESIÓN EXPIRADA' : 'SESSION EXPIRED'}
+      title={t ? 'Te cerramos\nla sesión.' : 'We signed\nyou out.'}
       message={
         t
           ? 'Por tu seguridad cerramos tu sesión después de un tiempo de inactividad. Vuelve a iniciar sesión para continuar.'

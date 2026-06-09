@@ -26,7 +26,8 @@ export default function TooManyAttempts() {
     <AuthStatusScreen
       icon="alert-triangle"
       variant="danger"
-      title={t ? 'Demasiados intentos' : 'Too many attempts'}
+      kicker={t ? 'ACCESO BLOQUEADO' : 'ACCESS BLOCKED'}
+      title={t ? 'Demasiados\nintentos.' : 'Too many\nattempts.'}
       message={
         ready
           ? t

@@ -8,14 +8,14 @@ import {
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
-import { Colors } from '@/constants/tokens';
+import { Colors, Radius, Spacing, TypePresets } from '@/constants/tokens';
+import { Caption, Heading, Kicker, Subhead } from '@/components/ui';
 import { useAdminCounts } from '@/hooks/useAdminCounts';
 
 // ─────────────────────────────────────────────
-//  Manage Hub — grouped by area, pending badges inline
-//  · Quick actions at top (create shortcuts)
-//  · Section groups for clarity
-//  · Pending counts shown per card
+//  Manage Hub — Editorial Premium
+//  · Quick actions arriba (gold)
+//  · Groups con kicker + tarjetas tokenized
 // ─────────────────────────────────────────────
 
 type FeatherIcon = React.ComponentProps<typeof Feather>['name'];
@@ -26,7 +26,6 @@ interface Section {
   label: string;
   sub: string;
   path: string;
-  tint: string;
   pendingKey?: 'posts' | 'reviews' | 'tickets' | 'reservations' | 'flags' | 'reports';
 }
 
@@ -45,7 +44,6 @@ const GROUPS: Group[] = [
         label: 'Eventos',
         sub: 'Crear, editar y cancelar',
         path: '/(admin)/manage/events',
-        tint: Colors.accentPrimary,
       },
       {
         id: 'offers',
@@ -53,7 +51,6 @@ const GROUPS: Group[] = [
         label: 'Ofertas',
         sub: 'Promociones y canjes',
         path: '/(admin)/manage/offers',
-        tint: '#A855F7',
       },
       {
         id: 'reservations',
@@ -61,30 +58,27 @@ const GROUPS: Group[] = [
         label: 'Reservaciones',
         sub: 'Mesas y check-ins',
         path: '/(admin)/manage/reservations',
-        tint: '#EC4899',
         pendingKey: 'reservations',
       },
     ],
   },
   {
-    title: 'Moderación',
+    title: 'Moderacion',
     items: [
       {
         id: 'community',
         icon: 'message-square',
         label: 'Comunidad',
-        sub: 'Posts pendientes de revisión',
+        sub: 'Posts pendientes de revision',
         path: '/(admin)/manage/community',
-        tint: Colors.accentSuccess,
         pendingKey: 'posts',
       },
       {
         id: 'reviews',
         icon: 'star',
-        label: 'Reseñas',
+        label: 'Resenas',
         sub: 'Opiniones de usuarios',
         path: '/(admin)/manage/reviews',
-        tint: Colors.accentWarning,
         pendingKey: 'reviews',
       },
       {
@@ -93,7 +87,6 @@ const GROUPS: Group[] = [
         label: 'Historias del bar',
         sub: 'Publica como OPAL BAR PV',
         path: '/(admin)/community/stories',
-        tint: '#EC4899',
       },
     ],
   },
@@ -104,9 +97,8 @@ const GROUPS: Group[] = [
         id: 'marketing',
         icon: 'mail',
         label: 'Email marketing',
-        sub: 'Envía campañas desde el teléfono',
+        sub: 'Envia campanas desde el telefono',
         path: '/(admin)/marketing',
-        tint: '#38C793',
       },
       {
         id: 'push',
@@ -114,7 +106,6 @@ const GROUPS: Group[] = [
         label: 'Notificaciones push',
         sub: 'Mensaje masivo a la app',
         path: '/(admin)/notifications',
-        tint: Colors.accentInfo,
       },
     ],
   },
@@ -127,29 +118,26 @@ const GROUPS: Group[] = [
         label: 'Tickets',
         sub: 'Mensajes de usuarios',
         path: '/(admin)/manage/support',
-        tint: '#60A5FA',
         pendingKey: 'tickets',
       },
       {
         id: 'messages',
         icon: 'message-circle',
         label: 'Chats privados',
-        sub: 'Supervisión de DMs',
+        sub: 'Supervision de DMs',
         path: '/(admin)/manage/messages',
-        tint: '#F59E0B',
       },
     ],
   },
   {
-    title: 'Configuración',
+    title: 'Configuracion',
     items: [
       {
         id: 'venue',
         icon: 'map-pin',
         label: 'Datos del bar',
-        sub: 'Foto, ubicación y contacto',
+        sub: 'Foto, ubicacion y contacto',
         path: '/(admin)/manage/venue',
-        tint: Colors.accentPrimary,
       },
       {
         id: 'reservations-config',
@@ -157,16 +145,15 @@ const GROUPS: Group[] = [
         label: 'Horarios y capacidad',
         sub: 'Config. de reservaciones',
         path: '/(admin)/manage/reservations/config',
-        tint: '#EC4899',
       },
     ],
   },
 ];
 
-const QUICK_ACTIONS: { icon: FeatherIcon; label: string; path: string; tint: string }[] = [
-  { icon: 'plus', label: 'Evento', path: '/(admin)/manage/events/new', tint: Colors.accentPrimary },
-  { icon: 'plus', label: 'Oferta', path: '/(admin)/manage/offers/new', tint: '#A855F7' },
-  { icon: 'mail', label: 'Email', path: '/(admin)/marketing/new', tint: '#38C793' },
+const QUICK_ACTIONS: { icon: FeatherIcon; label: string; path: string }[] = [
+  { icon: 'plus', label: 'Evento', path: '/(admin)/manage/events/new' },
+  { icon: 'plus', label: 'Oferta', path: '/(admin)/manage/offers/new' },
+  { icon: 'mail', label: 'Email', path: '/(admin)/marketing/new' },
 ];
 
 export default function ManageHub() {
@@ -182,11 +169,11 @@ export default function ManageHub() {
         contentContainerStyle={{ paddingBottom: 140 }}
         showsVerticalScrollIndicator={false}
       >
-        {/* ── Header ──────────────────────────── */}
+        {/* Header */}
         <View style={styles.header}>
           <View>
-            <Text style={styles.titleHint}>Panel de administración</Text>
-            <Text style={styles.title}>Gestión</Text>
+            <Kicker tone="muted">Panel de administracion</Kicker>
+            <Heading size="lg" style={{ marginTop: 4 }}>Gestion</Heading>
           </View>
           {totalPending > 0 && (
             <View style={styles.pendingPill}>
@@ -198,26 +185,28 @@ export default function ManageHub() {
           )}
         </View>
 
-        {/* ── Quick actions ───────────────────── */}
+        {/* Quick actions */}
         <View style={styles.quickRow}>
           {QUICK_ACTIONS.map((q) => (
             <Pressable
               key={q.label}
               style={({ pressed }) => [styles.quickBtn, pressed && styles.pressed]}
               onPress={() => router.push(q.path as never)}
+              accessibilityRole="button"
+              accessibilityLabel={`Crear ${q.label.toLowerCase()}`}
             >
-              <View style={[styles.quickIcon, { backgroundColor: q.tint + '22' }]}>
-                <Feather name={q.icon} size={18} color={q.tint} />
+              <View style={styles.quickIcon}>
+                <Feather name={q.icon} size={16} color={Colors.accentPrimary} />
               </View>
               <Text style={styles.quickLabel}>{q.label}</Text>
             </Pressable>
           ))}
         </View>
 
-        {/* ── Groups ──────────────────────────── */}
-        {GROUPS.map((group, gi) => (
+        {/* Groups */}
+        {GROUPS.map((group) => (
           <View key={group.title} style={styles.group}>
-            <Text style={styles.groupTitle}>{group.title}</Text>
+            <Kicker tone="muted" style={styles.groupTitle}>{group.title}</Kicker>
             <View style={styles.cardStack}>
               {group.items.map((s, idx) => {
                 const pending = s.pendingKey ? counts[s.pendingKey] : 0;
@@ -226,18 +215,20 @@ export default function ManageHub() {
                     key={s.id}
                     style={({ pressed }) => [
                       styles.card,
-                      idx === 0 && styles.cardFirst,
                       idx === group.items.length - 1 && styles.cardLast,
                       pressed && styles.pressed,
                     ]}
                     onPress={() => router.push(s.path as never)}
+                    accessibilityRole="button"
+                    accessibilityLabel={s.label}
+                    accessibilityHint={s.sub}
                   >
-                    <View style={[styles.cardIconBox, { backgroundColor: s.tint + '1F' }]}>
-                      <Feather name={s.icon} size={18} color={s.tint} />
+                    <View style={styles.cardIconBox}>
+                      <Feather name={s.icon} size={16} color={Colors.accentPrimary} />
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={styles.cardLabel}>{s.label}</Text>
-                      <Text style={styles.cardSub}>{s.sub}</Text>
+                      <Subhead>{s.label}</Subhead>
+                      <Caption tone="muted" style={{ marginTop: 2 }}>{s.sub}</Caption>
                     </View>
                     {pending > 0 && (
                       <View style={styles.countBadge}>
@@ -252,117 +243,92 @@ export default function ManageHub() {
           </View>
         ))}
 
-        {/* ── Footer note ─────────────────────── */}
-        <Text style={styles.footerNote}>
-          Toca en Gestión otra vez para regresar a este panel
-        </Text>
+        <Caption tone="muted" align="center" style={styles.footerNote}>
+          Toca en Gestion otra vez para regresar a este panel
+        </Caption>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-// ─────────────────────────────────────────────
-//  Styles
-// ─────────────────────────────────────────────
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
   pressed: { opacity: 0.7 },
 
-  // Header
   header: {
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 18,
+    paddingHorizontal: Spacing[5],
+    paddingTop: Spacing[2],
+    paddingBottom: Spacing[5],
     flexDirection: 'row',
     alignItems: 'flex-end',
     justifyContent: 'space-between',
-    gap: 12,
-  },
-  titleHint: {
-    color: Colors.textMuted,
-    fontSize: 11,
-    fontWeight: '600',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-    marginBottom: 4,
-  },
-  title: {
-    color: Colors.textPrimary,
-    fontSize: 28,
-    fontWeight: '800',
-    letterSpacing: -0.5,
+    gap: Spacing[3],
   },
   pendingPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 7,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-    backgroundColor: 'rgba(228,88,88,0.12)',
+    gap: 6,
+    paddingHorizontal: Spacing[2],
+    paddingVertical: 5,
+    borderRadius: Radius.full,
+    backgroundColor: 'rgba(196,104,104,0.10)',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(228,88,88,0.3)',
+    borderColor: 'rgba(196,104,104,0.30)',
   },
   pendingDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
     backgroundColor: Colors.accentDanger,
   },
   pendingText: {
+    ...TypePresets.label,
     color: Colors.accentDanger,
     fontSize: 11,
-    fontWeight: '700',
   },
 
-  // Quick actions
   quickRow: {
     flexDirection: 'row',
-    gap: 10,
-    paddingHorizontal: 20,
-    marginBottom: 26,
+    gap: Spacing[2],
+    paddingHorizontal: Spacing[5],
+    marginBottom: Spacing[6],
   },
   quickBtn: {
     flex: 1,
-    height: 72,
-    borderRadius: 14,
+    paddingVertical: Spacing[3],
+    borderRadius: Radius['2xl'],
     backgroundColor: Colors.bgCard,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: Colors.border,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 5,
+    gap: 6,
   },
   quickIcon: {
     width: 32,
     height: 32,
-    borderRadius: 10,
+    borderRadius: Radius.lg,
+    backgroundColor: 'rgba(201,169,97,0.14)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   quickLabel: {
+    ...TypePresets.subhead,
     color: Colors.textPrimary,
-    fontSize: 12,
-    fontWeight: '700',
+    fontSize: 13,
   },
 
-  // Groups
   group: {
-    paddingHorizontal: 20,
-    marginBottom: 22,
+    paddingHorizontal: Spacing[5],
+    marginBottom: Spacing[5],
   },
   groupTitle: {
-    color: Colors.textMuted,
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.7,
-    textTransform: 'uppercase',
-    marginBottom: 10,
+    marginBottom: Spacing[2],
     paddingHorizontal: 4,
   },
   cardStack: {
     backgroundColor: Colors.bgCard,
-    borderRadius: 14,
+    borderRadius: Radius['2xl'],
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: Colors.border,
     overflow: 'hidden',
@@ -370,37 +336,28 @@ const styles = StyleSheet.create({
   card: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    padding: 14,
+    gap: Spacing[3],
+    padding: Spacing[3],
+    paddingHorizontal: Spacing[4],
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: Colors.border,
   },
-  cardFirst: {},
   cardLast: {
     borderBottomWidth: 0,
   },
   cardIconBox: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
+    width: 36,
+    height: 36,
+    borderRadius: Radius.lg,
+    backgroundColor: 'rgba(201,169,97,0.12)',
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  cardLabel: {
-    color: Colors.textPrimary,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  cardSub: {
-    color: Colors.textMuted,
-    fontSize: 12,
-    marginTop: 2,
   },
   countBadge: {
     minWidth: 22,
     height: 22,
     paddingHorizontal: 7,
-    borderRadius: 11,
+    borderRadius: Radius.full,
     backgroundColor: Colors.accentDanger,
     alignItems: 'center',
     justifyContent: 'center',
@@ -408,15 +365,11 @@ const styles = StyleSheet.create({
   countBadgeText: {
     color: Colors.textInverse,
     fontSize: 11,
-    fontWeight: '800',
+    fontWeight: '700',
   },
 
   footerNote: {
-    color: Colors.textMuted,
-    fontSize: 11,
-    textAlign: 'center',
     paddingHorizontal: 40,
-    marginTop: 8,
-    lineHeight: 16,
+    marginTop: Spacing[2],
   },
 });

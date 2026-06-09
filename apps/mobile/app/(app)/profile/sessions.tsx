@@ -105,10 +105,8 @@ export default function Sessions() {
 
       <View style={styles.titleBlock}>
         <Kicker tone="muted">{t ? 'SEGURIDAD' : 'SECURITY'}</Kicker>
-        <Heading size="md" style={{ marginTop: Spacing[2] }}>
-          {t ? 'Sesiones activas' : 'Active sessions'}
-        </Heading>
-        <Lead tone="secondary" style={{ marginTop: Spacing[3] }}>
+        <Heading size="md">{t ? 'Sesiones activas' : 'Active sessions'}</Heading>
+        <Lead tone="secondary" style={{ marginTop: Spacing[2] }}>
           {t
             ? 'Dispositivos donde tu cuenta tiene sesión abierta.'
             : 'Devices where your account is currently signed in.'}
@@ -242,7 +240,8 @@ const styles = StyleSheet.create({
   },
   titleBlock: {
     paddingHorizontal: EditorialSpacing.pageGutter,
-    paddingBottom: Spacing[6],
+    paddingVertical: Spacing[4],
+    gap: Spacing[2],
   },
   card: {
     flexDirection: 'row',

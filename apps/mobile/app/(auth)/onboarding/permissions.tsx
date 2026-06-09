@@ -1,26 +1,58 @@
+// ─────────────────────────────────────────────
+//  Onboarding · Permissions (Editorial Premium)
+//
+//  Layout = Figma canonical:
+//   · Progress 3/4 + sub-step micro-dots
+//   · Kicker accent overline (LOCATION / CAMERA / NOTIFICATIONS)
+//   · Display headline + Lead body for the rationale
+//   · Hint card in bgCard hairline pill explaining privacy
+//   · Bottom CTAs: primary gold "Permitir" + ghost "Ahora no"
+//
+//  Lógica intacta: requestLocation / Camera / Notification permissions and
+//  step advance on either action. Final step → /(auth)/onboarding/welcome.
+// ─────────────────────────────────────────────
 import { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+
 import { useAppStore } from '@/stores/app.store';
-import { Colors, Radius } from '@/constants/tokens';
 import {
-  requestLocationPermission,
+  Colors,
+  EditorialSpacing,
+  Radius,
+  Spacing,
+} from '@/constants/tokens';
+import {
   requestCameraPermission,
+  requestLocationPermission,
   requestNotificationPermission,
 } from '@/lib/permissions';
 import { useFeedback } from '@/hooks/useFeedback';
+import {
+  Body,
+  Button,
+  Caption,
+  Display,
+  FadeIn,
+  Kicker,
+  Lead,
+} from '@/components/ui';
 
 type FeatherIcon = React.ComponentProps<typeof Feather>['name'];
 
 interface Step {
   key: 'location' | 'camera' | 'notifications';
   icon: FeatherIcon;
-  color: string;
-  titleEs: string; titleEn: string;
-  messageEs: string; messageEn: string;
-  hintEs: string; hintEn: string;
+  kickerEs: string;
+  kickerEn: string;
+  titleEs: string;
+  titleEn: string;
+  messageEs: string;
+  messageEn: string;
+  hintEs: string;
+  hintEn: string;
   request: () => Promise<'granted' | 'denied' | 'unavailable'>;
 }
 
@@ -28,11 +60,14 @@ const STEPS: Step[] = [
   {
     key: 'location',
     icon: 'map-pin',
-    color: '#60A5FA',
-    titleEs: 'Tu ubicación',
-    titleEn: 'Your location',
-    messageEs: 'Úsala para mostrarte bares y eventos cerca de ti, y para validar tu check-in.',
-    messageEn: 'Use it to show bars and events near you, and to validate your check-in.',
+    kickerEs: 'TU UBICACIÓN',
+    kickerEn: 'YOUR LOCATION',
+    titleEs: 'Mostramos lo\nque hay cerca.',
+    titleEn: 'We show what\nis nearby.',
+    messageEs:
+      'La usamos para mostrarte bares y eventos cerca, y para validar tu check-in.',
+    messageEn:
+      'We use it to show bars and events near you, and to validate your check-in.',
     hintEs: 'Solo se usa cuando la app está abierta. Puedes cambiarlo cuando quieras.',
     hintEn: 'Only used while the app is open. You can change this anytime.',
     request: requestLocationPermission,
@@ -40,23 +75,29 @@ const STEPS: Step[] = [
   {
     key: 'camera',
     icon: 'camera',
-    color: Colors.accentSuccess,
-    titleEs: 'Acceso a la cámara',
-    titleEn: 'Camera access',
-    messageEs: 'La necesitamos para escanear códigos QR y para que puedas compartir momentos en la comunidad.',
-    messageEn: 'We need it to scan QR codes and so you can share moments with the community.',
-    hintEs: 'Nunca accedemos sin tu autorización. Puedes denegarla ahora y activarla después.',
-    hintEn: 'We never access it without permission. You can deny now and enable it later.',
+    kickerEs: 'CÁMARA',
+    kickerEn: 'CAMERA',
+    titleEs: 'Escanea QR y\ncomparte la noche.',
+    titleEn: 'Scan QR and\nshare the night.',
+    messageEs:
+      'La necesitamos para escanear códigos QR y para que compartas momentos en la comunidad.',
+    messageEn:
+      'We need it to scan QR codes and so you can share moments with the community.',
+    hintEs: 'Nunca accedemos sin permiso. Puedes denegarla ahora y activarla después.',
+    hintEn: 'We never access it without permission. You can deny now and enable later.',
     request: requestCameraPermission,
   },
   {
     key: 'notifications',
     icon: 'bell',
-    color: Colors.accentPrimary,
-    titleEs: 'Notificaciones',
-    titleEn: 'Notifications',
-    messageEs: 'Te avisamos cuando cambie tu reserva, gane una oferta o se publique algo que te interesa.',
-    messageEn: 'We\'ll ping you when your booking changes, you win an offer, or something you like is posted.',
+    kickerEs: 'NOTIFICACIONES',
+    kickerEn: 'NOTIFICATIONS',
+    titleEs: 'Te avisamos cuando\nimporta.',
+    titleEn: 'We ping you when\nit matters.',
+    messageEs:
+      'Cuando cambia tu reserva, ganas una oferta o se publica algo que te interesa.',
+    messageEn:
+      "When your booking changes, you win an offer, or something you like is posted.",
     hintEs: 'Puedes elegir el detalle de qué recibir desde tu perfil.',
     hintEn: 'You can fine-tune what you receive from your profile.',
     request: requestNotificationPermission,
@@ -97,61 +138,85 @@ export default function Permissions() {
 
   return (
     <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
-      {/* Global progress 3/4 (steps 1 & 2 completed) */}
+      {/* Progress 3/4 */}
       <View style={styles.stepRow}>
-        <View style={[styles.stepDot, { backgroundColor: Colors.accentPrimary }]} />
-        <View style={[styles.stepDot, { backgroundColor: Colors.accentPrimary }]} />
-        <View style={[styles.stepDot, { backgroundColor: Colors.accentPrimary }]} />
-        <View style={[styles.stepDot, { backgroundColor: Colors.bgCard }]} />
+        <View style={[styles.stepDot, styles.stepDotActive]} />
+        <View style={[styles.stepDot, styles.stepDotActive]} />
+        <View style={[styles.stepDot, styles.stepDotActive]} />
+        <View style={styles.stepDot} />
       </View>
       <View style={styles.subStepRow}>
         {STEPS.map((_, i) => (
           <View
             key={i}
-            style={[
-              styles.subStepDot,
-              { backgroundColor: i <= idx ? step.color : Colors.bgElevated },
-            ]}
+            style={[styles.subStepDot, i <= idx && styles.subStepDotActive]}
           />
         ))}
       </View>
 
       <View style={styles.body}>
-        <View style={[styles.iconOuter, { backgroundColor: step.color + '15' }]}>
-          <View style={[styles.iconInner, { backgroundColor: step.color + '25' }]}>
-            <Feather name={step.icon} size={48} color={step.color} />
+        <FadeIn key={`icon-${step.key}`}>
+          <View
+            style={styles.iconChip}
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+          >
+            <Feather name={step.icon} size={20} color={Colors.accentPrimary} />
           </View>
+        </FadeIn>
+
+        <FadeIn key={`kicker-${step.key}`} delay={120} style={{ marginTop: Spacing[5] }}>
+          <Kicker tone="champagne">{t ? step.kickerEs : step.kickerEn}</Kicker>
+        </FadeIn>
+
+        <FadeIn key={`title-${step.key}`} delay={180} style={{ marginTop: Spacing[3] }}>
+          <Display size="md">{t ? step.titleEs : step.titleEn}</Display>
+        </FadeIn>
+
+        <FadeIn
+          key={`msg-${step.key}`}
+          delay={260}
+          style={{ marginTop: Spacing[4], maxWidth: 360 }}
+        >
+          <Lead tone="secondary">{t ? step.messageEs : step.messageEn}</Lead>
+        </FadeIn>
+
+        <FadeIn key={`hint-${step.key}`} delay={340} style={styles.hintCard}>
+          <View
+            style={styles.hintIcon}
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+          >
+            <Feather name="info" size={14} color={Colors.textMuted} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Caption tone="muted">{t ? step.hintEs : step.hintEn}</Caption>
+          </View>
+        </FadeIn>
+
+        <View style={styles.stepCountWrap}>
+          <Body size="sm" tone="muted">
+            {t ? 'Paso' : 'Step'} {idx + 1} {t ? 'de' : 'of'} {STEPS.length}
+          </Body>
         </View>
-
-        <Text style={styles.title}>{t ? step.titleEs : step.titleEn}</Text>
-        <Text style={styles.message}>{t ? step.messageEs : step.messageEn}</Text>
-
-        <View style={styles.hintBox}>
-          <Feather name="info" size={13} color={Colors.textMuted} />
-          <Text style={styles.hintText}>{t ? step.hintEs : step.hintEn}</Text>
-        </View>
-
-        <Text style={styles.stepCount}>
-          {t ? 'Paso' : 'Step'} {idx + 1} {t ? 'de' : 'of'} {STEPS.length}
-        </Text>
       </View>
 
       <View style={styles.footer}>
-        <TouchableOpacity
-          style={[styles.primaryBtn, { backgroundColor: step.color }, loading && { opacity: 0.7 }]}
+        <Button
+          label={t ? 'Permitir' : 'Allow'}
           onPress={handleAllow}
-          disabled={loading}
-          activeOpacity={0.9}
-        >
-          {loading
-            ? <ActivityIndicator color={Colors.textInverse} />
-            : <Text style={styles.primaryLbl}>{t ? 'Permitir' : 'Allow'}</Text>}
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.secondaryBtn} onPress={next} activeOpacity={0.85}>
-          <Text style={[styles.secondaryLbl, { color: step.color }]}>
-            {t ? 'Ahora no' : 'Not now'}
-          </Text>
-        </TouchableOpacity>
+          loading={loading}
+          variant="primary"
+          size="lg"
+          fullWidth
+        />
+        <Button
+          label={t ? 'Ahora no' : 'Not now'}
+          onPress={next}
+          variant="ghost"
+          size="lg"
+          fullWidth
+        />
       </View>
     </SafeAreaView>
   );
@@ -161,63 +226,76 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
 
   stepRow: {
-    flexDirection: 'row', gap: 6,
-    paddingHorizontal: 24, paddingTop: 20, paddingBottom: 4,
+    flexDirection: 'row',
+    gap: 6,
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[5],
+    paddingBottom: Spacing[1],
   },
-  stepDot: { flex: 1, height: 4, borderRadius: 2 },
+  stepDot: {
+    flex: 1,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: Colors.bgElevated,
+  },
+  stepDotActive: { backgroundColor: Colors.accentPrimary },
+
   subStepRow: {
-    flexDirection: 'row', gap: 4,
-    paddingHorizontal: 24, paddingTop: 6, paddingBottom: 4,
+    flexDirection: 'row',
+    gap: 4,
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[1],
+    paddingBottom: Spacing[2],
   },
-  subStepDot: { flex: 1, height: 2, borderRadius: 1, opacity: 0.6 },
+  subStepDot: {
+    flex: 1,
+    height: 2,
+    borderRadius: 1,
+    backgroundColor: Colors.bgElevated,
+  },
+  subStepDotActive: { backgroundColor: 'rgba(201,169,97,0.55)' },
 
   body: {
     flex: 1,
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[6],
+    paddingBottom: Spacing[6],
+  },
+  iconChip: {
+    width: 44,
+    height: 44,
+    borderRadius: Radius.lg,
+    backgroundColor: Colors.bgCard,
+    borderWidth: 1,
+    borderColor: 'rgba(201,169,97,0.35)',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 32, gap: 16,
   },
-  iconOuter: {
-    width: 140, height: 140, borderRadius: 70,
-    alignItems: 'center', justifyContent: 'center',
-    marginBottom: 8,
-  },
-  iconInner: {
-    width: 96, height: 96, borderRadius: 48,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  title: {
-    color: Colors.textPrimary,
-    fontSize: 24, fontWeight: '800',
-    textAlign: 'center', lineHeight: 30,
-  },
-  message: {
-    color: Colors.textSecondary,
-    fontSize: 14, lineHeight: 22,
-    textAlign: 'center',
-  },
-  hintBox: {
-    flexDirection: 'row', alignItems: 'flex-start', gap: 8,
-    paddingHorizontal: 14, paddingVertical: 10,
+  hintCard: {
+    marginTop: Spacing[6],
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing[3],
     backgroundColor: Colors.bgCard,
-    borderRadius: 12,
-    borderWidth: 1, borderColor: Colors.border,
-    marginTop: 8,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: Radius.lg,
+    paddingHorizontal: Spacing[4],
+    paddingVertical: Spacing[3],
   },
-  hintText: { color: Colors.textMuted, fontSize: 12, lineHeight: 17, flex: 1 },
-  stepCount: { color: Colors.textMuted, fontSize: 11, marginTop: 12, letterSpacing: 1 },
+  hintIcon: {
+    paddingTop: 2,
+  },
+  stepCountWrap: {
+    marginTop: 'auto',
+    alignItems: 'center',
+    paddingTop: Spacing[4],
+  },
 
   footer: {
-    paddingHorizontal: 24, paddingBottom: 24, paddingTop: 8, gap: 10,
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingBottom: Spacing[4],
+    paddingTop: Spacing[2],
+    gap: Spacing[3],
   },
-  primaryBtn: {
-    height: 54, borderRadius: Radius.button,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  primaryLbl: { color: Colors.textInverse, fontSize: 15, fontWeight: '800' },
-  secondaryBtn: {
-    height: 46, borderRadius: Radius.button,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  secondaryLbl: { fontSize: 14, fontWeight: '700' },
 });

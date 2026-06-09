@@ -1,32 +1,55 @@
+// ─────────────────────────────────────────────
+//  Onboarding · Step 1 — Profile (Editorial Premium)
+//
+//  Layout = Figma canonical:
+//   · SafeAreaView edges ['top','bottom'] fill bgPrimary
+//   · Progress bar (1/4) + Kicker + Display headline + Lead
+//   · Form cards: each field lives in a bgCard hairline pill with
+//     uppercase Kicker label + Input/Pressable value
+//   · Bottom CTAs: primary gold "Continuar" + ghost "Omitir"
+//
+//  Lógica intacta: usersApi.updateProfile + native DateTimePicker.
+// ─────────────────────────────────────────────
+import { useMemo, useState } from 'react';
 import {
-  View,
-  Text,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
   StyleSheet,
   TextInput,
-  ActivityIndicator,
-  ScrollView,
-  Pressable,
-  KeyboardAvoidingView,
-  Platform,
-  Modal,
+  View,
 } from 'react-native';
-import { useMemo, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+
 import { usersApi } from '@/api/client';
 import { useAuthStore } from '@/stores/auth.store';
 import { useAppStore } from '@/stores/app.store';
-import { Colors } from '@/constants/tokens';
+import {
+  Colors,
+  EditorialSpacing,
+  Radius,
+  Spacing,
+  TypePresets,
+} from '@/constants/tokens';
+import { HitSlop } from '@/constants/a11y';
 import { useFeedback } from '@/hooks/useFeedback';
-
-// ─────────────────────────────────────────────
-//  Onboarding step 1 — Profile data (elegant)
-//  · Native date picker (iOS inline wheel / Android dialog)
-//  · Visual section cards with colored icons
-//  · Personalized greeting with initials
-// ─────────────────────────────────────────────
+import {
+  Body,
+  Button,
+  Caption,
+  Display,
+  FadeIn,
+  Input,
+  Kicker,
+  Label,
+  Lead,
+  Pressy,
+} from '@/components/ui';
 
 const MAX_BIO = 160;
 const MIN_BIRTH_YEAR = 1920;
@@ -50,7 +73,7 @@ export default function Step1Profile() {
   const today = useMemo(() => new Date(), []);
   const maxDate = useMemo(() => {
     const d = new Date();
-    d.setFullYear(d.getFullYear() - 18); // 18+ by default
+    d.setFullYear(d.getFullYear() - 18);
     return d;
   }, []);
   const minDate = useMemo(() => new Date(`${MIN_BIRTH_YEAR}-01-01`), []);
@@ -64,6 +87,8 @@ export default function Step1Profile() {
   const [occupation, setOccupation] = useState('');
   const [discoverySource, setDiscoverySource] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  const firstName = user?.profile?.firstName ?? '';
 
   const genderOptions: { key: string; label: string }[] = [
     { key: 'FEMALE', label: t ? 'Mujer' : 'Woman' },
@@ -84,10 +109,6 @@ export default function Step1Profile() {
     { key: 'INFLUENCER', label: t ? 'Un influencer' : 'An influencer', icon: 'star' },
     { key: 'OTHER', label: t ? 'Otro' : 'Other', icon: 'more-horizontal' },
   ];
-
-  const firstName = user?.profile?.firstName ?? '';
-  const initials =
-    (firstName[0] ?? user?.email?.[0] ?? 'U').toUpperCase();
 
   function onPickerChange(_: any, d?: Date) {
     if (Platform.OS === 'android') {
@@ -120,7 +141,7 @@ export default function Step1Profile() {
         await refreshUser();
       }
     } catch {
-      // Non-blocking, user can edit later from Profile
+      // Non-blocking — user can edit later from Profile
     } finally {
       setLoading(false);
       router.replace('/(auth)/register/step2-interests' as never);
@@ -150,222 +171,214 @@ export default function Step1Profile() {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
-          {/* Avatar + greeting */}
-          <View style={styles.hero}>
-            <View style={styles.avatarRing}>
-              <View style={styles.avatarInner}>
-                <Text style={styles.avatarText}>{initials}</Text>
-              </View>
-            </View>
-            <Text style={styles.kicker}>{t ? 'Paso 1 de 4' : 'Step 1 of 4'}</Text>
-            <Text style={styles.title}>
+          <FadeIn>
+            <Kicker tone="champagne">{t ? 'PASO 1 DE 4' : 'STEP 1 OF 4'}</Kicker>
+          </FadeIn>
+          <FadeIn delay={80} style={{ marginTop: Spacing[3] }}>
+            <Display size="md">
               {firstName
                 ? t
-                  ? `Un placer,\n${firstName}`
-                  : `Nice to meet you,\n${firstName}`
+                  ? `Un placer,\n${firstName}.`
+                  : `Nice to meet you,\n${firstName}.`
                 : t
-                  ? 'Un placer'
-                  : 'Nice to meet you'}
-            </Text>
-            <Text style={styles.subtitle}>
+                  ? 'Un placer.'
+                  : 'Nice to meet you.'}
+            </Display>
+          </FadeIn>
+          <FadeIn delay={180} style={{ marginTop: Spacing[4], maxWidth: 360 }}>
+            <Lead tone="secondary">
               {t
-                ? 'Cuéntanos un poco más de ti para que tu experiencia sea a la medida.'
-                : 'Tell us a bit more about you so we can tailor your experience.'}
-            </Text>
-          </View>
+                ? 'Cuéntanos un poco más para que tu noche sea a la medida.'
+                : 'Tell us a bit more so we can tailor your night.'}
+            </Lead>
+          </FadeIn>
 
-          {/* Birthday card */}
-          <Pressable
-            style={({ pressed }) => [
-              styles.card,
-              birthDate && styles.cardFilled,
-              pressed && styles.pressed,
-            ]}
-            onPress={() => {
-              setTempDate(birthDate || maxDate);
-              setPickerOpen(true);
-            }}
-          >
-            <View style={[styles.iconBox, { backgroundColor: 'rgba(244,163,64,0.18)' }]}>
-              <Feather name="gift" size={18} color={Colors.accentPrimary} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.cardTitle}>{t ? 'Tu cumpleaños' : 'Your birthday'}</Text>
-              {birthDate ? (
-                <Text style={styles.cardValue}>{formatBirth(birthDate, language)}</Text>
-              ) : (
-                <Text style={styles.cardHint}>
-                  {t ? 'Te regalamos algo especial ese día' : 'We send a gift on that day'}
-                </Text>
-              )}
-            </View>
-            <Feather
-              name={birthDate ? 'edit-2' : 'chevron-right'}
-              size={16}
-              color={Colors.textMuted}
-            />
-          </Pressable>
+          <View style={styles.form}>
+            {/* Birthday */}
+            <FadeIn delay={240}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t ? 'Elegir fecha de cumpleaños' : 'Pick birthday'}
+                onPress={() => {
+                  setTempDate(birthDate || maxDate);
+                  setPickerOpen(true);
+                }}
+                style={({ pressed }) => [styles.fieldCard, pressed && styles.pressed]}
+              >
+                <View style={styles.labelRow}>
+                  <Label tone="secondary">{t ? 'CUMPLEAÑOS' : 'BIRTHDAY'}</Label>
+                </View>
+                <View style={styles.fieldValueRow}>
+                  <Body tone={birthDate ? 'primary' : 'muted'}>
+                    {birthDate
+                      ? formatBirth(birthDate, language)
+                      : t
+                        ? 'Toca para elegir'
+                        : 'Tap to choose'}
+                  </Body>
+                  <Feather
+                    name={birthDate ? 'edit-2' : 'chevron-right'}
+                    size={16}
+                    color={Colors.textMuted}
+                  />
+                </View>
+              </Pressable>
+            </FadeIn>
 
-          {/* City card */}
-          <View style={[styles.card, styles.cardFilled]}>
-            <View style={[styles.iconBox, { backgroundColor: 'rgba(96,165,250,0.18)' }]}>
-              <Feather name="map-pin" size={18} color={Colors.accentInfo} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.cardTitle}>{t ? 'Tu ciudad' : 'Your city'}</Text>
-              <TextInput
-                style={styles.cardInput}
+            {/* City */}
+            <FadeIn delay={310}>
+              <Input
+                label={t ? 'CIUDAD' : 'CITY'}
                 value={city}
                 onChangeText={setCity}
                 placeholder={t ? 'Puerto Vallarta' : 'Puerto Vallarta'}
-                placeholderTextColor={Colors.textMuted}
                 autoCapitalize="words"
+                accessibilityLabel={t ? 'Ciudad' : 'City'}
+                leftIcon={<Feather name="map-pin" size={18} color={Colors.textMuted} />}
               />
-            </View>
-          </View>
+            </FadeIn>
 
-          {/* Gender card */}
-          <View style={[styles.card, styles.cardFilled, { alignItems: 'flex-start' }]}>
-            <View style={[styles.iconBox, { backgroundColor: 'rgba(236,72,153,0.18)' }]}>
-              <Feather name="user" size={18} color="#EC4899" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.cardTitle}>
-                {t ? 'Género' : 'Gender'}
-                <Text style={styles.optional}>{t ? '  ·  opcional' : '  ·  optional'}</Text>
-              </Text>
-              <View style={styles.pillRow}>
-                {genderOptions.map((opt) => {
-                  const active = gender === opt.key;
-                  return (
-                    <Pressable
-                      key={opt.key}
-                      onPress={() => {
-                        fb.select();
-                        setGender(active ? null : opt.key);
-                      }}
-                      style={[styles.pill, active && styles.pillActive]}
-                    >
-                      <Text style={[styles.pillLabel, active && styles.pillLabelActive]}>{opt.label}</Text>
-                    </Pressable>
-                  );
-                })}
+            {/* Gender */}
+            <FadeIn delay={380}>
+              <View style={styles.groupBlock}>
+                <View style={styles.groupHeader}>
+                  <Label tone="secondary">{t ? 'GÉNERO' : 'GENDER'}</Label>
+                  <Caption tone="muted">{t ? 'OPCIONAL' : 'OPTIONAL'}</Caption>
+                </View>
+                <View style={styles.pillRow}>
+                  {genderOptions.map((opt) => {
+                    const active = gender === opt.key;
+                    return (
+                      <Pressy
+                        key={opt.key}
+                        accessibilityRole="button"
+                        accessibilityLabel={opt.label}
+                        accessibilityState={{ selected: active }}
+                        haptic="select"
+                        onPress={() => setGender(active ? null : opt.key)}
+                        style={[styles.pill, active && styles.pillActive]}
+                      >
+                        <Body
+                          size="sm"
+                          tone={active ? 'inverse' : 'secondary'}
+                          weight={active ? 'semiBold' : 'regular'}
+                        >
+                          {opt.label}
+                        </Body>
+                      </Pressy>
+                    );
+                  })}
+                </View>
               </View>
-            </View>
-          </View>
+            </FadeIn>
 
-          {/* Occupation card */}
-          <View style={[styles.card, styles.cardFilled]}>
-            <View style={[styles.iconBox, { backgroundColor: 'rgba(168,85,247,0.18)' }]}>
-              <Feather name="briefcase" size={18} color="#A855F7" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.cardTitle}>
-                {t ? '¿A qué te dedicas?' : 'What do you do?'}
-                <Text style={styles.optional}>{t ? '  ·  opcional' : '  ·  optional'}</Text>
-              </Text>
-              <TextInput
-                style={styles.cardInput}
+            {/* Occupation */}
+            <FadeIn delay={440}>
+              <Input
+                label={t ? 'A QUÉ TE DEDICAS' : 'WHAT YOU DO'}
                 value={occupation}
                 onChangeText={(v) => setOccupation(v.slice(0, 120))}
-                placeholder={t ? 'Ej. Diseñadora, chef, estudiante' : 'Ex. Designer, chef, student'}
-                placeholderTextColor={Colors.textMuted}
-                autoCapitalize="sentences"
-              />
-            </View>
-          </View>
-
-          {/* Discovery source card */}
-          <View style={[styles.card, styles.cardFilled, { alignItems: 'flex-start' }]}>
-            <View style={[styles.iconBox, { backgroundColor: 'rgba(251,191,36,0.18)' }]}>
-              <Feather name="compass" size={18} color="#FBBF24" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.cardTitle}>
-                {t ? '¿Cómo nos conociste?' : 'How did you find us?'}
-                <Text style={styles.optional}>{t ? '  ·  opcional' : '  ·  optional'}</Text>
-              </Text>
-              <View style={styles.pillRow}>
-                {discoveryOptions.map((opt) => {
-                  const active = discoverySource === opt.key;
-                  return (
-                    <Pressable
-                      key={opt.key}
-                      onPress={() => {
-                        fb.select();
-                        setDiscoverySource(active ? null : opt.key);
-                      }}
-                      style={[styles.pill, active && styles.pillActive]}
-                    >
-                      <Feather
-                        name={opt.icon as any}
-                        size={12}
-                        color={active ? Colors.textInverse : Colors.textSecondary}
-                        style={{ marginRight: 4 }}
-                      />
-                      <Text style={[styles.pillLabel, active && styles.pillLabelActive]}>{opt.label}</Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            </View>
-          </View>
-
-          {/* Bio card */}
-          <View style={[styles.card, styles.cardFilled, { alignItems: 'flex-start' }]}>
-            <View style={[styles.iconBox, { backgroundColor: 'rgba(56,199,147,0.18)' }]}>
-              <Feather name="edit-3" size={18} color={Colors.accentSuccess} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.cardTitle}>
-                {t ? 'Una bio corta' : 'A short bio'}
-                <Text style={styles.optional}>{t ? '  ·  opcional' : '  ·  optional'}</Text>
-              </Text>
-              <TextInput
-                style={[styles.cardInput, { minHeight: 60, textAlignVertical: 'top' }]}
-                value={bio}
-                onChangeText={(v) => setBio(v.slice(0, MAX_BIO))}
                 placeholder={
-                  t
-                    ? 'Ej. Me gustan los cocteles de autor y las noches de jazz'
-                    : 'Ex. Love craft cocktails and jazz nights'
+                  t ? 'Ej. Diseñadora, chef, estudiante' : 'Ex. Designer, chef, student'
                 }
-                placeholderTextColor={Colors.textMuted}
-                multiline
+                autoCapitalize="sentences"
+                accessibilityLabel={t ? 'A qué te dedicas' : 'What you do'}
+                leftIcon={<Feather name="briefcase" size={18} color={Colors.textMuted} />}
+                helper={t ? 'Opcional' : 'Optional'}
               />
-              <Text style={styles.charCount}>
-                {bio.length} / {MAX_BIO}
-              </Text>
-            </View>
+            </FadeIn>
+
+            {/* Discovery */}
+            <FadeIn delay={500}>
+              <View style={styles.groupBlock}>
+                <View style={styles.groupHeader}>
+                  <Label tone="secondary">
+                    {t ? 'CÓMO NOS CONOCISTE' : 'HOW YOU FOUND US'}
+                  </Label>
+                  <Caption tone="muted">{t ? 'OPCIONAL' : 'OPTIONAL'}</Caption>
+                </View>
+                <View style={styles.pillRow}>
+                  {discoveryOptions.map((opt) => {
+                    const active = discoverySource === opt.key;
+                    return (
+                      <Pressy
+                        key={opt.key}
+                        accessibilityRole="button"
+                        accessibilityLabel={opt.label}
+                        accessibilityState={{ selected: active }}
+                        haptic="select"
+                        onPress={() => setDiscoverySource(active ? null : opt.key)}
+                        style={[styles.pill, active && styles.pillActive]}
+                      >
+                        <Feather
+                          name={opt.icon as any}
+                          size={12}
+                          color={active ? Colors.textInverse : Colors.textSecondary}
+                          style={{ marginRight: 6 }}
+                        />
+                        <Body
+                          size="sm"
+                          tone={active ? 'inverse' : 'secondary'}
+                          weight={active ? 'semiBold' : 'regular'}
+                        >
+                          {opt.label}
+                        </Body>
+                      </Pressy>
+                    );
+                  })}
+                </View>
+              </View>
+            </FadeIn>
+
+            {/* Bio */}
+            <FadeIn delay={560}>
+              <View style={styles.fieldCardOpen}>
+                <View style={styles.groupHeader}>
+                  <Label tone="secondary">{t ? 'BIO CORTA' : 'SHORT BIO'}</Label>
+                  <Caption tone="muted">
+                    {bio.length} / {MAX_BIO}
+                  </Caption>
+                </View>
+                <TextInput
+                  style={styles.bioInput}
+                  value={bio}
+                  onChangeText={(v) => setBio(v.slice(0, MAX_BIO))}
+                  placeholder={
+                    t
+                      ? 'Ej. Cocteles de autor y noches de jazz'
+                      : 'Ex. Craft cocktails and jazz nights'
+                  }
+                  placeholderTextColor={Colors.textDisabled}
+                  multiline
+                  accessibilityLabel={t ? 'Bio corta' : 'Short bio'}
+                />
+              </View>
+            </FadeIn>
           </View>
         </ScrollView>
 
-        {/* Footer */}
+        {/* Footer CTAs */}
         <View style={styles.footer}>
-          <Pressable
-            style={({ pressed }) => [
-              styles.primaryBtn,
-              loading && { opacity: 0.6 },
-              pressed && styles.pressed,
-            ]}
+          <Button
+            label={t ? 'Continuar' : 'Continue'}
             onPress={handleNext}
-            disabled={loading}
-          >
-            {loading ? (
-              <ActivityIndicator color={Colors.textInverse} />
-            ) : (
-              <>
-                <Text style={styles.primaryBtnLabel}>{t ? 'Continuar' : 'Continue'}</Text>
-                <Feather name="arrow-right" size={18} color={Colors.textInverse} />
-              </>
-            )}
-          </Pressable>
-          <Pressable
+            loading={loading}
+            variant="primary"
+            size="lg"
+            fullWidth
+            rightIcon={<Feather name="arrow-right" size={18} color={Colors.textInverse} />}
+          />
+          <Pressy
+            accessibilityRole="button"
+            accessibilityLabel={t ? 'Omitir por ahora' : 'Skip for now'}
+            haptic="select"
             onPress={handleSkip}
-            style={({ pressed }) => [styles.skipBtn, pressed && styles.pressed]}
+            style={styles.skipBtn}
           >
-            <Text style={styles.skipLabel}>{t ? 'Omitir por ahora' : 'Skip for now'}</Text>
-          </Pressable>
+            <Body size="sm" tone="muted">
+              {t ? 'Omitir por ahora' : 'Skip for now'}
+            </Body>
+          </Pressy>
         </View>
 
         {/* Date picker */}
@@ -374,14 +387,26 @@ export default function Step1Profile() {
             <View style={styles.modalBackdrop}>
               <View style={styles.modalSheet}>
                 <View style={styles.modalHeader}>
-                  <Pressable onPress={() => setPickerOpen(false)} hitSlop={10}>
-                    <Text style={styles.modalCancel}>{t ? 'Cancelar' : 'Cancel'}</Text>
+                  <Pressable
+                    onPress={() => setPickerOpen(false)}
+                    hitSlop={HitSlop.expand}
+                    accessibilityRole="button"
+                    accessibilityLabel={t ? 'Cancelar' : 'Cancel'}
+                  >
+                    <Body size="sm" tone="muted">
+                      {t ? 'Cancelar' : 'Cancel'}
+                    </Body>
                   </Pressable>
-                  <Text style={styles.modalTitle}>
-                    {t ? 'Tu cumpleaños' : 'Your birthday'}
-                  </Text>
-                  <Pressable onPress={confirmDate} hitSlop={10}>
-                    <Text style={styles.modalConfirm}>{t ? 'Listo' : 'Done'}</Text>
+                  <Label tone="primary">{t ? 'CUMPLEAÑOS' : 'BIRTHDAY'}</Label>
+                  <Pressable
+                    onPress={confirmDate}
+                    hitSlop={HitSlop.expand}
+                    accessibilityRole="button"
+                    accessibilityLabel={t ? 'Confirmar' : 'Done'}
+                  >
+                    <Body size="sm" tone="accent" weight="semiBold">
+                      {t ? 'Listo' : 'Done'}
+                    </Body>
                   </Pressable>
                 </View>
                 <DateTimePicker
@@ -414,9 +439,6 @@ export default function Step1Profile() {
   );
 }
 
-// ─────────────────────────────────────────────
-//  Styles
-// ─────────────────────────────────────────────
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
   pressed: { opacity: 0.85 },
@@ -424,9 +446,9 @@ const styles = StyleSheet.create({
   stepRow: {
     flexDirection: 'row',
     gap: 6,
-    paddingHorizontal: 24,
-    paddingTop: 20,
-    paddingBottom: 12,
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[5],
+    paddingBottom: Spacing[3],
   },
   stepDot: {
     flex: 1,
@@ -436,191 +458,118 @@ const styles = StyleSheet.create({
   },
   stepDotActive: { backgroundColor: Colors.accentPrimary },
 
-  scroll: { paddingHorizontal: 24, paddingBottom: 24 },
-
-  // Hero
-  hero: {
-    alignItems: 'center',
-    paddingTop: 12,
-    paddingBottom: 28,
-  },
-  avatarRing: {
-    width: 92,
-    height: 92,
-    borderRadius: 46,
-    backgroundColor: Colors.accentPrimary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 14,
-  },
-  avatarInner: {
-    width: 84,
-    height: 84,
-    borderRadius: 42,
-    backgroundColor: Colors.bgPrimary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarText: {
-    color: Colors.accentPrimary,
-    fontSize: 34,
-    fontWeight: '800',
-  },
-  kicker: {
-    color: Colors.textMuted,
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.8,
-    textTransform: 'uppercase',
-  },
-  title: {
-    color: Colors.textPrimary,
-    fontSize: 28,
-    fontWeight: '800',
-    marginTop: 8,
-    lineHeight: 34,
-    textAlign: 'center',
-    letterSpacing: -0.3,
-  },
-  subtitle: {
-    color: Colors.textSecondary,
-    fontSize: 14,
-    lineHeight: 21,
-    marginTop: 10,
-    textAlign: 'center',
-    paddingHorizontal: 8,
+  scroll: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingTop: Spacing[6],
+    paddingBottom: Spacing[8],
   },
 
-  // Cards
-  card: {
+  form: {
+    marginTop: Spacing[8],
+    gap: Spacing[4],
+  },
+
+  fieldCard: {
+    backgroundColor: Colors.bgCard,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: Radius.lg,
+    paddingHorizontal: Spacing[4],
+    paddingVertical: Spacing[3],
+    gap: Spacing[2],
+    minHeight: 64,
+  },
+  fieldCardOpen: {
+    backgroundColor: Colors.bgCard,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: Radius.lg,
+    paddingHorizontal: Spacing[4],
+    paddingVertical: Spacing[3],
+    gap: Spacing[2],
+  },
+  labelRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
-    padding: 16,
-    borderRadius: 16,
-    backgroundColor: Colors.bgCard,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: Colors.border,
-    marginBottom: 10,
+    justifyContent: 'space-between',
   },
-  cardFilled: {},
-  iconBox: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
+  fieldValueRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'space-between',
   },
-  cardTitle: {
-    color: Colors.textPrimary,
-    fontSize: 14,
-    fontWeight: '700',
+
+  groupBlock: {
+    gap: Spacing[3],
   },
-  cardHint: {
-    color: Colors.textMuted,
-    fontSize: 12,
-    marginTop: 3,
+  groupHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
-  cardValue: {
-    color: Colors.accentPrimary,
-    fontSize: 14,
-    fontWeight: '700',
-    marginTop: 3,
-    textTransform: 'capitalize',
-  },
-  cardInput: {
-    color: Colors.textPrimary,
-    fontSize: 14,
-    padding: 0,
-    marginTop: 3,
-    fontWeight: '600',
-  },
-  optional: {
-    color: Colors.textMuted,
-    fontSize: 11,
-    fontWeight: '500',
-  },
-  charCount: {
-    color: Colors.textMuted,
-    fontSize: 11,
-    textAlign: 'right',
-    marginTop: 4,
-  },
+
   pillRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 6,
-    marginTop: 10,
+    gap: Spacing[2],
   },
   pill: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 6,
-    paddingHorizontal: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
     borderRadius: 999,
-    backgroundColor: Colors.bgElevated,
-    borderWidth: StyleSheet.hairlineWidth,
+    backgroundColor: Colors.bgCard,
+    borderWidth: 1,
     borderColor: Colors.border,
   },
   pillActive: {
     backgroundColor: Colors.accentPrimary,
     borderColor: Colors.accentPrimary,
   },
-  pillLabel: {
-    color: Colors.textSecondary,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  pillLabelActive: {
-    color: Colors.textInverse,
+
+  bioInput: {
+    ...TypePresets.body,
+    color: Colors.textPrimary,
+    minHeight: 72,
+    textAlignVertical: 'top',
+    padding: 0,
   },
 
-  // Footer
   footer: {
-    paddingHorizontal: 24,
-    paddingBottom: 16,
-    paddingTop: 10,
-    gap: 6,
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingBottom: Spacing[4],
+    paddingTop: Spacing[3],
+    gap: Spacing[3],
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
   },
-  primaryBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    height: 54,
-    borderRadius: 14,
-    backgroundColor: Colors.accentPrimary,
-  },
-  primaryBtnLabel: { color: Colors.textInverse, fontSize: 15, fontWeight: '800' },
   skipBtn: {
-    height: 44,
+    minHeight: 44,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  skipLabel: { color: Colors.textMuted, fontSize: 13, fontWeight: '600' },
 
-  // Date picker modal (iOS)
   modalBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
+    backgroundColor: Colors.bgOverlay,
     justifyContent: 'flex-end',
   },
   modalSheet: {
     backgroundColor: Colors.bgCard,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingBottom: 20,
+    borderTopLeftRadius: Radius.xl,
+    borderTopRightRadius: Radius.xl,
+    paddingBottom: Spacing[5],
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
   },
   modalHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: Spacing[5],
+    paddingVertical: Spacing[4],
+    borderBottomWidth: 1,
     borderBottomColor: Colors.border,
   },
-  modalCancel: { color: Colors.textMuted, fontSize: 14, fontWeight: '600' },
-  modalConfirm: { color: Colors.accentPrimary, fontSize: 14, fontWeight: '800' },
-  modalTitle: { color: Colors.textPrimary, fontSize: 15, fontWeight: '700' },
 });

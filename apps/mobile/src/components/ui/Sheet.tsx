@@ -49,6 +49,7 @@ import { Colors, Radius, Shadows, Spacing, TypePresets } from '@/constants/token
 import { Springs, ReducedMotion } from '@/constants/motion';
 import { A11yDefaults, Roles } from '@/constants/a11y';
 import { useReducedMotion } from '@/animations';
+import { playUiSound } from '@/hooks/useFeedback';
 
 interface Props {
   open: boolean;
@@ -81,6 +82,7 @@ export function Sheet({
 
   useEffect(() => {
     if (open) {
+      playUiSound('whoosh');
       if (title) AccessibilityInfo.announceForAccessibility(title);
       if (reduced) {
         translateY.value = 0;

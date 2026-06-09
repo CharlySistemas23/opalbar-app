@@ -1014,8 +1014,8 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.bgElevated,
   },
   heroActionDanger: {
-    borderColor: 'rgba(228,88,88,0.3)',
-    backgroundColor: 'rgba(228,88,88,0.08)',
+    borderColor: 'rgba(196,104,104,0.30)',
+    backgroundColor: 'rgba(196,104,104,0.08)',
   },
   heroActionLabel: {
     color: Colors.textPrimary,
@@ -1062,9 +1062,9 @@ const styles = StyleSheet.create({
     padding: 10,
     marginTop: 8,
     borderRadius: 10,
-    backgroundColor: 'rgba(244,163,64,0.1)',
+    backgroundColor: 'rgba(201,169,97,0.10)',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(244,163,64,0.3)',
+    borderColor: 'rgba(201,169,97,0.30)',
   },
   heroWarnText: {
     flex: 1,

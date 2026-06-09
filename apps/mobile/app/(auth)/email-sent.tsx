@@ -14,7 +14,8 @@ export default function EmailSent() {
     <AuthStatusScreen
       icon="mail"
       variant="success"
-      title={t ? 'Correo enviado' : 'Email sent'}
+      kicker={t ? 'CORREO ENVIADO' : 'EMAIL SENT'}
+      title={t ? 'Revisa tu\nbuzón.' : 'Check your\ninbox.'}
       message={
         t
           ? `Te enviamos un código de 6 dígitos a ${mail}. Revisa tu bandeja y la carpeta de spam.`

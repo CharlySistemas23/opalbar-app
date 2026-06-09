@@ -24,6 +24,7 @@ import { useRealtimeConnection } from '@/hooks/useRealtime';
 import { ToastHost } from '@/components/Toast';
 import { NotificationListener } from '@/components/NotificationListener';
 import { NotificationBannerHost } from '@/components/NotificationBanner';
+import { AmbientBridge } from '@/components/AmbientBridge';
 import { OfflineBanner } from '@/components/OfflineBanner';
 import { UpdateOverlay } from '@/components/UpdateOverlay';
 import { reportError } from '@/lib/error-reporter';
@@ -199,6 +200,7 @@ export default function RootLayout() {
         <SessionGuard />
         <PushGuard />
         <RealtimeBridge />
+        <AmbientBridge />
         <NotificationListener />
         <Stack screenOptions={{ headerShown: false }}>
           <Stack.Screen name="index" />

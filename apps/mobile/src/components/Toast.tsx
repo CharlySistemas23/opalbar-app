@@ -35,8 +35,18 @@ import Animated, {
 import { Colors, Radius, Spacing, TypePresets } from '@/constants/tokens';
 import { Durations } from '@/constants/motion';
 import { HitSlop } from '@/constants/a11y';
+import { playUiSound } from '@/hooks/useFeedback';
 
 type Variant = 'success' | 'danger' | 'info' | 'warning';
+
+// Each toast variant gets a matching one-shot. Info stays a subtle tick so the
+// frequent neutral toasts texture rather than nag.
+const TOAST_SOUND: Record<Variant, string> = {
+  success: 'success',
+  danger: 'error',
+  warning: 'notification',
+  info: 'tick',
+};
 
 interface ToastItem {
   id: number;
@@ -59,6 +69,7 @@ export const useToastStore = create<ToastState>((set) => ({
   push: (message, variant = 'info', durationMs = DEFAULT_MS) => {
     const id = nextId++;
     set((s) => ({ items: [...s.items, { id, message, variant, durationMs }] }));
+    playUiSound(TOAST_SOUND[variant]);
     AccessibilityInfo.announceForAccessibility(message);
     setTimeout(() => set((s) => ({ items: s.items.filter((t) => t.id !== id) })), durationMs);
   },

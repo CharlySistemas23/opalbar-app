@@ -24,7 +24,7 @@ interface Level {
   sortOrder?: number;
 }
 
-const PALETTE = [Colors.accentPrimary, '#60A5FA', '#A855F7', Colors.accentSuccess, '#EC4899', '#F59E0B'];
+const PALETTE = [Colors.accentPrimary, Colors.accentInfo, Colors.accentChampagne, Colors.accentSuccess, Colors.accentChampagne, Colors.accentPrimary];
 const ICON_CHOICES: FeatherIcon[] = ['star', 'award', 'gift', 'shield', 'zap', 'heart'];
 
 export default function AdminLoyalty() {
@@ -340,7 +340,7 @@ const styles = StyleSheet.create({
   },
   introIcon: {
     width: 32, height: 32, borderRadius: 10,
-    backgroundColor: 'rgba(244,163,64,0.15)',
+    backgroundColor: 'rgba(201,169,97,0.14)',
     alignItems: 'center', justifyContent: 'center',
   },
   introText: { flex: 1, color: Colors.textSecondary, fontSize: 12, lineHeight: 18 },
@@ -370,7 +370,7 @@ const styles = StyleSheet.create({
   discountText: { fontSize: 12, fontWeight: '800' },
   deleteBtn: {
     width: 36, height: 36, borderRadius: 10,
-    backgroundColor: 'rgba(228,88,88,0.12)',
+    backgroundColor: 'rgba(196,104,104,0.12)',
     alignItems: 'center', justifyContent: 'center',
   },
 

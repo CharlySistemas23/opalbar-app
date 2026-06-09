@@ -141,9 +141,7 @@ export default function MentionRequests() {
 
       <View style={styles.titleBlock}>
         <Kicker tone="muted">{t ? 'COMUNIDAD' : 'COMMUNITY'}</Kicker>
-        <Heading size="md" style={{ marginTop: Spacing[2] }}>
-          {t ? 'Etiquetas pendientes' : 'Tag requests'}
-        </Heading>
+        <Heading size="md">{t ? 'Etiquetas pendientes' : 'Tag requests'}</Heading>
       </View>
 
       {loading ? (
@@ -290,7 +288,8 @@ const styles = StyleSheet.create({
   },
   titleBlock: {
     paddingHorizontal: EditorialSpacing.pageGutter,
-    paddingBottom: Spacing[6],
+    paddingVertical: Spacing[4],
+    gap: Spacing[2],
   },
   requestRow: {
     gap: Spacing[4],

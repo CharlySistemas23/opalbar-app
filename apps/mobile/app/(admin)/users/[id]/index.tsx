@@ -55,32 +55,32 @@ function formatMembership(createdAt: string): string {
 
 const ROLE_COLOR: Record<string, string> = {
   USER: Colors.textMuted,
-  MODERATOR: '#60A5FA',
+  MODERATOR: Colors.accentInfo,
   ADMIN: Colors.accentPrimary,
-  SUPER_ADMIN: '#A855F7',
+  SUPER_ADMIN: Colors.accentChampagne,
 };
 
 const STATUS_META: Record<string, { bg: string; color: string; label: string }> = {
-  ACTIVE: { bg: 'rgba(56,199,147,0.15)', color: Colors.accentSuccess, label: 'ACTIVO' },
-  BANNED: { bg: 'rgba(228,88,88,0.15)', color: Colors.accentDanger, label: 'BANEADO' },
-  PENDING_VERIFICATION: { bg: 'rgba(244,163,64,0.15)', color: Colors.accentPrimary, label: 'SIN VERIFICAR' },
+  ACTIVE: { bg: 'rgba(111,168,138,0.14)', color: Colors.accentSuccess, label: 'ACTIVO' },
+  BANNED: { bg: 'rgba(196,104,104,0.14)', color: Colors.accentDanger, label: 'BANEADO' },
+  PENDING_VERIFICATION: { bg: 'rgba(201,169,97,0.14)', color: Colors.accentPrimary, label: 'SIN VERIFICAR' },
   DELETED: { bg: 'rgba(107,107,120,0.15)', color: Colors.textMuted, label: 'ELIMINADO' },
 };
 
 const ACTION_META: Record<string, { icon: FeatherIcon; color: string; label: string }> = {
   POINTS_ADJUST:     { icon: 'award',        color: Colors.accentPrimary, label: 'Ajuste de puntos' },
-  STATUS_CHANGE:     { icon: 'refresh-cw',   color: '#60A5FA',            label: 'Cambio de estado' },
-  ROLE_CHANGE:       { icon: 'shield',       color: '#A855F7',            label: 'Cambio de rol' },
+  STATUS_CHANGE:     { icon: 'refresh-cw',   color: Colors.accentInfo,            label: 'Cambio de estado' },
+  ROLE_CHANGE:       { icon: 'shield',       color: Colors.accentChampagne,            label: 'Cambio de rol' },
   NOTE_ADDED:        { icon: 'edit-3',       color: Colors.accentWarning, label: 'Nota añadida' },
   NOTE_UPDATED:      { icon: 'edit-2',       color: Colors.accentWarning, label: 'Nota actualizada' },
   DELETE:            { icon: 'trash-2',      color: Colors.accentDanger,  label: 'Eliminación' },
   BAN:               { icon: 'slash',        color: Colors.accentDanger,  label: 'Ban' },
   UNBAN:             { icon: 'user-check',   color: Colors.accentSuccess, label: 'Unban' },
   VERIFY:            { icon: 'check-circle', color: Colors.accentSuccess, label: 'Verificación' },
-  MESSAGE_SENT:      { icon: 'send',         color: '#60A5FA',            label: 'Mensaje enviado' },
+  MESSAGE_SENT:      { icon: 'send',         color: Colors.accentInfo,            label: 'Mensaje enviado' },
   INTEREST_ADDED:    { icon: 'plus-circle',  color: Colors.accentSuccess, label: 'Interés añadido' },
   INTEREST_REMOVED:  { icon: 'minus-circle', color: Colors.textMuted,     label: 'Interés removido' },
-  PROFILE_UPDATED:   { icon: 'user',         color: '#60A5FA',            label: 'Perfil actualizado' },
+  PROFILE_UPDATED:   { icon: 'user',         color: Colors.accentInfo,            label: 'Perfil actualizado' },
 };
 
 function formatAuditTime(iso: string): string {
@@ -645,7 +645,7 @@ export default function AdminUserDetail() {
                   style={[styles.activityRow, idx === recentReservations.length - 1 && { borderBottomWidth: 0 }]}
                 >
                   <View style={[styles.activityIcon, { backgroundColor: 'rgba(236,72,153,0.15)' }]}>
-                    <Feather name="bookmark" size={13} color="#EC4899" />
+                    <Feather name="bookmark" size={13} color={Colors.accentChampagne} />
                   </View>
                   <Text style={styles.activityText}>
                     {new Date(r.date).toLocaleDateString('es', { day: 'numeric', month: 'short' })} · {r.partySize} pax
@@ -1146,7 +1146,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 10,
-    backgroundColor: 'rgba(244,163,64,0.15)',
+    backgroundColor: 'rgba(201,169,97,0.14)',
   },
   levelPillText: { color: Colors.accentPrimary, fontSize: 10, fontWeight: '800', letterSpacing: 0.3 },
 
@@ -1180,7 +1180,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     backgroundColor: Colors.bgCard,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(244,163,64,0.35)',
+    borderColor: 'rgba(201,169,97,0.30)',
   },
   dossierHeader: {
     flexDirection: 'row',
@@ -1390,7 +1390,7 @@ const styles = StyleSheet.create({
     width: 26,
     height: 26,
     borderRadius: 7,
-    backgroundColor: 'rgba(56,199,147,0.15)',
+    backgroundColor: 'rgba(111,168,138,0.14)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1438,7 +1438,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.bgCard,
     borderRadius: 12,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(244,163,64,0.35)',
+    borderColor: 'rgba(201,169,97,0.30)',
     padding: 12,
     gap: 10,
   },
@@ -1540,9 +1540,9 @@ const styles = StyleSheet.create({
     gap: 8,
     height: 48,
     borderRadius: 12,
-    backgroundColor: 'rgba(228,88,88,0.1)',
+    backgroundColor: 'rgba(196,104,104,0.10)',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(228,88,88,0.3)',
+    borderColor: 'rgba(196,104,104,0.30)',
   },
   banLbl: { color: Colors.accentDanger, fontSize: 14, fontWeight: '700' },
   unbanBtn: {

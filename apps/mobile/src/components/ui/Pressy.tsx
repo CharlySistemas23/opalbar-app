@@ -21,7 +21,7 @@ import {
 
 import { Press } from '@/constants/motion';
 import { HitSlop, Roles } from '@/constants/a11y';
-import { useFeedback } from '@/hooks/useFeedback';
+import { useFeedback, playUiSound } from '@/hooks/useFeedback';
 
 // Layout props that must live on the OUTER (animated) wrapper so the wrapper
 // participates in its parent's layout. If we only pass them to the inner
@@ -55,6 +55,8 @@ type HapticKind = 'none' | 'tap' | 'select' | 'success' | 'error' | 'warning' | 
 
 interface PressyProps extends Omit<PressableProps, 'style'> {
   haptic?: HapticKind;
+  /** Optional one-shot SFX name (see useFeedback SOUND_ASSETS), e.g. 'tick'. */
+  sound?: string;
   scaleTo?: number;
   style?: StyleProp<ViewStyle> | ((state: { pressed: boolean }) => StyleProp<ViewStyle>);
   children?: React.ReactNode;
@@ -62,6 +64,7 @@ interface PressyProps extends Omit<PressableProps, 'style'> {
 
 export function Pressy({
   haptic = 'tap',
+  sound,
   scaleTo = Press.scale,
   style,
   onPress,
@@ -88,6 +91,7 @@ export function Pressy({
   };
 
   function fireHaptic() {
+    if (sound) playUiSound(sound);
     if (haptic === 'none') return;
     if (haptic === 'tap') fb.tap();
     else if (haptic === 'select') fb.select();

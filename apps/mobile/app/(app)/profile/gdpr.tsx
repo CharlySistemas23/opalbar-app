@@ -112,12 +112,10 @@ export default function Gdpr() {
       </View>
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        <FadeIn>
+        <FadeIn style={styles.hero}>
           <Kicker tone="muted">{t ? 'GDPR · TUS DATOS' : 'GDPR · YOUR DATA'}</Kicker>
-          <Heading size="md" style={{ marginTop: Spacing[2] }}>
-            {t ? 'Mis datos' : 'My data'}
-          </Heading>
-          <Lead tone="secondary" style={{ marginTop: Spacing[4] }}>
+          <Heading size="md">{t ? 'Mis datos' : 'My data'}</Heading>
+          <Lead tone="secondary" style={{ marginTop: Spacing[3] }}>
             {t
               ? 'Tienes derecho a acceder, rectificar, exportar y eliminar tus datos en cualquier momento.'
               : 'You have the right to access, rectify, export and delete your personal data at any time.'}
@@ -249,6 +247,10 @@ const styles = StyleSheet.create({
   scroll: {
     paddingHorizontal: EditorialSpacing.pageGutter,
     paddingBottom: Spacing[12],
+  },
+  hero: {
+    paddingVertical: Spacing[4],
+    gap: Spacing[2],
   },
   actionCard: {
     flexDirection: 'row',

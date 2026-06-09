@@ -1,9 +1,12 @@
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert } from 'react-native';
+import { View, StyleSheet, ScrollView, Pressable } from 'react-native';
+import { useState } from 'react';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { useAuthStore } from '@/stores/auth.store';
-import { Colors } from '@/constants/tokens';
+import { Colors, Radius, Spacing } from '@/constants/tokens';
+import { Body, Caption, ConfirmDialog, Kicker, Subhead } from '@/components/ui';
+import { AdminHeader } from '@/components/admin';
 
 type FeatherIcon = React.ComponentProps<typeof Feather>['name'];
 
@@ -20,53 +23,54 @@ interface Row {
 export default function AdminSettings() {
   const router = useRouter();
   const { user, logout } = useAuthStore();
+  const [confirmLogout, setConfirmLogout] = useState(false);
+
+  async function performLogout() {
+    setConfirmLogout(false);
+    await logout();
+    router.replace('/(auth)/login' as never);
+  }
 
   const sections: { title: string; rows: Row[] }[] = [
     {
-      title: 'CAMBIO DE MODO',
+      title: 'Cambio de modo',
       rows: [
-        { icon: 'smartphone', label: 'Modo Usuario', sub: 'Regresa a la app como cliente', color: '#60A5FA', onPress: () => router.replace('/(tabs)/home' as never) },
+        { icon: 'smartphone', label: 'Modo Usuario', sub: 'Regresa a la app como cliente', color: Colors.accentInfo, onPress: () => router.replace('/(tabs)/home' as never) },
         { icon: 'camera', label: 'Escanear QR (Staff)', sub: 'Check-in de reservas y canjes', color: Colors.accentSuccess, path: '/(app)/staff/scan' },
       ],
     },
     {
-      title: 'COMUNICACIÓN',
+      title: 'Comunicacion',
       rows: [
-        { icon: 'bell', label: 'Push Notifications', sub: 'Enviar notificación masiva', color: Colors.accentPrimary, path: '/(admin)/notifications' },
-        { icon: 'bar-chart-2', label: 'Analytics', sub: 'Métricas del sistema', color: '#A855F7', path: '/(admin)/analytics' },
+        { icon: 'bell', label: 'Push Notifications', sub: 'Enviar notificacion masiva', color: Colors.accentPrimary, path: '/(admin)/notifications' },
+        { icon: 'bar-chart-2', label: 'Analytics', sub: 'Metricas del sistema', color: Colors.accentChampagne, path: '/(admin)/analytics' },
       ],
     },
     {
-      title: 'OPERACIÓN',
+      title: 'Operacion',
       rows: [
-        { icon: 'users', label: 'Equipo staff', sub: 'Administradores y moderadores', color: '#60A5FA', path: '/(admin)/staff' },
+        { icon: 'users', label: 'Equipo staff', sub: 'Administradores y moderadores', color: Colors.accentInfo, path: '/(admin)/staff' },
         { icon: 'award', label: 'Niveles de fidelidad', sub: 'Beneficios por nivel', color: Colors.accentPrimary, path: '/(admin)/loyalty' },
-        { icon: 'toggle-left', label: 'Feature flags', sub: 'Activar o desactivar funciones', color: '#F59E0B', path: '/(admin)/flags' },
+        { icon: 'toggle-left', label: 'Feature flags', sub: 'Activar o desactivar funciones', color: Colors.accentPrimary, path: '/(admin)/flags' },
       ],
     },
     {
-      title: 'SISTEMA',
+      title: 'Sistema',
       rows: [
-        { icon: 'activity', label: 'Actividad reciente', sub: 'Historial de eventos', color: '#EC4899', path: '/(admin)/activity' },
-        { icon: 'shield', label: 'Solicitudes GDPR', sub: 'Exportación y eliminación de datos', color: Colors.accentDanger, path: '/(admin)/gdpr' },
+        { icon: 'activity', label: 'Actividad reciente', sub: 'Historial de eventos', color: Colors.accentChampagne, path: '/(admin)/activity' },
+        { icon: 'shield', label: 'Solicitudes GDPR', sub: 'Exportacion y eliminacion de datos', color: Colors.accentDanger, path: '/(admin)/gdpr' },
         { icon: 'info', label: 'Acerca de', sub: 'OPALBAR v1.0.0 · Build 2026-04', color: Colors.textMuted },
       ],
     },
     {
-      title: 'SESIÓN',
+      title: 'Sesion',
       rows: [
         {
-          icon: 'log-out', label: 'Cerrar sesión', color: Colors.accentDanger, destructive: true,
-          onPress: () => Alert.alert('Cerrar sesión', '¿Seguro?', [
-            { text: 'Cancelar', style: 'cancel' },
-            {
-              text: 'Cerrar sesión', style: 'destructive',
-              onPress: async () => {
-                await logout();
-                router.replace('/(auth)/login' as never);
-              },
-            },
-          ]),
+          icon: 'log-out',
+          label: 'Cerrar sesion',
+          color: Colors.accentDanger,
+          destructive: true,
+          onPress: () => setConfirmLogout(true),
         },
       ],
     },
@@ -74,112 +78,139 @@ export default function AdminSettings() {
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
-      <View style={styles.header}>
-        <View style={styles.logo}><Feather name="settings" size={16} color={Colors.accentPrimary} /></View>
-        <Text style={styles.title}>Ajustes</Text>
-      </View>
+      <AdminHeader title="Ajustes" kicker="Admin" hideBack />
 
-      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 120, gap: 18 }}>
+      <ScrollView contentContainerStyle={{ padding: Spacing[5], paddingBottom: 120, gap: Spacing[4] }}>
         <View style={styles.userCard}>
           <View style={styles.userAvatar}>
-            <Text style={styles.userAvatarText}>
+            <Body tone="inverse" weight="bold" size="lg">
               {(user?.profile?.firstName?.[0] ?? user?.email?.[0] ?? 'A').toUpperCase()}
-            </Text>
+            </Body>
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={styles.userName}>
+            <Subhead>
               {user?.profile?.firstName ?? 'Admin'} {user?.profile?.lastName ?? ''}
-            </Text>
-            <Text style={styles.userEmail}>{user?.email}</Text>
+            </Subhead>
+            <Caption tone="muted" style={{ marginTop: 2 }}>
+              {user?.email}
+            </Caption>
             <View style={styles.rolePill}>
               <Feather name="shield" size={10} color={Colors.accentPrimary} />
-              <Text style={styles.roleText}>{user?.role}</Text>
+              <Kicker tone="accent" style={{ fontSize: 10 }}>{user?.role}</Kicker>
             </View>
           </View>
         </View>
 
         {sections.map((sec) => (
-          <View key={sec.title} style={{ gap: 8 }}>
-            <Text style={styles.sectionLabel}>{sec.title}</Text>
+          <View key={sec.title} style={{ gap: Spacing[2] }}>
+            <Kicker tone="muted">{sec.title}</Kicker>
             <View style={styles.group}>
               {sec.rows.map((r, i) => (
-                <TouchableOpacity
+                <Pressable
                   key={r.label}
-                  style={[styles.row, r.destructive && styles.rowDestructive, i > 0 && styles.rowBorder]}
-                  activeOpacity={0.85}
-                  onPress={() => { r.onPress ? r.onPress() : r.path ? router.push(r.path as never) : null; }}
+                  style={({ pressed }) => [
+                    styles.row,
+                    i > 0 && styles.rowBorder,
+                    pressed && styles.pressed,
+                  ]}
+                  onPress={() => {
+                    if (r.onPress) r.onPress();
+                    else if (r.path) router.push(r.path as never);
+                  }}
                   disabled={!r.onPress && !r.path}
+                  accessibilityRole="button"
+                  accessibilityLabel={r.label}
+                  accessibilityHint={r.sub}
                 >
                   <View style={[styles.rowIcon, { backgroundColor: r.color + '20' }]}>
                     <Feather name={r.icon} size={16} color={r.color} />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={[styles.rowLabel, r.destructive && { color: Colors.accentDanger }]}>{r.label}</Text>
-                    {r.sub ? <Text style={styles.rowSub}>{r.sub}</Text> : null}
+                    <Subhead tone={r.destructive ? 'danger' : 'primary'}>{r.label}</Subhead>
+                    {r.sub ? (
+                      <Caption tone="muted" style={{ marginTop: 2 }}>
+                        {r.sub}
+                      </Caption>
+                    ) : null}
                   </View>
                   {(r.onPress || r.path) && !r.destructive && (
                     <Feather name="chevron-right" size={16} color={Colors.textMuted} />
                   )}
-                </TouchableOpacity>
+                </Pressable>
               ))}
             </View>
           </View>
         ))}
       </ScrollView>
+
+      <ConfirmDialog
+        open={confirmLogout}
+        onClose={() => setConfirmLogout(false)}
+        onConfirm={performLogout}
+        title="Cerrar sesion"
+        description="Seguro que quieres cerrar sesion?"
+        confirmLabel="Cerrar sesion"
+        confirmVariant="danger"
+      />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
-  header: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    paddingHorizontal: 20, paddingTop: 8, paddingBottom: 12,
-  },
-  logo: {
-    width: 32, height: 32, borderRadius: 8,
-    backgroundColor: 'rgba(244,163,64,0.15)',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  title: { color: Colors.textPrimary, fontSize: 18, fontWeight: '800' },
+  pressed: { opacity: 0.7 },
 
   userCard: {
-    flexDirection: 'row', gap: 14, alignItems: 'center',
+    flexDirection: 'row',
+    gap: Spacing[3],
+    alignItems: 'center',
     backgroundColor: Colors.bgCard,
-    borderRadius: 16, padding: 16,
-    borderWidth: 1, borderColor: Colors.border,
+    borderRadius: Radius['2xl'],
+    paddingHorizontal: Spacing[4],
+    paddingVertical: Spacing[4],
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
   },
   userAvatar: {
-    width: 56, height: 56, borderRadius: 28,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     backgroundColor: Colors.accentPrimary,
-    alignItems: 'center', justifyContent: 'center',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  userAvatarText: { color: Colors.textInverse, fontSize: 22, fontWeight: '800' },
-  userName: { color: Colors.textPrimary, fontSize: 16, fontWeight: '800' },
-  userEmail: { color: Colors.textMuted, fontSize: 12, marginTop: 2 },
   rolePill: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    paddingHorizontal: 8, paddingVertical: 3,
-    borderRadius: 8, alignSelf: 'flex-start',
-    backgroundColor: 'rgba(244,163,64,0.15)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: Spacing[2],
+    paddingVertical: 3,
+    borderRadius: Radius.lg,
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(201,169,97,0.14)',
     marginTop: 6,
   },
-  roleText: { color: Colors.accentPrimary, fontSize: 10, fontWeight: '800', letterSpacing: 0.5 },
 
-  sectionLabel: { color: Colors.textMuted, fontSize: 11, fontWeight: '700', letterSpacing: 0.5 },
   group: {
     backgroundColor: Colors.bgCard,
-    borderRadius: 14,
-    borderWidth: 1, borderColor: Colors.border,
+    borderRadius: Radius['2xl'],
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
     overflow: 'hidden',
   },
   row: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    padding: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing[3],
+    padding: Spacing[3],
+    paddingHorizontal: Spacing[4],
   },
-  rowDestructive: {},
-  rowBorder: { borderTopWidth: 1, borderTopColor: Colors.border },
-  rowIcon: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  rowLabel: { color: Colors.textPrimary, fontSize: 14, fontWeight: '700' },
-  rowSub: { color: Colors.textMuted, fontSize: 12, marginTop: 2 },
+  rowBorder: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: Colors.border },
+  rowIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: Radius.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });

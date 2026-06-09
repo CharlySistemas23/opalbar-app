@@ -170,9 +170,7 @@ export default function FriendRequests() {
 
       <View style={styles.titleBlock}>
         <Kicker tone="muted">{t ? 'AMISTAD' : 'FRIENDSHIP'}</Kicker>
-        <Heading size="md" style={{ marginTop: Spacing[2] }}>
-          {t ? 'Solicitudes' : 'Requests'}
-        </Heading>
+        <Heading size="md">{t ? 'Solicitudes' : 'Requests'}</Heading>
       </View>
 
       <View style={styles.tabsWrap}>
@@ -338,7 +336,8 @@ const styles = StyleSheet.create({
   },
   titleBlock: {
     paddingHorizontal: EditorialSpacing.pageGutter,
-    paddingBottom: Spacing[5],
+    paddingVertical: Spacing[4],
+    gap: Spacing[2],
   },
   tabsWrap: {
     paddingHorizontal: EditorialSpacing.pageGutter,

@@ -119,9 +119,7 @@ export default function Redemptions() {
 
       <View style={styles.titleBlock}>
         <Kicker tone="muted">{t ? 'CANJES' : 'REDEMPTIONS'}</Kicker>
-        <Heading size="md" style={{ marginTop: Spacing[2] }}>
-          {t ? 'Historial' : 'History'}
-        </Heading>
+        <Heading size="md">{t ? 'Historial' : 'History'}</Heading>
       </View>
 
       <View style={styles.tabsWrap}>
@@ -283,7 +281,8 @@ const styles = StyleSheet.create({
   },
   titleBlock: {
     paddingHorizontal: EditorialSpacing.pageGutter,
-    paddingBottom: Spacing[5],
+    paddingVertical: Spacing[4],
+    gap: Spacing[2],
   },
   tabsWrap: {
     paddingHorizontal: EditorialSpacing.pageGutter,

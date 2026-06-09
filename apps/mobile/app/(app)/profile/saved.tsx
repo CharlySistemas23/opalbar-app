@@ -127,9 +127,7 @@ export default function Saved() {
 
       <View style={styles.titleBlock}>
         <Kicker tone="muted">{t ? 'COLECCIÓN' : 'COLLECTION'}</Kicker>
-        <Heading size="md" style={{ marginTop: Spacing[2] }}>
-          {t ? 'Guardados' : 'Saved'}
-        </Heading>
+        <Heading size="md">{t ? 'Guardados' : 'Saved'}</Heading>
       </View>
 
       <ScrollView
@@ -310,7 +308,8 @@ const styles = StyleSheet.create({
   },
   titleBlock: {
     paddingHorizontal: EditorialSpacing.pageGutter,
-    paddingBottom: Spacing[5],
+    paddingVertical: Spacing[4],
+    gap: Spacing[2],
   },
   filters: {
     paddingHorizontal: EditorialSpacing.pageGutter,

@@ -24,6 +24,7 @@ import {
 } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { useAppStore } from '@/stores/app.store';
+import { useFeedback } from '@/hooks/useFeedback';
 import { Colors, EditorialSpacing, Spacing } from '@/constants/tokens';
 import { HitSlop, Roles } from '@/constants/a11y';
 import {
@@ -40,6 +41,7 @@ type DmPolicy = 'EVERYONE' | 'FOLLOWING' | 'FRIENDS_OF_FRIENDS' | 'FRIENDS_ONLY'
 export default function Privacy() {
   const router = useRouter();
   const { language } = useAppStore();
+  const fb = useFeedback();
   const t = language === 'es';
 
   const [settings, setSettings] = useState({ showProfile: true, showActivity: false, allowMessages: true });
@@ -71,6 +73,7 @@ export default function Privacy() {
   async function toggle(key: keyof typeof settings) {
     const prev = settings[key];
     const next = !prev;
+    fb.toggle(next);
     setSettings((p) => ({ ...p, [key]: next }));
     try {
       await usersApi.updatePrivacy({ ...settings, [key]: next });
@@ -207,11 +210,9 @@ export default function Privacy() {
       </View>
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        <FadeIn>
+        <FadeIn style={styles.hero}>
           <Kicker tone="muted">{t ? 'AJUSTES' : 'SETTINGS'}</Kicker>
-          <Heading size="md" style={{ marginTop: Spacing[2] }}>
-            {t ? 'Privacidad' : 'Privacy'}
-          </Heading>
+          <Heading size="md">{t ? 'Privacidad' : 'Privacy'}</Heading>
         </FadeIn>
 
         {/* ── Visibilidad ── */}
@@ -342,6 +343,10 @@ const styles = StyleSheet.create({
   scroll: {
     paddingHorizontal: EditorialSpacing.pageGutter,
     paddingBottom: Spacing[12],
+  },
+  hero: {
+    paddingVertical: Spacing[4],
+    gap: Spacing[2],
   },
   section: {
     marginTop: Spacing[8],

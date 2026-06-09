@@ -10,10 +10,10 @@ import { Colors } from '@/constants/tokens';
 type Tab = 'export' | 'deletion';
 
 const STATUS_META: Record<string, { bg: string; color: string; label: string }> = {
-  PENDING: { bg: 'rgba(244,163,64,0.15)', color: Colors.accentPrimary, label: 'PENDIENTE' },
-  PROCESSING: { bg: 'rgba(96,165,250,0.15)', color: '#60A5FA', label: 'PROCESANDO' },
-  COMPLETED: { bg: 'rgba(56,199,147,0.15)', color: Colors.accentSuccess, label: 'COMPLETADO' },
-  REJECTED: { bg: 'rgba(228,88,88,0.15)', color: Colors.accentDanger, label: 'RECHAZADO' },
+  PENDING: { bg: 'rgba(201,169,97,0.14)', color: Colors.accentPrimary, label: 'PENDIENTE' },
+  PROCESSING: { bg: 'rgba(127,160,188,0.14)', color: Colors.accentInfo, label: 'PROCESANDO' },
+  COMPLETED: { bg: 'rgba(111,168,138,0.14)', color: Colors.accentSuccess, label: 'COMPLETADO' },
+  REJECTED: { bg: 'rgba(196,104,104,0.14)', color: Colors.accentDanger, label: 'RECHAZADO' },
 };
 
 function userName(u: any) {
@@ -308,8 +308,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: 6,
     paddingHorizontal: 10, paddingVertical: 8,
     borderRadius: 8,
-    backgroundColor: 'rgba(56,199,147,0.1)',
-    borderWidth: 1, borderColor: 'rgba(56,199,147,0.3)',
+    backgroundColor: 'rgba(111,168,138,0.10)',
+    borderWidth: 1, borderColor: 'rgba(111,168,138,0.30)',
   },
   downloadText: { color: Colors.accentSuccess, fontSize: 11, fontWeight: '700', flex: 1 },
 
@@ -317,8 +317,8 @@ const styles = StyleSheet.create({
   rejectBtn: {
     flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
     height: 36, borderRadius: 10,
-    backgroundColor: 'rgba(228,88,88,0.1)',
-    borderWidth: 1, borderColor: 'rgba(228,88,88,0.3)',
+    backgroundColor: 'rgba(196,104,104,0.10)',
+    borderWidth: 1, borderColor: 'rgba(196,104,104,0.30)',
   },
   rejectLbl: { color: Colors.accentDanger, fontSize: 11, fontWeight: '700' },
   approveBtn: {

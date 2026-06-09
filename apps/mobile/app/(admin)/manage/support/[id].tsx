@@ -1,4 +1,15 @@
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, TextInput, KeyboardAvoidingView, Platform, Alert, Modal, ScrollView } from 'react-native';
+import {
+  View,
+  StyleSheet,
+  FlatList,
+  ActivityIndicator,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
+  Alert,
+  ScrollView,
+  Pressable,
+} from 'react-native';
 import { useCallback, useEffect, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -6,14 +17,26 @@ import { Feather } from '@expo/vector-icons';
 import { apiClient, adminApi, supportApi } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { useSafeBack } from '@/hooks/useSafeBack';
-import { Colors } from '@/constants/tokens';
+import { Colors, Radius, Spacing } from '@/constants/tokens';
+import {
+  Body,
+  Button,
+  Caption,
+  Kicker,
+  Sheet,
+  Subhead,
+} from '@/components/ui';
+import { AdminHeader, StatusPill } from '@/components/admin';
 
-const STATUS_META: Record<string, { bg: string; color: string; label: string }> = {
-  OPEN: { bg: 'rgba(244,163,64,0.15)', color: Colors.accentPrimary, label: 'ABIERTO' },
-  IN_REVIEW: { bg: 'rgba(96,165,250,0.15)', color: '#60A5FA', label: 'EN REVISIÓN' },
-  WAITING_USER: { bg: 'rgba(168,85,247,0.15)', color: '#A855F7', label: 'ESPERA USER' },
-  RESOLVED: { bg: 'rgba(56,199,147,0.15)', color: Colors.accentSuccess, label: 'RESUELTO' },
-  CLOSED: { bg: 'rgba(107,107,120,0.15)', color: Colors.textMuted, label: 'CERRADO' },
+const STATUS_TONE: Record<
+  string,
+  { tone: 'accent' | 'info' | 'success' | 'neutral'; label: string }
+> = {
+  OPEN: { tone: 'accent', label: 'ABIERTO' },
+  IN_REVIEW: { tone: 'info', label: 'EN REVISION' },
+  WAITING_USER: { tone: 'neutral', label: 'ESPERA USER' },
+  RESOLVED: { tone: 'success', label: 'RESUELTO' },
+  CLOSED: { tone: 'neutral', label: 'CERRADO' },
 };
 
 export default function SupportChatAdmin() {
@@ -40,7 +63,7 @@ export default function SupportChatAdmin() {
   }
 
   function insertTemplate(body: string) {
-    setText((prev) => prev ? `${prev}\n\n${body}` : body);
+    setText((prev) => (prev ? `${prev}\n\n${body}` : body));
     setShowTemplates(false);
   }
 
@@ -54,7 +77,9 @@ export default function SupportChatAdmin() {
       setTicket(list.find((t: any) => t.id === id) ?? null);
       const ms = mRes?.data?.data ?? [];
       setMessages(Array.isArray(ms) ? ms : []);
-    } finally { setLoading(false); }
+    } finally {
+      setLoading(false);
+    }
   }, [id]);
 
   useEffect(() => { load(); }, [load]);
@@ -70,280 +95,355 @@ export default function SupportChatAdmin() {
     } catch (err) {
       Alert.alert('Error', apiError(err));
       setText(body);
-    } finally { setSending(false); }
+    } finally {
+      setSending(false);
+    }
   }
 
   async function updateStatus(status: string) {
     try {
       await apiClient.patch(`/admin/support/tickets/${id}`, { status });
-      setTicket((t: any) => t ? { ...t, status } : t);
-    } catch (err) { Alert.alert('Error', apiError(err)); }
+      setTicket((t: any) => (t ? { ...t, status } : t));
+    } catch (err) {
+      Alert.alert('Error', apiError(err));
+    }
   }
 
-  if (loading) return <View style={styles.center}><ActivityIndicator color={Colors.accentPrimary} /></View>;
-  if (!ticket) return <View style={styles.center}><Text style={{ color: Colors.textMuted }}>Ticket no encontrado</Text></View>;
+  if (loading)
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator color={Colors.accentPrimary} />
+      </View>
+    );
+  if (!ticket)
+    return (
+      <View style={styles.center}>
+        <Caption tone="muted">Ticket no encontrado</Caption>
+      </View>
+    );
 
   const user = ticket.user;
-  const name = `${user?.profile?.firstName ?? ''} ${user?.profile?.lastName ?? ''}`.trim() || user?.email || 'Usuario';
-  const st = STATUS_META[ticket.status] ?? STATUS_META.OPEN;
+  const name =
+    `${user?.profile?.firstName ?? ''} ${user?.profile?.lastName ?? ''}`.trim() ||
+    user?.email ||
+    'Usuario';
+  const st = STATUS_TONE[ticket.status] ?? STATUS_TONE.OPEN;
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-        <View style={styles.header}>
-          <TouchableOpacity style={styles.iconBtn} onPress={goBack} hitSlop={10}>
-            <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
-          </TouchableOpacity>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.title} numberOfLines={1}>{ticket.subject}</Text>
-            <Text style={styles.subtitle} numberOfLines={1}>{name}</Text>
-          </View>
-          <View style={[styles.statusPill, { backgroundColor: st.bg }]}>
-            <Text style={[styles.statusText, { color: st.color }]}>{st.label}</Text>
-          </View>
-        </View>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        <AdminHeader
+          title={ticket.subject}
+          kicker={name}
+          onBack={goBack}
+          right={<StatusPill label={st.label} tone={st.tone} />}
+        />
 
         <View style={styles.actionsBar}>
-          <TouchableOpacity style={styles.actionChip} onPress={() => updateStatus('IN_REVIEW')}>
-            <Text style={styles.actionChipLbl}>En proceso</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.actionChip} onPress={() => updateStatus('WAITING_USER')}>
-            <Text style={styles.actionChipLbl}>Espera user</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.actionChip, styles.actionResolve]} onPress={() => updateStatus('RESOLVED')}>
-            <Text style={styles.actionResolveLbl}>Resolver</Text>
-          </TouchableOpacity>
+          <ActionChip label="En proceso" onPress={() => updateStatus('IN_REVIEW')} />
+          <ActionChip label="Espera user" onPress={() => updateStatus('WAITING_USER')} />
+          <ActionChip
+            label="Resolver"
+            onPress={() => updateStatus('RESOLVED')}
+            tone="success"
+          />
         </View>
 
         <FlatList
           data={messages}
           keyExtractor={(m) => m.id}
-          contentContainerStyle={{ padding: 16, gap: 10 }}
+          contentContainerStyle={{ padding: Spacing[4], gap: Spacing[2] }}
           renderItem={({ item }) => {
             const fromUser = item.userId === ticket.userId;
             return (
               <View style={[styles.bubbleRow, !fromUser && styles.bubbleRowStaff]}>
-                <View style={[styles.bubble, fromUser ? styles.bubbleUser : styles.bubbleStaff]}>
-                  <Text style={[styles.bubbleText, !fromUser && styles.bubbleTextStaff]}>
+                <View
+                  style={[
+                    styles.bubble,
+                    fromUser ? styles.bubbleUser : styles.bubbleStaff,
+                  ]}
+                >
+                  <Body size="sm" tone={fromUser ? 'primary' : 'inverse'}>
                     {item.content}
-                  </Text>
-                  <Text style={[styles.bubbleTime, !fromUser && styles.bubbleTimeStaff]}>
-                    {new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </Text>
+                  </Body>
+                  <Caption
+                    tone={fromUser ? 'muted' : 'inverse'}
+                    size="sm"
+                    style={{ marginTop: 4, opacity: fromUser ? 1 : 0.7 }}
+                  >
+                    {new Date(item.createdAt).toLocaleTimeString([], {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </Caption>
                 </View>
               </View>
             );
           }}
           ListHeaderComponent={
             <View style={styles.ticketBody}>
-              <Text style={styles.ticketDesc}>{ticket.description}</Text>
+              <Body size="sm">{ticket.description}</Body>
             </View>
           }
         />
 
         <View style={styles.composer}>
-          <TouchableOpacity style={styles.zapBtn} onPress={openTemplates} hitSlop={8}>
+          <Pressable
+            style={({ pressed }) => [styles.zapBtn, pressed && styles.pressed]}
+            onPress={openTemplates}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Plantillas"
+          >
             <Feather name="zap" size={18} color={Colors.accentPrimary} />
-          </TouchableOpacity>
+          </Pressable>
           <TextInput
             style={styles.input}
             value={text}
             onChangeText={setText}
-            placeholder="Escribe una respuesta…"
+            placeholder="Escribe una respuesta..."
             placeholderTextColor={Colors.textMuted}
             multiline
           />
-          <TouchableOpacity
-            style={[styles.sendBtn, (!text.trim() || sending) && { opacity: 0.4 }]}
+          <Pressable
+            style={({ pressed }) => [
+              styles.sendBtn,
+              (!text.trim() || sending) && styles.disabled,
+              pressed && styles.pressed,
+            ]}
             onPress={send}
             disabled={!text.trim() || sending}
+            accessibilityRole="button"
+            accessibilityLabel="Enviar"
           >
-            {sending
-              ? <ActivityIndicator color={Colors.textInverse} size="small" />
-              : <Feather name="send" size={18} color={Colors.textInverse} />}
-          </TouchableOpacity>
+            {sending ? (
+              <ActivityIndicator color={Colors.textInverse} size="small" />
+            ) : (
+              <Feather name="send" size={18} color={Colors.textInverse} />
+            )}
+          </Pressable>
         </View>
 
-        <Modal visible={showTemplates} transparent animationType="slide" onRequestClose={() => setShowTemplates(false)}>
-          <TouchableOpacity style={styles.tmplBackdrop} activeOpacity={1} onPress={() => setShowTemplates(false)}>
-            <TouchableOpacity activeOpacity={1} onPress={() => {}} style={styles.tmplSheet}>
-              <View style={styles.tmplHandle} />
-              <View style={styles.tmplHead}>
-                <View>
-                  <Text style={styles.tmplTitle}>Plantillas de respuesta</Text>
-                  <Text style={styles.tmplSub}>Toca para insertar en la respuesta</Text>
-                </View>
-                <TouchableOpacity
-                  style={styles.tmplEditBtn}
-                  onPress={() => { setShowTemplates(false); router.push('/(admin)/manage/support/templates' as never); }}
-                >
-                  <Feather name="edit-2" size={13} color={Colors.accentPrimary} />
-                  <Text style={styles.tmplEditLbl}>Administrar</Text>
-                </TouchableOpacity>
+        <Sheet
+          open={showTemplates}
+          onClose={() => setShowTemplates(false)}
+          title="Plantillas de respuesta"
+        >
+          <View style={{ gap: Spacing[3] }}>
+            <View style={styles.tmplHead}>
+              <Caption tone="muted">Toca para insertar en la respuesta</Caption>
+              <Pressable
+                style={({ pressed }) => [styles.tmplEditBtn, pressed && styles.pressed]}
+                onPress={() => {
+                  setShowTemplates(false);
+                  router.push('/(admin)/manage/support/templates' as never);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Administrar plantillas"
+              >
+                <Feather name="edit-2" size={12} color={Colors.accentPrimary} />
+                <Kicker tone="accent" style={{ fontSize: 10 }}>Administrar</Kicker>
+              </Pressable>
+            </View>
+            {loadingTemplates ? (
+              <ActivityIndicator color={Colors.accentPrimary} style={{ marginVertical: 40 }} />
+            ) : templates.length === 0 ? (
+              <View style={styles.tmplEmpty}>
+                <Feather name="zap" size={32} color={Colors.textMuted} />
+                <Caption tone="muted">Sin plantillas guardadas.</Caption>
+                <Button
+                  label="Crear primera plantilla"
+                  variant="primary"
+                  onPress={() => {
+                    setShowTemplates(false);
+                    router.push('/(admin)/manage/support/templates' as never);
+                  }}
+                  leftIcon={<Feather name="plus" size={14} color={Colors.textInverse} />}
+                />
               </View>
-              {loadingTemplates ? (
-                <ActivityIndicator color={Colors.accentPrimary} style={{ marginVertical: 40 }} />
-              ) : templates.length === 0 ? (
-                <View style={styles.tmplEmpty}>
-                  <Feather name="zap" size={36} color={Colors.textMuted} />
-                  <Text style={styles.tmplEmptyText}>Sin plantillas guardadas.</Text>
-                  <TouchableOpacity
-                    style={styles.tmplCreateBtn}
-                    onPress={() => { setShowTemplates(false); router.push('/(admin)/manage/support/templates' as never); }}
+            ) : (
+              <ScrollView
+                style={{ maxHeight: 400 }}
+                contentContainerStyle={{ gap: Spacing[2], paddingBottom: Spacing[5] }}
+              >
+                {templates.map((t) => (
+                  <Pressable
+                    key={t.id}
+                    style={({ pressed }) => [styles.tmplRow, pressed && styles.pressed]}
+                    onPress={() => insertTemplate(t.body)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Plantilla ${t.title}`}
                   >
-                    <Feather name="plus" size={14} color={Colors.textInverse} />
-                    <Text style={styles.tmplCreateLbl}>Crear primera plantilla</Text>
-                  </TouchableOpacity>
-                </View>
-              ) : (
-                <ScrollView style={{ maxHeight: 400 }} contentContainerStyle={{ gap: 8, paddingBottom: 20 }}>
-                  {templates.map((t) => (
-                    <TouchableOpacity
-                      key={t.id}
-                      style={styles.tmplRow}
-                      activeOpacity={0.85}
-                      onPress={() => insertTemplate(t.body)}
-                    >
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.tmplRowTitle}>{t.title}</Text>
-                        <Text style={styles.tmplRowBody} numberOfLines={2}>{t.body}</Text>
-                      </View>
-                      <Feather name="plus-circle" size={18} color={Colors.accentPrimary} />
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              )}
-            </TouchableOpacity>
-          </TouchableOpacity>
-        </Modal>
+                    <View style={{ flex: 1 }}>
+                      <Subhead>{t.title}</Subhead>
+                      <Caption tone="muted" numberOfLines={2} style={{ marginTop: 4 }}>
+                        {t.body}
+                      </Caption>
+                    </View>
+                    <Feather name="plus-circle" size={18} color={Colors.accentPrimary} />
+                  </Pressable>
+                ))}
+              </ScrollView>
+            )}
+          </View>
+        </Sheet>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
+function ActionChip({
+  label,
+  onPress,
+  tone,
+}: {
+  label: string;
+  onPress: () => void;
+  tone?: 'success';
+}) {
+  const isSuccess = tone === 'success';
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.actionChip,
+        isSuccess && styles.actionResolve,
+        pressed && styles.pressed,
+      ]}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+    >
+      <Caption
+        tone={isSuccess ? 'success' : 'secondary'}
+        size="sm"
+        style={{ fontWeight: '700' }}
+      >
+        {label}
+      </Caption>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
+  pressed: { opacity: 0.7 },
+  disabled: { opacity: 0.4 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
-  header: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    paddingHorizontal: 16, paddingTop: 8, paddingBottom: 8,
-    borderBottomWidth: 1, borderBottomColor: Colors.border,
-  },
-  iconBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: Colors.bgCard,
-    alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1, borderColor: Colors.border,
-  },
-  title: { color: Colors.textPrimary, fontSize: 15, fontWeight: '700' },
-  subtitle: { color: Colors.textMuted, fontSize: 12, marginTop: 2 },
-  statusPill: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10 },
-  statusText: { fontSize: 9, fontWeight: '800', letterSpacing: 0.5 },
-
   actionsBar: {
-    flexDirection: 'row', gap: 8,
-    paddingHorizontal: 16, paddingVertical: 10,
-    borderBottomWidth: 1, borderBottomColor: Colors.border,
+    flexDirection: 'row',
+    gap: Spacing[2],
+    paddingHorizontal: Spacing[4],
+    paddingVertical: Spacing[2],
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.border,
   },
   actionChip: {
-    paddingHorizontal: 12, paddingVertical: 6,
-    borderRadius: 16,
+    paddingHorizontal: Spacing[3],
+    paddingVertical: 6,
+    borderRadius: Radius.full,
     backgroundColor: Colors.bgCard,
-    borderWidth: 1, borderColor: Colors.border,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
   },
-  actionChipLbl: { color: Colors.textSecondary, fontSize: 11, fontWeight: '600' },
-  actionResolve: { backgroundColor: 'rgba(56,199,147,0.15)', borderColor: Colors.accentSuccess },
-  actionResolveLbl: { color: Colors.accentSuccess, fontSize: 11, fontWeight: '800' },
+  actionResolve: {
+    backgroundColor: 'rgba(111,168,138,0.14)',
+    borderColor: Colors.accentSuccess,
+  },
 
   ticketBody: {
     backgroundColor: Colors.bgCard,
-    borderRadius: 12,
-    padding: 14,
-    borderWidth: 1, borderColor: Colors.border,
+    borderRadius: Radius['2xl'],
+    paddingHorizontal: Spacing[4],
+    paddingVertical: Spacing[3],
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
     marginBottom: 6,
   },
-  ticketDesc: { color: Colors.textPrimary, fontSize: 13, lineHeight: 19 },
 
   bubbleRow: { flexDirection: 'row', justifyContent: 'flex-start' },
   bubbleRowStaff: { justifyContent: 'flex-end' },
   bubble: {
     maxWidth: '75%',
-    paddingHorizontal: 12, paddingVertical: 8,
-    borderRadius: 14,
+    paddingHorizontal: Spacing[3],
+    paddingVertical: Spacing[2],
+    borderRadius: Radius.xl,
   },
-  bubbleUser: { backgroundColor: Colors.bgCard, borderBottomLeftRadius: 4 },
-  bubbleStaff: { backgroundColor: Colors.accentPrimary, borderBottomRightRadius: 4 },
-  bubbleText: { color: Colors.textPrimary, fontSize: 13, lineHeight: 18 },
-  bubbleTextStaff: { color: Colors.textInverse },
-  bubbleTime: { color: Colors.textMuted, fontSize: 10, marginTop: 4 },
-  bubbleTimeStaff: { color: 'rgba(13,13,15,0.6)' },
+  bubbleUser: {
+    backgroundColor: Colors.bgCard,
+    borderBottomLeftRadius: Radius.sm,
+  },
+  bubbleStaff: {
+    backgroundColor: Colors.accentPrimary,
+    borderBottomRightRadius: Radius.sm,
+  },
 
   composer: {
-    flexDirection: 'row', gap: 8, alignItems: 'flex-end',
-    paddingHorizontal: 12, paddingVertical: 10,
-    borderTopWidth: 1, borderTopColor: Colors.border,
+    flexDirection: 'row',
+    gap: Spacing[2],
+    alignItems: 'flex-end',
+    paddingHorizontal: Spacing[3],
+    paddingVertical: Spacing[2],
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Colors.border,
   },
   input: {
-    flex: 1, minHeight: 42, maxHeight: 120,
-    paddingHorizontal: 14, paddingVertical: 10,
-    backgroundColor: Colors.bgCard, borderRadius: 22,
-    color: Colors.textPrimary, fontSize: 14,
+    flex: 1,
+    minHeight: 42,
+    maxHeight: 120,
+    paddingHorizontal: Spacing[4],
+    paddingVertical: Spacing[2],
+    backgroundColor: Colors.bgCard,
+    borderRadius: Radius.full,
+    color: Colors.textPrimary,
+    fontSize: 14,
   },
   sendBtn: {
-    width: 42, height: 42, borderRadius: 21,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     backgroundColor: Colors.accentPrimary,
-    alignItems: 'center', justifyContent: 'center',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   zapBtn: {
-    width: 42, height: 42, borderRadius: 21,
-    backgroundColor: 'rgba(244,163,64,0.15)',
-    borderWidth: 1, borderColor: 'rgba(244,163,64,0.3)',
-    alignItems: 'center', justifyContent: 'center',
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: 'rgba(201,169,97,0.14)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(201,169,97,0.30)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
-  tmplBackdrop: {
-    flex: 1, backgroundColor: 'rgba(0,0,0,0.6)',
-    justifyContent: 'flex-end',
+  // Sheet content
+  tmplHead: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
-  tmplSheet: {
-    backgroundColor: Colors.bgCard,
-    borderTopLeftRadius: 24, borderTopRightRadius: 24,
-    padding: 20, paddingBottom: 32,
-    gap: 10,
-    borderTopWidth: 1, borderColor: Colors.border,
-    alignItems: 'stretch',
-  },
-  tmplHandle: {
-    width: 40, height: 4, borderRadius: 2,
-    backgroundColor: '#2A2A32',
-    alignSelf: 'center',
-  },
-  tmplHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  tmplTitle: { color: Colors.textPrimary, fontSize: 17, fontWeight: '800' },
-  tmplSub: { color: Colors.textMuted, fontSize: 11, marginTop: 2 },
   tmplEditBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    paddingHorizontal: 10, paddingVertical: 6,
-    borderRadius: 8,
-    backgroundColor: 'rgba(244,163,64,0.12)',
-    borderWidth: 1, borderColor: 'rgba(244,163,64,0.3)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: Spacing[2],
+    paddingVertical: 6,
+    borderRadius: Radius.lg,
+    backgroundColor: 'rgba(201,169,97,0.10)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(201,169,97,0.30)',
   },
-  tmplEditLbl: { color: Colors.accentPrimary, fontSize: 11, fontWeight: '700' },
-  tmplEmpty: { alignItems: 'center', padding: 30, gap: 10 },
-  tmplEmptyText: { color: Colors.textMuted, fontSize: 13 },
-  tmplCreateBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    paddingHorizontal: 14, paddingVertical: 10,
-    backgroundColor: Colors.accentPrimary,
-    borderRadius: 10,
-  },
-  tmplCreateLbl: { color: Colors.textInverse, fontSize: 13, fontWeight: '800' },
+  tmplEmpty: { alignItems: 'center', padding: Spacing[6], gap: Spacing[2] },
   tmplRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing[2],
     backgroundColor: Colors.bgElevated,
-    borderRadius: 10, padding: 12,
+    borderRadius: Radius.lg,
+    padding: Spacing[3],
   },
-  tmplRowTitle: { color: Colors.textPrimary, fontSize: 13, fontWeight: '700' },
-  tmplRowBody: { color: Colors.textMuted, fontSize: 11, lineHeight: 15, marginTop: 4 },
 });

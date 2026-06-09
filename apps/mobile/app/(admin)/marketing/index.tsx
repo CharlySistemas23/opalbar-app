@@ -1,11 +1,10 @@
 import {
   View,
-  Text,
   StyleSheet,
   ScrollView,
-  TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
+  Pressable,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -13,7 +12,9 @@ import { Feather } from '@expo/vector-icons';
 import { useEffect, useState, useCallback } from 'react';
 import { adminApi } from '@/api/client';
 import { apiError } from '@/api/errors';
-import { Colors, Radius } from '@/constants/tokens';
+import { Colors, Radius, Spacing } from '@/constants/tokens';
+import { Body, Button, Caption, Kicker, Numeric, Subhead } from '@/components/ui';
+import { AdminHeader, StatusPill } from '@/components/admin';
 
 type Campaign = {
   id: string;
@@ -31,20 +32,23 @@ type Campaign = {
   createdAt: string;
 };
 
-const STATUS_META: Record<Campaign['status'], { label: string; color: string; bg: string }> = {
-  DRAFT:     { label: 'Borrador',   color: Colors.textSecondary, bg: 'rgba(180,180,187,0.12)' },
-  SCHEDULED: { label: 'Programada', color: Colors.accentInfo,    bg: 'rgba(96,165,250,0.14)' },
-  SENDING:   { label: 'Enviando',   color: Colors.accentWarning, bg: 'rgba(244,163,64,0.14)' },
-  SENT:      { label: 'Enviada',    color: Colors.accentSuccess, bg: 'rgba(56,199,147,0.14)' },
-  FAILED:    { label: 'Fallida',    color: Colors.accentDanger,  bg: 'rgba(228,88,88,0.14)' },
-  CANCELLED: { label: 'Cancelada',  color: Colors.textMuted,     bg: 'rgba(107,107,120,0.14)' },
+const STATUS_TONE: Record<
+  Campaign['status'],
+  { tone: 'neutral' | 'info' | 'accent' | 'success' | 'danger'; label: string }
+> = {
+  DRAFT: { tone: 'neutral', label: 'BORRADOR' },
+  SCHEDULED: { tone: 'info', label: 'PROGRAMADA' },
+  SENDING: { tone: 'accent', label: 'ENVIANDO' },
+  SENT: { tone: 'success', label: 'ENVIADA' },
+  FAILED: { tone: 'danger', label: 'FALLIDA' },
+  CANCELLED: { tone: 'neutral', label: 'CANCELADA' },
 };
 
 const AUDIENCE_LABEL: Record<string, string> = {
   ALL: 'Todos',
   NEW_7D: 'Nuevos (7d)',
   VIP: 'VIP',
-  BIRTHDAY_MONTH: 'Cumpleañeros',
+  BIRTHDAY_MONTH: 'Cumpleaneros',
   INACTIVE_30D: 'Inactivos (30d)',
   CUSTOM: 'Segmento',
 };
@@ -62,7 +66,7 @@ export default function MarketingList() {
       setItems(res.data?.data ?? res.data ?? []);
       setError('');
     } catch (err: any) {
-      setError(apiError(err, 'No pudimos cargar las campañas'));
+      setError(apiError(err, 'No pudimos cargar las campanas'));
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -78,23 +82,22 @@ export default function MarketingList() {
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.iconBtn} hitSlop={10}>
-          <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
-        </TouchableOpacity>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.hint}>Email marketing</Text>
-          <Text style={styles.title}>Campañas</Text>
-        </View>
-        <TouchableOpacity
-          onPress={() => router.push('/(admin)/marketing/new' as never)}
-          style={styles.newBtn}
-          activeOpacity={0.85}
-        >
-          <Feather name="plus" size={16} color={Colors.textInverse} />
-          <Text style={styles.newBtnLabel}>Nueva</Text>
-        </TouchableOpacity>
-      </View>
+      <AdminHeader
+        title="Campanas"
+        kicker="Email marketing"
+        onBack={() => router.back()}
+        right={
+          <Pressable
+            onPress={() => router.push('/(admin)/marketing/new' as never)}
+            accessibilityRole="button"
+            accessibilityLabel="Nueva campana"
+            style={({ pressed }) => [styles.newBtn, pressed && styles.pressed]}
+          >
+            <Feather name="plus" size={14} color={Colors.textInverse} />
+            <Caption tone="inverse" style={{ fontWeight: '700' }}>Nueva</Caption>
+          </Pressable>
+        }
+      />
 
       {loading ? (
         <View style={styles.center}>
@@ -102,53 +105,58 @@ export default function MarketingList() {
         </View>
       ) : (
         <ScrollView
-          contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 140 }}
+          contentContainerStyle={{ paddingHorizontal: Spacing[5], paddingBottom: 140 }}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.accentPrimary} />
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor={Colors.accentPrimary}
+            />
           }
           showsVerticalScrollIndicator={false}
         >
-          {error ? <Text style={styles.errorText}>{error}</Text> : null}
+          {error ? (
+            <Caption tone="danger" style={{ marginBottom: Spacing[3], paddingHorizontal: 4 }}>
+              {error}
+            </Caption>
+          ) : null}
 
           {items.length === 0 ? (
             <View style={styles.empty}>
-              <Feather name="mail" size={36} color={Colors.textMuted} />
-              <Text style={styles.emptyTitle}>Aún no hay campañas</Text>
-              <Text style={styles.emptySub}>
-                Crea tu primer envío masivo — elige plantilla, audiencia y envía.
-              </Text>
-              <TouchableOpacity
-                style={styles.emptyBtn}
-                onPress={() => router.push('/(admin)/marketing/new' as never)}
-                activeOpacity={0.85}
-              >
-                <Feather name="plus" size={16} color={Colors.textInverse} />
-                <Text style={styles.emptyBtnLabel}>Crear campaña</Text>
-              </TouchableOpacity>
+              <Feather name="mail" size={32} color={Colors.textMuted} />
+              <Subhead style={{ marginTop: Spacing[2] }}>Aun no hay campanas</Subhead>
+              <Caption tone="secondary" align="center" style={{ paddingHorizontal: 24 }}>
+                Crea tu primer envio masivo — elige plantilla, audiencia y envia.
+              </Caption>
+              <View style={{ width: '60%', marginTop: Spacing[2] }}>
+                <Button
+                  label="Crear campana"
+                  variant="primary"
+                  onPress={() => router.push('/(admin)/marketing/new' as never)}
+                  leftIcon={<Feather name="plus" size={14} color={Colors.textInverse} />}
+                />
+              </View>
             </View>
           ) : (
             items.map((c) => {
-              const meta = STATUS_META[c.status];
-              const openRate = c.sentCount > 0
-                ? Math.round((c.openCount / c.sentCount) * 100)
-                : 0;
+              const meta = STATUS_TONE[c.status];
+              const openRate = c.sentCount > 0 ? Math.round((c.openCount / c.sentCount) * 100) : 0;
               return (
-                <TouchableOpacity
+                <Pressable
                   key={c.id}
-                  style={styles.card}
+                  style={({ pressed }) => [styles.card, pressed && styles.pressed]}
                   onPress={() => router.push(`/(admin)/marketing/${c.id}` as never)}
-                  activeOpacity={0.85}
+                  accessibilityRole="button"
+                  accessibilityLabel={c.subject}
                 >
                   <View style={styles.cardHead}>
-                    <View style={[styles.statusPill, { backgroundColor: meta.bg }]}>
-                      <Text style={[styles.statusPillText, { color: meta.color }]}>{meta.label}</Text>
-                    </View>
-                    <Text style={styles.audienceHint}>
+                    <StatusPill label={meta.label} tone={meta.tone} />
+                    <Caption tone="muted" style={{ fontWeight: '600' }}>
                       {AUDIENCE_LABEL[c.audienceType] || c.audienceType}
-                    </Text>
+                    </Caption>
                   </View>
 
-                  <Text style={styles.subject} numberOfLines={2}>{c.subject}</Text>
+                  <Subhead numberOfLines={2}>{c.subject}</Subhead>
 
                   <View style={styles.statsRow}>
                     <Stat label="Enviados" value={`${c.sentCount}/${c.recipientCount}`} />
@@ -158,26 +166,27 @@ export default function MarketingList() {
                     <Stat label="Bajas" value={String(c.unsubCount)} />
                   </View>
 
-                  {c.scheduledAt && c.status === 'SCHEDULED' ? (
-                    <Text style={styles.footer}>
-                      Programada · {new Date(c.scheduledAt).toLocaleString('es-MX', {
-                        day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
-                      })}
-                    </Text>
-                  ) : c.sentAt ? (
-                    <Text style={styles.footer}>
-                      Enviada · {new Date(c.sentAt).toLocaleString('es-MX', {
-                        day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
-                      })}
-                    </Text>
-                  ) : (
-                    <Text style={styles.footer}>
-                      Creada · {new Date(c.createdAt).toLocaleString('es-MX', {
-                        day: '2-digit', month: 'short',
-                      })}
-                    </Text>
-                  )}
-                </TouchableOpacity>
+                  <Caption tone="muted" size="sm">
+                    {c.scheduledAt && c.status === 'SCHEDULED'
+                      ? `Programada · ${new Date(c.scheduledAt).toLocaleString('es-MX', {
+                          day: '2-digit',
+                          month: 'short',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}`
+                      : c.sentAt
+                        ? `Enviada · ${new Date(c.sentAt).toLocaleString('es-MX', {
+                            day: '2-digit',
+                            month: 'short',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}`
+                        : `Creada · ${new Date(c.createdAt).toLocaleString('es-MX', {
+                            day: '2-digit',
+                            month: 'short',
+                          })}`}
+                  </Caption>
+                </Pressable>
               );
             })
           )}
@@ -190,94 +199,58 @@ export default function MarketingList() {
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <View style={{ flex: 1, alignItems: 'center' }}>
-      <Text style={styles.statValue}>{value}</Text>
-      <Text style={styles.statLabel}>{label}</Text>
+      <Body weight="bold" size="sm">{value}</Body>
+      <Caption tone="muted" size="sm" style={{ marginTop: 2 }}>
+        {label}
+      </Caption>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
+  pressed: { opacity: 0.7 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
-  header: {
+  newBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 18,
-    gap: 12,
-  },
-  iconBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: Colors.bgCard,
-    borderWidth: 1, borderColor: Colors.border,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  hint: {
-    color: Colors.textMuted, fontSize: 11, fontWeight: '600',
-    letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 2,
-  },
-  title: { color: Colors.textPrimary, fontSize: 22, fontWeight: '800' },
-  newBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    height: 36, paddingHorizontal: 14,
-    backgroundColor: Colors.accentPrimary, borderRadius: 18,
-  },
-  newBtnLabel: { color: Colors.textInverse, fontWeight: '700', fontSize: 13 },
-
-  errorText: {
-    color: Colors.accentDanger, fontSize: 13,
-    marginBottom: 12, paddingHorizontal: 4,
+    gap: 6,
+    height: 32,
+    paddingHorizontal: Spacing[3],
+    backgroundColor: Colors.accentPrimary,
+    borderRadius: Radius.full,
   },
 
   card: {
     backgroundColor: Colors.bgCard,
-    borderRadius: Radius.card,
+    borderRadius: Radius['2xl'],
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: Colors.border,
-    padding: 16,
-    marginBottom: 12,
-    gap: 12,
+    paddingHorizontal: Spacing[4],
+    paddingVertical: Spacing[3],
+    marginBottom: Spacing[2],
+    gap: Spacing[2],
   },
   cardHead: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  statusPill: {
-    paddingHorizontal: 10, paddingVertical: 4,
-    borderRadius: 999,
-  },
-  statusPillText: { fontSize: 10, fontWeight: '800', letterSpacing: 0.5, textTransform: 'uppercase' },
-  audienceHint: { color: Colors.textMuted, fontSize: 11, fontWeight: '600' },
-
-  subject: { color: Colors.textPrimary, fontSize: 15, fontWeight: '700', lineHeight: 20 },
 
   statsRow: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: Colors.bgElevated,
-    borderRadius: 12,
-    paddingVertical: 10,
+    borderRadius: Radius.lg,
+    paddingVertical: Spacing[2],
   },
   statsDivider: { width: StyleSheet.hairlineWidth, height: 24, backgroundColor: Colors.border },
-  statValue: { color: Colors.textPrimary, fontSize: 14, fontWeight: '800' },
-  statLabel: { color: Colors.textMuted, fontSize: 10, fontWeight: '600', marginTop: 2 },
-
-  footer: { color: Colors.textMuted, fontSize: 11 },
 
   empty: {
-    marginTop: 60, alignItems: 'center', gap: 10,
-    paddingHorizontal: 24,
+    marginTop: 60,
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: Spacing[5],
   },
-  emptyTitle: { color: Colors.textPrimary, fontSize: 17, fontWeight: '800', marginTop: 10 },
-  emptySub: { color: Colors.textSecondary, fontSize: 13, textAlign: 'center', lineHeight: 19 },
-  emptyBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    height: 44, paddingHorizontal: 18,
-    backgroundColor: Colors.accentPrimary, borderRadius: 22,
-    marginTop: 8,
-  },
-  emptyBtnLabel: { color: Colors.textInverse, fontWeight: '800', fontSize: 14 },
 });
