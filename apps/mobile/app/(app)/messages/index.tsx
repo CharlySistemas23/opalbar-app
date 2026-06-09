@@ -206,7 +206,7 @@ export default function MessagesList() {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={() => { playUiSound('swoosh'); setRefreshing(true); load(); }}
-              tintColor={Colors.textMuted}
+              tintColor={Colors.accentPrimary}
             />
           }
           contentContainerStyle={styles.listContent}

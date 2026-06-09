@@ -22,6 +22,7 @@ import { Feather } from '@expo/vector-icons';
 import { eventsApi } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { useAppStore } from '@/stores/app.store';
+import { playUiSound } from '@/hooks/useFeedback';
 import { Colors, EditorialSpacing, Radius, Spacing } from '@/constants/tokens';
 import { HitSlop, Roles } from '@/constants/a11y';
 import {
@@ -154,10 +155,11 @@ export default function Events() {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={() => {
+                playUiSound('swoosh');
                 setRefreshing(true);
                 load('fresh');
               }}
-              tintColor={Colors.textMuted}
+              tintColor={Colors.accentPrimary}
             />
           }
           renderItem={({ item, index }) =>

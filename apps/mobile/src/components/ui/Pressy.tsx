@@ -81,11 +81,11 @@ export function Pressy({
   const animateTo = (to: number) => {
     Animated.spring(scale, {
       toValue: to,
-      // Match Springs.press (damping 22, stiffness 280) in feel — RN Animated
-      // doesn't speak the same params so we tune to the same perceptual rest.
-      tension: 240,
-      friction: 12,
-      overshootClamping: true,
+      // Bouncier spring (FB/TikTok feel) — slightly loose, lets the press
+      // overshoot just a touch on release for a "gummy" feel.
+      tension: 200,
+      friction: 8,
+      overshootClamping: false,
       useNativeDriver: true,
     }).start();
   };

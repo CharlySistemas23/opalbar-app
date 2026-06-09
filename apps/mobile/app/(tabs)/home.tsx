@@ -148,7 +148,7 @@ export default function Home() {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={() => { playUiSound('swoosh'); setRefreshing(true); load(); }}
-            tintColor={Colors.textMuted}
+            tintColor={Colors.accentPrimary}
           />
         }
       >
@@ -346,16 +346,21 @@ const styles = StyleSheet.create({
 
   // Tonight card
   tonightCard: {
-    borderRadius: Radius.md,
+    borderRadius: Radius.lg,
     overflow: 'hidden',
   },
   tonightImage: {
     height: 180,
     backgroundColor: Colors.bgElevated,
-    borderRadius: Radius.md,
+    borderRadius: Radius.lg,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.32,
+    shadowRadius: 14,
+    elevation: 4,
   },
   tonightText: {
     paddingTop: 12,
@@ -368,9 +373,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 14,
     backgroundColor: Colors.bgCard,
-    borderRadius: Radius.md,
+    borderRadius: Radius.lg,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(246,241,231,0.06)',
   },

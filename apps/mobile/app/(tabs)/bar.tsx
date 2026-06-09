@@ -198,7 +198,7 @@ export default function BarTab() {
               setRefreshing(true);
               load();
             }}
-            tintColor={Colors.textMuted}
+            tintColor={Colors.accentPrimary}
           />
         }
       >

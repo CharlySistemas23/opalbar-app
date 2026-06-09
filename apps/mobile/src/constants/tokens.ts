@@ -318,45 +318,46 @@ export const EditorialSpacing = {
 } as const;
 
 // ── Border Radius ────────────────────────────
-// NOIR ABSOLUTE: sharp geometry. NO rounded-everything. The "premium"
-// reads from confident corners + dense composition, not from blob shapes.
+// Updated 2026-06-09: shifted from NOIR sharp (3-4) to softer modern social
+// feel (12-20). Keeps editorial restraint via paleta + typography, but
+// reads as fluid/touchable like FB / TikTok / Apple cards.
 export const Radius = {
-  xs: 0,
-  sm: 2,
-  md: 3,
-  lg: 4,
-  button: 4,
-  card: 4,
-  xl: 6,
-  '2xl': 8,
+  xs: 4,
+  sm: 8,
+  md: 12,
+  lg: 16,
+  button: 12,
+  card: 14,
+  xl: 18,
+  '2xl': 22,
   full: 9999,
 } as const;
 
 // ── Shadows / Elevation ──────────────────────
 //
-// Editorial: shadows are nearly invisible. Depth comes from the highlightTop
-// border + 1px hairline borders. Keep shadows as a *whisper*.
+// Soft depth for cards/sheets — visible enough to read as elevated,
+// subtle enough to stay editorial. Matches modern social app feel.
 export const Shadows = {
   sm: {
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.18,
-    shadowRadius: 2,
-    elevation: 1,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.24,
+    shadowRadius: 6,
+    elevation: 2,
   },
   md: {
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.22,
-    shadowRadius: 8,
-    elevation: 4,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.32,
+    shadowRadius: 14,
+    elevation: 6,
   },
   lg: {
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.30,
-    shadowRadius: 18,
-    elevation: 10,
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.40,
+    shadowRadius: 24,
+    elevation: 14,
   },
   card: {
     shadowColor: '#000',

@@ -28,6 +28,7 @@ import {
 } from '@/components/ui';
 import { Colors, EditorialSpacing, Radius, Spacing } from '@/constants/tokens';
 import { HitSlop, Roles } from '@/constants/a11y';
+import { playUiSound } from '@/hooks/useFeedback';
 import { offersApi } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { useAuthStore } from '@/stores/auth.store';
@@ -105,7 +106,7 @@ export default function OffersList() {
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            onRefresh={() => { setRefreshing(true); load(); }}
+            onRefresh={() => { playUiSound('swoosh'); setRefreshing(true); load(); }}
             tintColor={Colors.accentPrimary}
           />
         }

@@ -86,7 +86,7 @@ export const Springs = {
 
 // ── Press feedback ───────────────────────────
 export const Press = {
-  scale: 0.97,      // <Pressy> default
+  scale: 0.94,      // <Pressy> default — bouncier (FB/TikTok feel)
   opacity: 0.85,    // alt fallback when scale isn't appropriate
   hapticOnPress: 'selection' as const, // Expo Haptics ImpactFeedbackStyle
 } as const;

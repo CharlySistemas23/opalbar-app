@@ -479,7 +479,7 @@ export default function Community() {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onRefresh}
-              tintColor={Colors.textMuted}
+              tintColor={Colors.accentPrimary}
             />
           }
           onEndReachedThreshold={0.5}
