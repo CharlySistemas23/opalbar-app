@@ -30,6 +30,7 @@ import { Feather } from '@expo/vector-icons';
 
 import { Colors, EditorialSpacing, Radius, Spacing, TypePresets } from '@/constants/tokens';
 import { HitSlop, Roles } from '@/constants/a11y';
+import { playUiSound } from '@/hooks/useFeedback';
 import { eventsApi, offersApi } from '@/api/client';
 import { useAppStore } from '@/stores/app.store';
 import { useAuthStore } from '@/stores/auth.store';
@@ -146,7 +147,7 @@ export default function Home() {
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            onRefresh={() => { setRefreshing(true); load(); }}
+            onRefresh={() => { playUiSound('swoosh'); setRefreshing(true); load(); }}
             tintColor={Colors.textMuted}
           />
         }
@@ -194,7 +195,7 @@ export default function Home() {
         ) : (
           <>
             {/* ── 3. ESTA NOCHE EN OPALBAR ── */}
-            <View style={[styles.section, { paddingTop: 32 }]}>
+            <View style={[styles.section, { paddingTop: 20 }]}>
               <FadeIn delay={140}>
                 <Text style={[TypePresets.kicker, { color: Colors.textMuted }]}>
                   {t ? 'ESTA NOCHE EN OPALBAR' : 'TONIGHT AT OPALBAR'}
@@ -252,7 +253,7 @@ export default function Home() {
             </View>
 
             {/* ── 4. TUS PRIVILEGIOS ── */}
-            <View style={[styles.section, { paddingTop: 24 }]}>
+            <View style={[styles.section, { paddingTop: 16 }]}>
               <FadeIn delay={220}>
                 <Text style={[TypePresets.kicker, { color: Colors.textMuted }]}>
                   {t ? 'TUS PRIVILEGIOS' : 'YOUR PRIVILEGES'}
@@ -300,7 +301,7 @@ export default function Home() {
         )}
 
         {/* Spacer for tab bar */}
-        <View style={{ height: 80 }} />
+        <View style={{ height: 40 }} />
       </ScrollView>
     </SafeAreaView>
   );
@@ -315,7 +316,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 24,
-    paddingVertical: 12,
+    paddingTop: 8,
+    paddingBottom: 8,
   },
   greetText: {
     gap: 2,
@@ -329,17 +331,17 @@ const styles = StyleSheet.create({
 
   cardWrap: {
     paddingHorizontal: 24,
-    paddingVertical: 8,
+    paddingVertical: 4,
   },
 
   section: {
     paddingHorizontal: 24,
-    gap: 12,
+    gap: 10,
   },
   hairline: {
     height: StyleSheet.hairlineWidth,
     backgroundColor: 'rgba(246,241,231,0.06)',
-    marginTop: 12,
+    marginTop: 8,
   },
 
   // Tonight card

@@ -183,7 +183,7 @@ export default function Profile() {
 
         {/* ── Stats (bookings + redemptions) ── */}
         <FadeIn delay={140}>
-          <Hairline variant="subtle" style={{ marginTop: Spacing[6] }} />
+          <Hairline variant="subtle" style={{ marginTop: Spacing[4] }} />
           <View style={styles.stats}>
             <StatCell value={String(bookings)} label={t ? 'RESERVAS' : 'BOOKINGS'} />
             <View style={styles.statsDivider} />
@@ -412,8 +412,8 @@ const styles = StyleSheet.create({
 
   profileHeader: {
     paddingHorizontal: EditorialSpacing.pageGutter,
-    paddingTop: Spacing[2],
-    paddingBottom: Spacing[4],
+    paddingTop: Spacing[1],
+    paddingBottom: Spacing[3],
   },
   cardWrap: {
     paddingHorizontal: EditorialSpacing.pageGutter,
@@ -421,7 +421,7 @@ const styles = StyleSheet.create({
 
   stats: {
     flexDirection: 'row',
-    paddingVertical: Spacing[5],
+    paddingVertical: Spacing[4],
     paddingHorizontal: EditorialSpacing.pageGutter,
   },
   statCell: {
@@ -436,7 +436,7 @@ const styles = StyleSheet.create({
 
   wallBlock: {
     paddingHorizontal: EditorialSpacing.pageGutter,
-    marginTop: Spacing[8],
+    marginTop: Spacing[5],
   },
   wallTiles: {
     flexDirection: 'row',
@@ -461,7 +461,7 @@ const styles = StyleSheet.create({
 
   menuSection: {
     paddingHorizontal: EditorialSpacing.pageGutter,
-    marginTop: Spacing[8],
+    marginTop: Spacing[5],
   },
   listShell: {
     backgroundColor: Colors.bgCard,
@@ -474,7 +474,7 @@ const styles = StyleSheet.create({
 
   dangerZone: {
     paddingHorizontal: EditorialSpacing.pageGutter,
-    marginTop: Spacing[10],
+    marginTop: Spacing[6],
     gap: Spacing[3],
   },
   deleteLink: {
