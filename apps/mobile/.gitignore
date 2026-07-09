@@ -7,3 +7,4 @@ expo-env.d.ts
 
 # EAS Submit — Google Service Account credentials (no commitear)
 google-service-account.json
+credentials.json

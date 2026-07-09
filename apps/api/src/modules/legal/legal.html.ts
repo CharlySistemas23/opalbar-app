@@ -155,9 +155,10 @@ export const PRIVACY_POLICY_HTML = shell(
   <p>No vendemos tus datos. Compartimos solo cuando es necesario:</p>
   <ul>
     <li><strong>Otros usuarios de la app:</strong> tu nombre, foto y publicaciones públicas. No exponemos tu email ni teléfono.</li>
-    <li><strong>Proveedores de infraestructura:</strong> Railway (base de datos y servidor), Cloudinary (almacenamiento de imágenes), Twilio (verificación SMS opcional), servicios de notificación push de Google y Apple.</li>
+    <li><strong>Proveedores de infraestructura:</strong> Railway (base de datos y servidor), Cloudinary (almacenamiento de imágenes), Twilio (verificación SMS opcional), Resend (correo transaccional), Expo y los servicios de notificación push de Google (FCM) y Apple (APNs). Cada proveedor procesa datos solo para prestar su servicio.</li>
     <li><strong>Autoridades:</strong> solo si hay una orden judicial válida o requerimiento legal.</li>
   </ul>
+  <p><strong>No usamos tus datos para publicidad de terceros ni para rastreo (tracking) entre apps o sitios web.</strong> No compartimos tus datos con brokers de datos ni redes publicitarias. Los datos se usan únicamente para operar la app (autenticación, reservas, comunidad, notificaciones), para análisis interno del producto y para comunicaciones propias del servicio.</p>
 
   <h2>4. Tus derechos (GDPR-compatible)</h2>
   <p>Tenés derecho a:</p>
