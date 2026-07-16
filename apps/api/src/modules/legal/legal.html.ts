@@ -287,6 +287,7 @@ export const TERMS_OF_SERVICE_HTML = shell(
   </ul>
 
   <h2>4. Normas de la comunidad</h2>
+  <p><strong>OPALBAR aplica una política de TOLERANCIA CERO frente al contenido objetable y los usuarios abusivos.</strong> El contenido objetable y el comportamiento abusivo no están permitidos. El contenido reportado se revisa y se retira, y las cuentas infractoras se suspenden o eliminan, dentro de las 24 horas siguientes. Al usar la app aceptas estas normas.</p>
   <p>Está <strong>prohibido</strong>:</p>
   <ul>
     <li>Publicar contenido ilegal, ofensivo, discriminatorio o violento.</li>
