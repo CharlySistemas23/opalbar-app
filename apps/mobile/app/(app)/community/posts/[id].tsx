@@ -995,7 +995,7 @@ export default function PostDetail() {
           title={t ? 'Reportar post' : 'Report post'}
           onSubmit={async (reason, details) => {
             try {
-              await communityApi.reportPost(id!, { reason, details });
+              await communityApi.reportPost(id!, { reason, description: details });
               toast(t ? 'Gracias. Revisaremos el reporte.' : 'Thanks. We will review.', 'success');
             } catch (err) {
               toast(apiError(err, t ? 'No se pudo enviar el reporte.' : 'Report failed.'), 'danger');

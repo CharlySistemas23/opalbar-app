@@ -3,13 +3,22 @@ import { useEffect, useState } from 'react';
 import { Feather } from '@expo/vector-icons';
 import { Colors } from '@/constants/tokens';
 
-export type ReportReason = 'SPAM' | 'INAPPROPRIATE' | 'HARASSMENT' | 'FAKE' | 'OTHER';
+// Debe coincidir EXACTO con el enum ReportReason del backend (Prisma):
+// SPAM | HATE_SPEECH | VIOLENCE | MISINFORMATION | INAPPROPRIATE | COPYRIGHT | OTHER
+export type ReportReason =
+  | 'SPAM'
+  | 'INAPPROPRIATE'
+  | 'HATE_SPEECH'
+  | 'VIOLENCE'
+  | 'MISINFORMATION'
+  | 'OTHER';
 
 const REASONS: { key: ReportReason; label: string; sub: string }[] = [
   { key: 'SPAM', label: 'Spam', sub: 'Publicidad no deseada o repetitiva' },
-  { key: 'INAPPROPRIATE', label: 'Contenido inapropiado', sub: 'Violencia, desnudos o ilegal' },
-  { key: 'HARASSMENT', label: 'Acoso', sub: 'Insultos, amenazas, bullying' },
-  { key: 'FAKE', label: 'Información falsa', sub: 'Estafa o contenido engañoso' },
+  { key: 'INAPPROPRIATE', label: 'Contenido inapropiado', sub: 'Desnudos o contenido ilegal' },
+  { key: 'HATE_SPEECH', label: 'Acoso u odio', sub: 'Insultos, amenazas, discriminación' },
+  { key: 'VIOLENCE', label: 'Violencia', sub: 'Contenido violento o peligroso' },
+  { key: 'MISINFORMATION', label: 'Información falsa', sub: 'Estafa o contenido engañoso' },
   { key: 'OTHER', label: 'Otro', sub: 'Descríbelo abajo' },
 ];
 

@@ -205,11 +205,14 @@ export class CommunityService {
   }
 
   async createPost(userId: string, dto: CreatePostDto) {
-    // Manual moderation mode: every post enters the admin queue before publishing.
-    // This matches the owner's workflow ("todo lo reviso manual antes de publicar").
-    // When an ML filter is wired later, change this back to score-based.
+    // Post-moderation: los posts se publican de inmediato (sin esperar aprobación).
+    // El filtro automático solo RETIENE para revisión manual el contenido
+    // potencialmente objetable (score alto). El admin puede verificar, ocultar o
+    // eliminar cualquier post después desde el panel. Esto cumple la 1.2 de Apple
+    // (filtro de contenido objetable + moderación) sin bloquear la experiencia.
     const moderationScore = this.basicModerationCheck(dto.content);
-    const status = PostStatus.PENDING_REVIEW;
+    const status =
+      moderationScore >= 0.5 ? PostStatus.PENDING_REVIEW : PostStatus.PUBLISHED;
 
     const isWallPost = dto.surface === PostSurface.WALL;
 
@@ -1156,11 +1159,23 @@ export class CommunityService {
   // ── HELPERS ───────────────────────────────
 
   private basicModerationCheck(content: string): number {
-    // Placeholder — returns 0 (safe) by default
-    // In production: integrate OpenAI Moderation API or similar
-    const blockedWords = ['spam', 'offensive'];
+    // Primera línea de moderación automática. Lo que caiga aquí se RETIENE para
+    // revisión manual (PENDING_REVIEW); el resto se publica directo.
+    // TODO: reemplazar por OpenAI Moderation API para score real (ML).
+    const blocked = [
+      // odio / discriminación / acoso (es + en)
+      'maricon', 'marica', 'joto', 'puto', 'puta', 'pendejo', 'faggot', 'nigger',
+      'retrasado', 'discapacitado de mierda',
+      // violencia / amenazas
+      'te voy a matar', 'matarte', 'violar', 'violarte', 'kill you', 'rape',
+      'terrorismo', 'bomba',
+      // ilegal / drogas / menores
+      'vendo droga', 'cocaina', 'child porn', 'pornografia infantil', 'sexo con menores',
+      // spam
+      'spam', 'offensive',
+    ];
     const lower = content.toLowerCase();
-    const hasBlocked = blockedWords.some((w) => lower.includes(w));
-    return hasBlocked ? 0.8 : 0.1;
+    const hit = blocked.some((w) => lower.includes(w));
+    return hit ? 0.9 : 0.1;
   }
 }
