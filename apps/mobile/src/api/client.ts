@@ -234,6 +234,8 @@ export const friendshipsApi = {
   decline: (friendshipId: string) => apiClient.post(`/friendships/${friendshipId}/decline`),
   cancel: (userId: string) => apiClient.delete(`/friendships/request/${userId}`),
   remove: (userId: string) => apiClient.delete(`/friendships/${userId}`),
+  block: (userId: string) => apiClient.post(`/friendships/${userId}/block`),
+  unblock: (userId: string) => apiClient.delete(`/friendships/${userId}/block`),
   updatePolicy: (policy: FriendPolicy) =>
     apiClient.patch('/friendships/me/policy', { policy }),
 };
@@ -327,6 +329,7 @@ export const communityApi = {
   // sending the same type twice is how we "remove" a reaction.
   removeReaction: (postId: string) => apiClient.post(`/community/posts/${postId}/react`, { type: 'LIKE' }),
   reportPost: (id: string, data: unknown) => apiClient.post(`/community/posts/${id}/report`, data),
+  reportUser: (id: string, data: unknown) => apiClient.post(`/community/users/${id}/report`, data),
   ranking: () => apiClient.get('/community/ranking'),
   // Stories
   stories: (scope?: 'forYou' | 'following') =>
@@ -378,7 +381,7 @@ export const reservationsApi = {
   my: () => apiClient.get('/reservations/my'),
   get: (id: string) => apiClient.get(`/reservations/${id}`),
   detail: (id: string) => apiClient.get(`/reservations/${id}`),
-  modify: (id: string, data: { date?: string; partySize?: number; notes?: string }) =>
+  modify: (id: string, data: { date?: string; partySize?: number; specialRequests?: string }) =>
     apiClient.patch(`/reservations/${id}`, data),
   cancel: (id: string) => apiClient.delete(`/reservations/${id}`),
 };
@@ -462,7 +465,7 @@ export const adminApi = {
     apiClient.delete(`/admin/support/quick-replies/${id}`),
   reviews: (params?: any) => apiClient.get('/admin/reviews', { params }),
   moderateReview: (id: string, status: string, reason?: string) =>
-    apiClient.patch(`/admin/reviews/${id}/moderate`, { status, reason }),
+    apiClient.patch(`/admin/reviews/${id}/moderate`, { status, rejectionReason: reason }),
   sendBroadcast: (data: { title: string; body: string; audience: 'ALL' | 'ADMINS' }) =>
     apiClient.post('/admin/notifications/broadcast', data),
   allThreads: (search?: string) =>

@@ -1301,7 +1301,7 @@ export class AdminService {
         date: new Date(date),
         timeSlot,
         partySize: Number(partySize),
-        notes: body.notes ?? null,
+        specialRequests: body.notes ?? null,
         internalNotes: body.internalNotes ?? `Creada manualmente por admin ${adminId}`,
         status: 'CONFIRMED', // alta admin = ya confirmada por default
       },

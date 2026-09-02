@@ -75,7 +75,7 @@ export default function ModifyReservation() {
         const res = r.data?.data ?? r.data;
         setDate(toLocal(new Date(res.date)));
         setPartySize(res.partySize ?? 2);
-        setNotes(res.notes ?? '');
+        setNotes(res.specialRequests ?? '');
         setVenueName(res.venue?.name ?? '');
         setStatus(res.status ?? '');
       })
@@ -88,7 +88,7 @@ export default function ModifyReservation() {
   async function save() {
     setSaving(true);
     try {
-      await reservationsApi.modify(id!, { date, partySize, notes });
+      await reservationsApi.modify(id!, { date, partySize, specialRequests: notes });
       toast(
         t ? 'Reserva actualizada' : 'Reservation updated',
         'success',

@@ -239,7 +239,7 @@ export class ReservationsService {
 
   async modify(
     id: string,
-    dto: { date?: string; partySize?: number; notes?: string },
+    dto: { date?: string; partySize?: number; specialRequests?: string },
     userId: string,
     role: UserRole,
   ) {
@@ -256,7 +256,7 @@ export class ReservationsService {
     const data: any = {};
     if (dto.date) data.date = new Date(dto.date);
     if (dto.partySize != null) data.partySize = dto.partySize;
-    if (dto.notes !== undefined) data.notes = dto.notes;
+    if (dto.specialRequests !== undefined) data.specialRequests = dto.specialRequests;
 
     const updated = await this.prisma.reservation.update({ where: { id }, data });
     this.realtime.toUserAndStaff(reservation.userId, 'reservation', 'updated', { id, data: updated });

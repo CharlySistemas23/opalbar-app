@@ -35,7 +35,7 @@ export class ReservationsController {
   @ApiOperation({ summary: 'Modify my reservation (date / party size / notes)' })
   modify(
     @Param('id') id: string,
-    @Body() dto: { date?: string; partySize?: number; notes?: string },
+    @Body() dto: { date?: string; partySize?: number; specialRequests?: string },
     @CurrentUser('id') userId: string,
     @CurrentUser('role') role: UserRole,
   ) {

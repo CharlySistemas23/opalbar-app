@@ -319,6 +319,58 @@ export class FriendshipsService {
     return { ok: true, status: 'none' as const };
   }
 
+  /** Bloquea a un usuario: marca la relación como BLOCKED y corta follows en ambos sentidos. */
+  async block(meId: string, otherId: string) {
+    if (meId === otherId) throw new BadRequestException('No puedes bloquearte a ti mismo.');
+    const existing = await this.findPair(meId, otherId);
+    if (existing) {
+      await this.prisma.friendship.update({
+        where: { id: existing.id },
+        data: {
+          status: FriendshipStatus.BLOCKED,
+          requesterId: meId,
+          addresseeId: otherId,
+          blockedAt: new Date(),
+        },
+      });
+    } else {
+      await this.prisma.friendship.create({
+        data: {
+          requesterId: meId,
+          addresseeId: otherId,
+          status: FriendshipStatus.BLOCKED,
+          blockedAt: new Date(),
+        },
+      });
+    }
+    await this.prisma.follow.deleteMany({
+      where: {
+        OR: [
+          { followerId: meId, followingId: otherId },
+          { followerId: otherId, followingId: meId },
+        ],
+      },
+    });
+    this.realtime.toUsers([meId, otherId], 'user', 'updated', {
+      id: otherId,
+      data: { friendship: 'blocked', by: meId },
+    });
+    return { ok: true, status: 'blocked' as const };
+  }
+
+  /** Desbloquea a un usuario (borra la relación BLOCKED). */
+  async unblock(meId: string, otherId: string) {
+    const fs = await this.findPair(meId, otherId);
+    if (fs && fs.status === FriendshipStatus.BLOCKED) {
+      await this.prisma.friendship.delete({ where: { id: fs.id } });
+      this.realtime.toUsers([meId, otherId], 'user', 'updated', {
+        id: otherId,
+        data: { friendship: 'unblocked', by: meId },
+      });
+    }
+    return { ok: true, status: 'none' as const };
+  }
+
   // ─────────────────────────────────────────────
   //  LISTS
   // ─────────────────────────────────────────────

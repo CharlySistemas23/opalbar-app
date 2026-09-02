@@ -21,6 +21,8 @@ import { usersApi, messagesApi, communityApi, friendshipsApi, mentionsApi } from
 import { useAuthStore } from '@/stores/auth.store';
 import { useAppStore } from '@/stores/app.store';
 import { toast } from '@/components/Toast';
+import { apiError } from '@/api/errors';
+import { ReportSheet } from '@/components/ReportSheet';
 import { StoryRing } from '@/components/StoryRing';
 import { Heart } from '@/components/Heart';
 import { useFeedback } from '@/hooks/useFeedback';
@@ -72,6 +74,7 @@ export default function UserProfile() {
   const [taggedLoading, setTaggedLoading] = useState(false);
   const [postsLoading, setPostsLoading] = useState(true);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [showReport, setShowReport] = useState(false);
   const [tab, setTab] = useState<'grid' | 'feed' | 'community' | 'tagged'>('grid');
   const [coverUploading, setCoverUploading] = useState(false);
   const [avatarUploading, setAvatarUploading] = useState(false);
@@ -454,26 +457,29 @@ export default function UserProfile() {
   }
 
   function handleReport() {
-    toast(
-      t
-        ? 'Gracias. Nuestro equipo revisará este perfil.'
-        : 'Thanks. Our team will review this profile.',
-      'success',
-    );
+    setShowReport(true);
   }
 
   function handleBlock() {
     Alert.alert(
       t ? 'Bloquear usuario' : 'Block user',
       t
-        ? '¿Seguro que quieres bloquear a este usuario?'
-        : 'Are you sure you want to block this user?',
+        ? '¿Seguro que quieres bloquear a este usuario? Dejarán de seguirse y no verá tu contenido.'
+        : 'Are you sure you want to block this user? You will unfollow each other and they can no longer see your content.',
       [
         { text: t ? 'Cancelar' : 'Cancel', style: 'cancel' },
         {
           text: t ? 'Bloquear' : 'Block',
           style: 'destructive',
-          onPress: () => toast(t ? 'Usuario bloqueado.' : 'User blocked.', 'info'),
+          onPress: async () => {
+            try {
+              await friendshipsApi.block(id);
+              toast(t ? 'Usuario bloqueado.' : 'User blocked.', 'success');
+              router.back();
+            } catch (err: any) {
+              toast(apiError(err, t ? 'No se pudo bloquear.' : 'Could not block.'), 'danger');
+            }
+          },
         },
       ],
     );
@@ -1046,6 +1052,20 @@ export default function UserProfile() {
           ) : null}
         </View>
       </Modal>
+
+      <ReportSheet
+        visible={showReport}
+        onClose={() => setShowReport(false)}
+        title={t ? 'Reportar perfil' : 'Report profile'}
+        onSubmit={async (reason, details) => {
+          try {
+            await communityApi.reportUser(id, { reason, description: details });
+            toast(t ? 'Gracias. Revisaremos este perfil.' : 'Thanks. We will review.', 'success');
+          } catch (err) {
+            toast(apiError(err, t ? 'No se pudo enviar el reporte.' : 'Report failed.'), 'danger');
+          }
+        }}
+      />
     </SafeAreaView>
   );
 }

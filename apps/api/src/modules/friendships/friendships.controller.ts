@@ -74,6 +74,20 @@ export class FriendshipsController {
     return this.friendships.cancel(me.id, userId);
   }
 
+  @Post(':userId/block')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Block a user' })
+  block(@CurrentUser() me: User, @Param('userId') userId: string) {
+    return this.friendships.block(me.id, userId);
+  }
+
+  @Delete(':userId/block')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Unblock a user' })
+  unblock(@CurrentUser() me: User, @Param('userId') userId: string) {
+    return this.friendships.unblock(me.id, userId);
+  }
+
   @Delete(':userId')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Remove (unfriend) a user' })

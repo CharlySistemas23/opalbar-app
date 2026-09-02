@@ -46,7 +46,7 @@ export default function AdminReviewsList() {
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  async function moderate(id: string, status: 'APPROVED' | 'REJECTED', reason?: string) {
+  async function moderate(id: string, status: 'PUBLISHED' | 'REJECTED', reason?: string) {
     try {
       await adminApi.moderateReview(id, status, reason);
       setReviews((p) => p.filter((r) => r.id !== id));
@@ -148,7 +148,7 @@ export default function AdminReviewsList() {
                           label="Aprobar"
                           variant="primary"
                           size="sm"
-                          onPress={() => moderate(item.id, 'APPROVED')}
+                          onPress={() => moderate(item.id, 'PUBLISHED')}
                           leftIcon={<Feather name="check" size={13} color={Colors.textInverse} />}
                         />
                       </View>

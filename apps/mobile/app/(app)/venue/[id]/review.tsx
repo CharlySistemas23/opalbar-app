@@ -62,7 +62,7 @@ export default function WriteReview() {
       await reviewsApi.create({
         venueId: id,
         rating,
-        comment: comment.trim() || undefined,
+        body: comment.trim() || undefined,
       });
       fb.success();
       router.back();
