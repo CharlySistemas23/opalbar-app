@@ -44,9 +44,26 @@ async function step(name, fn, { optional = false } = {}) {
     return out;
   } catch (err) {
     const detail = err?.detail ?? err?.message ?? String(err);
-    record(optional ? 'SKIP' : 'FAIL', name, detail);
+    // A step that touched the absent second account is skipped, not failed.
+    record(optional || err?.__skip ? 'SKIP' : 'FAIL', name, detail);
     return undefined;
   }
+}
+
+/**
+ * Stand-in for the second account when it isn't available (production, where
+ * registration needs an emailed OTP). Any step that touches it throws a
+ * skip-tagged error, so those steps report SKIP instead of failing.
+ */
+function absentUser(reason) {
+  return new Proxy({}, {
+    get() {
+      const err = new Error(reason);
+      err.detail = reason;
+      err.__skip = true;
+      throw err;
+    },
+  });
 }
 
 async function api(method, path, { token, body, expect = [200, 201, 204] } = {}) {
@@ -112,8 +129,37 @@ async function readOtpFromLog(email, { attempts = 20, delayMs = 500 } = {}) {
   throw err;
 }
 
+/**
+ * Logs into an existing account. Used against environments where the OTP is
+ * emailed (i.e. production) and registration can't be completed headlessly:
+ *
+ *   E2E_EMAIL_A=… E2E_PASSWORD_A=… E2E_EMAIL_B=… E2E_PASSWORD_B=… node …
+ *
+ * With only the A pair set, the two-user flows are skipped rather than failed.
+ */
+async function loginExisting(tag) {
+  const email = process.env[`E2E_EMAIL_${tag.toUpperCase()}`];
+  const password = process.env[`E2E_PASSWORD_${tag.toUpperCase()}`];
+  if (!email || !password) return null;
+  const d = await api('POST', '/auth/login', {
+    body: { email, password, deviceName: 'e2e', deviceOs: 'node' },
+  });
+  assert(d?.tokens?.accessToken, 'login returned no tokens');
+  return {
+    id: d.user.id,
+    email,
+    password,
+    token: d.tokens.accessToken,
+    refreshToken: d.tokens.refreshToken,
+    preexisting: true,
+  };
+}
+
 /** Registers a user (verifying the email OTP if needed) and returns a session. */
 async function makeUser(tag) {
+  const existing = await loginExisting(tag);
+  if (existing) return existing;
+
   const email = `e2e.${tag}.${STAMP}@opalbar-test.mx`;
   const firstName = tag === 'a' ? 'Ana' : 'Beto';
   const reg = await api('POST', '/auth/register', {
@@ -139,7 +185,14 @@ async function makeUser(tag) {
 
   assert(tokens?.accessToken, 'no access token after registration');
   assert(userId, 'no user id after registration');
-  return { id: userId, email, token: tokens.accessToken, refreshToken: tokens.refreshToken };
+  return {
+    id: userId,
+    email,
+    password: PASSWORD,
+    token: tokens.accessToken,
+    refreshToken: tokens.refreshToken,
+    preexisting: false,
+  };
 }
 
 const main = async () => {
@@ -166,16 +219,24 @@ const main = async () => {
   });
 
   group('auth');
-  const A = await step('register user A', () => makeUser('a'));
-  const B = await step('register user B', () => makeUser('b'));
-  if (!A || !B) {
-    console.log('\n\x1b[31mCannot continue without two users.\x1b[0m');
+  const A = await step('sign in as user A', () => makeUser('a'));
+  // The second account is only needed by the social / messaging / blocking
+  // groups. Against production (where registration needs an emailed OTP) it is
+  // usually unavailable — those groups then report SKIP instead of failing.
+  let B = await step('sign in as user B', () => makeUser('b'), { optional: true });
+  if (!A) {
+    console.log('\n\x1b[31mCannot continue without user A.\x1b[0m');
     return summarize();
+  }
+  const twoUsers = !!B;
+  if (!B) B = absentUser('needs a second account — set E2E_EMAIL_B / E2E_PASSWORD_B');
+  if (!twoUsers) {
+    console.log('\n\x1b[33mSolo una cuenta disponible — los flujos de dos usuarios se omiten.\x1b[0m');
   }
 
   await step('login with password', async () => {
     const d = await api('POST', '/auth/login', {
-      body: { email: A.email, password: PASSWORD, deviceName: 'e2e', deviceOs: 'node' },
+      body: { email: A.email, password: A.password, deviceName: 'e2e', deviceOs: 'node' },
     });
     assert(d?.tokens?.accessToken || d?.requiresEmailVerification, 'no tokens and no verification flag');
     if (d?.tokens?.accessToken) A.token = d.tokens.accessToken;
@@ -280,7 +341,7 @@ const main = async () => {
   await step('B accepts the request', async () => {
     assert(friendshipId, 'no friendship id');
     await api('POST', `/friendships/${friendshipId}/accept`, { token: B.token });
-  });
+  }, { optional: !twoUsers });
   await step('accepting twice is safe (idempotent, never 500)', async () => {
     assert(friendshipId, 'no friendship id');
     const d = await api('POST', `/friendships/${friendshipId}/accept`, {
@@ -288,7 +349,7 @@ const main = async () => {
     });
     // If it succeeds it must be a no-op, not a duplicate friendship.
     if (d?.friendship) assert(d.friendship.status === 'ACCEPTED', 'unexpected status after re-accept');
-  });
+  }, { optional: !twoUsers });
   await step('friends list contains B', async () => {
     const d = await api('GET', `/users/${A.id}/friends?page=1&limit=20`, { token: A.token });
     const list = d?.data ?? d ?? [];
@@ -345,7 +406,7 @@ const main = async () => {
     assert(postId, 'no post');
     const d = await api('GET', `/community/posts/${postId}`, { token: A.token });
     assert((d.commentsCount ?? 0) >= 1, `commentsCount=${d.commentsCount}`);
-  });
+  }, { optional: !twoUsers });
   await step('B reports the post', async () => {
     assert(postId, 'no post');
     await api('POST', `/community/posts/${postId}/report`, {
@@ -398,13 +459,13 @@ const main = async () => {
     await api('POST', `/messages/threads/${threadId}/messages`, {
       token: A.token, body: { content: 'Hola, mensaje de prueba e2e' },
     });
-  });
+  }, { optional: !twoUsers });
   await step('B reads the thread', async () => {
     assert(threadId, 'no thread');
     const d = await api('GET', `/messages/threads/${threadId}/messages?limit=30`, { token: B.token });
     const list = d?.data ?? d ?? [];
     assert(list.length > 0, 'no messages');
-  });
+  }, { optional: !twoUsers });
   await step('thread list preview + unread count', async () => {
     const d = await api('GET', '/messages/threads', { token: B.token });
     const list = d?.data ?? d ?? [];
@@ -418,7 +479,7 @@ const main = async () => {
     await api('GET', '/messages/threads/not-a-real-thread/messages', {
       token: A.token, expect: [400, 403, 404],
     });
-  });
+  }, { optional: !twoUsers });
 
   group('blocking');
   await step('B blocks A', async () => {
@@ -429,7 +490,7 @@ const main = async () => {
     await api('POST', `/messages/threads/${threadId}/messages`, {
       token: A.token, body: { content: 'no deberia entrar' }, expect: [403, 404],
     });
-  });
+  }, { optional: !twoUsers });
   await step('blocked user cannot follow', async () => {
     await api('POST', `/users/${B.id}/follow`, { token: A.token, expect: [403, 404] });
   });
@@ -558,27 +619,36 @@ const main = async () => {
   }
 
   group('account deletion (App Store 5.1.1v)');
+  // Hard safety rule: only accounts this run created may be deleted. Pointed at
+  // real credentials (production) the deletion steps report SKIP instead.
+  const canDeleteA = !A.preexisting;
+  const canDeleteB = twoUsers && !B.preexisting;
+
   await step('deletion requires the password', async () => {
     await api('DELETE', '/users/me', { token: B.token, body: { reason: 'e2e' }, expect: [400, 401] });
   });
   await step('B deletes their account', async () => {
+    assert(canDeleteB, 'pre-existing account — refusing to delete a real user');
     await api('DELETE', '/users/me', {
-      token: B.token, body: { reason: 'e2e cleanup', password: PASSWORD }, expect: [200, 202, 204],
+      token: B.token, body: { reason: 'e2e cleanup', password: B.password }, expect: [200, 202, 204],
     });
-  });
+  }, { optional: !canDeleteB });
   await step('deleted account token is dead', async () => {
+    assert(canDeleteB, 'skipped: account was not deleted');
     await api('GET', '/users/me', { token: B.token, expect: [401] });
-  });
+  }, { optional: !canDeleteB });
   await step('deleted account cannot log back in', async () => {
+    assert(canDeleteB, 'skipped: account was not deleted');
     await api('POST', '/auth/login', {
-      body: { email: B.email, password: PASSWORD }, expect: [401, 403],
+      body: { email: B.email, password: B.password }, expect: [401, 403],
     });
-  });
+  }, { optional: !canDeleteB });
   await step('A deletes their account', async () => {
+    assert(canDeleteA, 'pre-existing account — refusing to delete a real user');
     await api('DELETE', '/users/me', {
-      token: A.token, body: { reason: 'e2e cleanup', password: PASSWORD }, expect: [200, 202, 204],
+      token: A.token, body: { reason: 'e2e cleanup', password: A.password }, expect: [200, 202, 204],
     });
-  });
+  }, { optional: !canDeleteA });
 
   summarize();
 };

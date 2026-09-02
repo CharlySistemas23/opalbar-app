@@ -52,7 +52,15 @@ export class EventsService {
         ...(venueId && { venueId }),
         ...(isFree !== undefined && { isFree }),
         ...(highlighted && { isHighlighted: true }),
-        ...(startDate && { startDate: { gte: new Date(startDate) } }),
+        // Public listings are "what's coming up": an event that already ended
+        // must not surface (and the list is ordered isHighlighted-first, so a
+        // finished one could even headline the home hero). `includeAll` is the
+        // admin escape hatch, and an explicit `startDate` still wins.
+        ...(startDate
+          ? { startDate: { gte: new Date(startDate) } }
+          : includeAll
+            ? {}
+            : { endDate: { gte: new Date() } }),
         ...(endDate && { endDate: { lte: new Date(endDate) } }),
         ...(search && {
           OR: [
