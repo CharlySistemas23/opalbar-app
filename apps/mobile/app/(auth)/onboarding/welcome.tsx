@@ -4,7 +4,8 @@
 //  Layout = Figma canonical:
 //   · Progress 4/4 (all complete)
 //   · Kicker accent overline + Display headline ("¡Bienvenido, Nombre.")
-//   · Lead body with welcome line + champagne points note
+//   · Lead body with welcome line + loyalty note (no fake welcome bonus:
+//     the backend grants no signup points)
 //   · Section label + 3 suggestion list items (bgCard hairline pill,
 //     icon chip + Subhead + Caption + arrow-right)
 //   · Bottom CTA: primary gold "Entrar a OPAL BAR"
@@ -121,8 +122,8 @@ export default function OnboardingWelcome() {
         <FadeIn delay={180} style={{ marginTop: Spacing[4], maxWidth: 360 }}>
           <Lead tone="secondary">
             {t
-              ? 'Tu cuenta en OPALBAR está activa. Te regalamos 50 puntos para empezar.'
-              : 'Your OPALBAR account is active. We gifted you 50 points to start.'}
+              ? 'Tu cuenta en OPALBAR está activa. Tu wallet ya está lista para sumar puntos.'
+              : 'Your OPALBAR account is active. Your wallet is ready to start earning points.'}
           </Lead>
         </FadeIn>
 
@@ -132,16 +133,16 @@ export default function OnboardingWelcome() {
             accessibilityElementsHidden
             importantForAccessibility="no-hide-descendants"
           >
-            <Feather name="gift" size={16} color={Colors.accentPrimary} />
+            <Feather name="award" size={16} color={Colors.accentPrimary} />
           </View>
           <View style={{ flex: 1 }}>
             <Label tone="accent">
-              {t ? '+50 PUNTOS DE BIENVENIDA' : '+50 WELCOME POINTS'}
+              {t ? 'PROGRAMA DE LEALTAD' : 'LOYALTY PROGRAM'}
             </Label>
             <Caption tone="muted" style={{ marginTop: 2 }}>
               {t
-                ? 'Disponibles en tu wallet desde hoy.'
-                : 'Available in your wallet from today.'}
+                ? 'Suma puntos en cada visita y canjéalos por beneficios.'
+                : 'Earn points on every visit and redeem them for perks.'}
             </Caption>
           </View>
         </FadeIn>

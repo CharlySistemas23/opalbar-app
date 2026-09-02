@@ -16,6 +16,7 @@ import { Feather } from '@expo/vector-icons';
 import { usersApi } from '@/api/client';
 import { useAppStore } from '@/stores/app.store';
 import { apiError } from '@/api/errors';
+import { formatDateOnly } from '@/utils/date';
 import { Colors, EditorialSpacing, Radius, Spacing } from '@/constants/tokens';
 import { HitSlop, Roles } from '@/constants/a11y';
 import {
@@ -43,9 +44,13 @@ interface SavedItem {
     id: string;
     title?: string;
     name?: string;
+    content?: string | null;
     imageUrl?: string;
     coverUrl?: string;
-    venue?: { name?: string };
+    city?: string | null;
+    startDate?: string;
+    author?: { firstName?: string | null; lastName?: string | null } | null;
+    venue?: { name?: string | null };
   };
 }
 
@@ -230,13 +235,47 @@ function SavedCard({
   onPress: () => void;
   onUnsave: () => void;
 }) {
-  const img = item.target?.imageUrl ?? item.target?.coverUrl;
+  const target = item.target;
+  const img = target?.imageUrl ?? target?.coverUrl;
+
+  // Each saved type hydrates a different shape from the API — render the
+  // fields that actually matter for that type instead of a generic card.
+  let title: string;
+  let subtitle: string | null = null;
+  let metaLine: string | null = null;
+
+  if (item.type === 'POST') {
+    const authorName = target?.author
+      ? `${target.author.firstName ?? ''} ${target.author.lastName ?? ''}`.trim() || null
+      : null;
+    title = authorName
+      ? t
+        ? `Publicación de ${authorName}`
+        : `Post by ${authorName}`
+      : t
+        ? 'Publicación'
+        : 'Post';
+    subtitle = target?.content?.trim() || null;
+  } else if (item.type === 'EVENT') {
+    title = target?.title ?? (t ? 'Evento' : 'Event');
+    const dateLabel = target?.startDate
+      ? formatDateOnly(target.startDate, t ? 'es' : 'en', { month: 'short' })
+      : null;
+    metaLine = [dateLabel, target?.venue?.name].filter(Boolean).join(' · ') || null;
+  } else if (item.type === 'OFFER') {
+    title = target?.title ?? (t ? 'Oferta' : 'Offer');
+    metaLine = target?.venue?.name ?? null;
+  } else {
+    title = target?.name ?? (t ? 'Bar' : 'Bar');
+    metaLine = target?.city ?? null;
+  }
+
   return (
     <Pressy
       onPress={onPress}
       haptic="select"
       accessibilityRole={Roles.button}
-      accessibilityLabel={item.target?.title ?? item.target?.name ?? (t ? 'Elemento guardado' : 'Saved item')}
+      accessibilityLabel={title}
       style={styles.card}
     >
       {img ? (
@@ -249,11 +288,16 @@ function SavedCard({
       <View style={{ flex: 1 }}>
         <Kicker tone="champagne">{labelFor(item.type, t)}</Kicker>
         <Subhead numberOfLines={2} style={{ marginTop: 2 }}>
-          {item.target?.title ?? item.target?.name ?? (t ? 'Elemento guardado' : 'Saved item')}
+          {title}
         </Subhead>
-        {item.target?.venue?.name ? (
+        {subtitle ? (
+          <Caption tone="secondary" numberOfLines={2} style={{ marginTop: 2 }}>
+            {subtitle}
+          </Caption>
+        ) : null}
+        {metaLine ? (
           <Caption tone="muted" numberOfLines={1} style={{ marginTop: 2 }}>
-            {item.target.venue.name}
+            {metaLine}
           </Caption>
         ) : null}
       </View>

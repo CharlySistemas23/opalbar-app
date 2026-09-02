@@ -6,7 +6,6 @@ import {
   TextInput,
   TouchableOpacity,
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Image,
@@ -34,7 +33,8 @@ import { ErrorState } from '@/components/ErrorState';
 import { useMentionAutocomplete } from '@/hooks/useMentionAutocomplete';
 import { MentionSuggestions } from '@/components/MentionSuggestions';
 import { MentionText } from '@/components/MentionText';
-import { Kicker, Pressy } from '@/components/ui';
+import { MediaCarousel } from '@/components/community/MediaCarousel';
+import { Badge, ConfirmDialog, Kicker, ListItem, Pressy, Sheet } from '@/components/ui';
 
 // ─────────────────────────────────────────────
 //  Post Detail — Instagram × Facebook hybrid
@@ -53,15 +53,18 @@ function colorFor(id: string) {
   const idx = Math.abs([...id].reduce((a, c) => a + c.charCodeAt(0), 0)) % AVATAR_COLORS.length;
   return AVATAR_COLORS[idx];
 }
-function relTime(d?: string) {
+function relTime(d?: string, t: boolean = true) {
   if (!d) return '';
   const diff = Math.max(0, Math.floor((Date.now() - new Date(d).getTime()) / 1000));
-  if (diff < 5) return 'ahora';
+  if (diff < 5) return t ? 'ahora' : 'now';
   if (diff < 60) return `${diff}s`;
   if (diff < 3600) return `${Math.floor(diff / 60)}m`;
   if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
   return `${Math.floor(diff / 86400)}d`;
 }
+
+// Unified ❤️ emoji reaction — matches the feed's "Me gusta" counter.
+const LIKE = '❤️';
 
 type ReplyTarget = { id: string; name: string } | null;
 type CommentSort = 'recent' | 'interacted' | 'likes';
@@ -90,11 +93,10 @@ export default function PostDetail() {
   const comment = mention.text;
   const setComment = mention.setText;
   const [sending, setSending] = useState(false);
-  const [liked, setLiked] = useState(false);
   const [showReport, setShowReport] = useState(false);
-  const [likeCount, setLikeCount] = useState(0);
   const [replyTo, setReplyTo] = useState<ReplyTarget>(null);
   const [previewVisible, setPreviewVisible] = useState(false);
+  const [previewIndex, setPreviewIndex] = useState(0);
   const [commentSort, setCommentSort] = useState<CommentSort>('recent');
   const [hideThreads, setHideThreads] = useState(false);
   const [collapsedThreads, setCollapsedThreads] = useState<Record<string, boolean>>({});
@@ -115,6 +117,30 @@ export default function PostDetail() {
   const lastTap = useRef<number>(0);
   const pendingOpen = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isSaved, setIsSaved] = useState(false);
+
+  // Own-post header menu (Editar / Eliminar / status chip)
+  const [postMenuOpen, setPostMenuOpen] = useState(false);
+  const [confirmDeletePost, setConfirmDeletePost] = useState(false);
+
+  // Comment "…" menu (Editar / Borrar / Reportar) — replaces Alert.alert
+  const [commentMenu, setCommentMenu] = useState<any | null>(null);
+  const [confirmDeleteComment, setConfirmDeleteComment] = useState<any | null>(null);
+  const [reportComment, setReportComment] = useState<any | null>(null);
+
+  const isStaffUser = !!me?.role && ['ADMIN', 'SUPER_ADMIN', 'MODERATOR'].includes(me.role);
+
+  // Derived from the unified emoji reaction set so the counter always
+  // matches the feed's PostCard.
+  const myEmoji = postEmojiReactions.find((r) => r.mine)?.emoji ?? null;
+  const liked = myEmoji === LIKE;
+  const likeCount = postEmojiReactions.reduce((s, r) => s + r.count, 0);
+
+  const media: string[] = Array.isArray(post?.mediaUrls) && post.mediaUrls.length > 0
+    ? post.mediaUrls
+    : post?.imageUrl
+      ? [post.imageUrl]
+      : [];
+  const totalComments = post?.commentsCount ?? comments.length;
 
   const sortedComments = useMemo(() => {
     const list = [...comments];
@@ -144,9 +170,8 @@ export default function PostDetail() {
       ]);
       const p = postRes.data?.data;
       setPost(p);
-      setLikeCount(p?.likesCount ?? p?._count?.reactions ?? 0);
-      setLiked(!!p?.hasReacted);
       setPostEmojiReactions(Array.isArray(p?.emojiReactions) ? p.emojiReactions : []);
+      setIsSaved(!!p?.isSaved);
       const c = commentsRes.data?.data;
       setComments(Array.isArray(c) ? c : c?.data ?? []);
     } catch (err) {
@@ -217,29 +242,22 @@ export default function PostDetail() {
     fb.tap();
     try {
       await communityApi.emojiReact(id, emoji);
-    } catch {
+    } catch (err) {
+      fb.error();
+      toast(apiError(err, t ? 'No se pudo reaccionar.' : 'Could not react.'), 'danger');
       load();
     }
   }
 
+  // Heart tap / double-tap on media → same ❤️ emoji reaction as the feed, so
+  // the counter always matches PostCard. Tapping again removes whatever
+  // reaction you had (any emoji), mirroring the feed's quickToggle.
   async function toggleLike() {
     if (!isAuthenticated) return router.push('/(auth)/login' as never);
-    try {
-      if (liked) {
-        fb.tap();
-        await communityApi.removeReaction(id);
-        setLiked(false);
-        setLikeCount((c) => Math.max(0, c - 1));
-      } else {
-        fb.like();
-        await communityApi.react(id, 'LIKE');
-        setLiked(true);
-        setLikeCount((c) => c + 1);
-      }
-    } catch {}
+    await togglePostEmojiReaction(myEmoji ?? LIKE);
   }
 
-  function handleImagePress() {
+  function handleMediaPress(index: number) {
     const now = Date.now();
     if (now - lastTap.current < 280) {
       // Double tap → like + cancel any pending preview open
@@ -259,6 +277,7 @@ export default function PostDetail() {
       pendingOpen.current = setTimeout(() => {
         pendingOpen.current = null;
         fb.tap();
+        setPreviewIndex(index);
         setPreviewVisible(true);
       }, 280);
     }
@@ -274,20 +293,24 @@ export default function PostDetail() {
       id: post.id,
       content: post.content,
       authorName: aName,
-      imageUrl: post.imageUrl,
+      imageUrl: media[0] ?? post.imageUrl,
       likes: likeCount,
-      comments: comments.length,
+      comments: totalComments,
       t,
     });
   }
 
   async function handleBookmark() {
     fb.select();
-    setIsSaved((v) => !v);
+    const prevSaved = isSaved;
+    setIsSaved(!prevSaved);
     try {
-      await usersApi.toggleSave('POST', id);
-    } catch {
-      setIsSaved((v) => !v);
+      const r = await usersApi.toggleSave('POST', id);
+      setIsSaved(!!r.data?.data?.saved);
+    } catch (err) {
+      fb.error();
+      setIsSaved(prevSaved);
+      toast(apiError(err, t ? 'No se pudo guardar.' : 'Could not save.'), 'danger');
     }
   }
 
@@ -315,8 +338,11 @@ export default function PostDetail() {
     }
 
     const parentId = replyTo?.id;
+    // Build the mentions BEFORE the request, but only clear the mention
+    // tracking (pickedRef map) once the send actually succeeds — clearing it
+    // optimistically meant a failed send + retry lost the @handle→userId
+    // links even though the text itself was restored.
     const mentions = overrideText ? [] : mention.buildMentions();
-    if (!overrideText) mention.reset();
     const savedReply = replyTo;
     setReplyTo(null);
     setSending(true);
@@ -325,6 +351,7 @@ export default function PostDetail() {
       if (parentId) payload.parentId = parentId;
       if (mentions.length > 0) payload.mentions = mentions;
       await communityApi.addComment(id, payload);
+      if (!overrideText) mention.reset();
       fb.send();
       await load();
     } catch (err: any) {
@@ -412,69 +439,18 @@ export default function PostDetail() {
     setReactPickerFor({ id: c.id, x: anchor?.x ?? 0, y: anchor?.y ?? 0 });
   }
 
+  // Reglas:
+  //  · Si es mi comentario: Editar siempre. Borrar solo si soy staff.
+  //  · Si es ajeno: Reportar (todos). Borrar también si soy staff
+  //    (poder del equipo para limpiar contenido violatorio rápido).
   function onCommentOptions(c: any) {
-    const mine = c.user?.id === me?.id;
-    const isStaff = me?.role && ['ADMIN', 'SUPER_ADMIN', 'MODERATOR'].includes(me.role);
-    const buttons: any[] = [];
-    // Reglas:
-    //  · Si es mi comentario: Editar siempre. Borrar solo si soy staff.
-    //  · Si es ajeno: Reportar (todos). Borrar también si soy staff
-    //    (poder del equipo para limpiar contenido violatorio rápido).
-    if (mine) {
-      buttons.push({
-        text: t ? 'Editar' : 'Edit',
-        onPress: () => {
-          setEditingComment({ id: c.id });
-          setReplyTo(null);
-          setComment(c.content ?? '');
-        },
-      });
-    }
-    if (isStaff) {
-      buttons.push({
-        text: t ? 'Borrar comentario' : 'Delete comment',
-        style: 'destructive' as const,
-        onPress: () => {
-          Alert.alert(
-            t ? '¿Borrar comentario?' : 'Delete comment?',
-            t ? 'No se puede deshacer.' : 'Cannot be undone.',
-            [
-              { text: t ? 'Cancelar' : 'Cancel', style: 'cancel' },
-              {
-                text: t ? 'Borrar' : 'Delete', style: 'destructive', onPress: async () => {
-                  try {
-                    await communityApi.deleteComment(c.id);
-                    load();
-                  } catch (err) {
-                    toast(apiError(err, t ? 'No se pudo borrar.' : 'Delete failed.'), 'danger');
-                  }
-                }
-              }
-            ]
-          );
-        },
-      });
-    }
-    if (!mine) {
-      buttons.push({
-        text: t ? 'Reportar' : 'Report',
-        onPress: async () => {
-          try {
-            await communityApi.reportComment(c.id, { reason: 'INAPPROPRIATE' });
-            toast(t ? 'Comentario reportado. Gracias.' : 'Comment reported. Thanks.', 'success');
-          } catch (err) {
-            toast(apiError(err, t ? 'No se pudo reportar.' : 'Report failed.'), 'danger');
-          }
-        },
-      });
-    }
-    buttons.push({ text: t ? 'Cancelar' : 'Cancel', style: 'cancel' as const });
-    Alert.alert(t ? 'Opciones' : 'Options', '', buttons);
+    setCommentMenu(c);
   }
 
   function startReply(c: any) {
     const name =
-      `${c.user?.profile?.firstName ?? ''} ${c.user?.profile?.lastName ?? ''}`.trim() || 'Usuario';
+      `${c.user?.profile?.firstName ?? ''} ${c.user?.profile?.lastName ?? ''}`.trim() ||
+      (t ? 'Usuario' : 'User');
     const firstName = (c.user?.profile?.firstName ?? '').trim();
     const seed = firstName ? `@${firstName} ` : '';
     setReplyTo({ id: c.id, name });
@@ -513,7 +489,8 @@ export default function PostDetail() {
 
   const author = post.user;
   const authorName =
-    `${author?.profile?.firstName ?? ''} ${author?.profile?.lastName ?? ''}`.trim() || 'Usuario';
+    `${author?.profile?.firstName ?? ''} ${author?.profile?.lastName ?? ''}`.trim() ||
+    (t ? 'Usuario' : 'User');
   const authorInitials =
     ((author?.profile?.firstName?.[0] || '') + (author?.profile?.lastName?.[0] || '')).toUpperCase() ||
     'U';
@@ -533,7 +510,7 @@ export default function PostDetail() {
               haptic="select"
               hitSlop={HitSlop.expand}
               accessibilityRole={Roles.button}
-              accessibilityLabel="Volver"
+              accessibilityLabel={t ? 'Volver' : 'Back'}
               style={styles.topBtn}
             >
               <Feather name="arrow-left" size={22} color={Colors.textPrimary} />
@@ -544,14 +521,17 @@ export default function PostDetail() {
               </Kicker>
             </View>
             <Pressy
-              onPress={() => author?.id && author.id !== me?.id && setShowReport(true)}
+              onPress={() => {
+                if (author?.id === me?.id) setPostMenuOpen(true);
+                else if (author?.id) setShowReport(true);
+              }}
               haptic="select"
               hitSlop={HitSlop.expand}
               accessibilityRole={Roles.button}
               accessibilityLabel={t ? 'Más opciones' : 'More options'}
               style={styles.topBtn}
             >
-              {author?.id && author.id !== me?.id ? (
+              {author?.id ? (
                 <Feather name="more-horizontal" size={20} color={Colors.textPrimary} />
               ) : (
                 <View style={{ width: 22 }} />
@@ -593,9 +573,15 @@ export default function PostDetail() {
                             <Text style={styles.authorTagText}>{t ? 'Tú' : 'You'}</Text>
                           </View>
                         )}
+                        {author?.id === me?.id && post.status === 'PENDING_REVIEW' ? (
+                          <Badge label={t ? 'En revisión' : 'In review'} variant="warning" size="sm" outline />
+                        ) : null}
+                        {author?.id === me?.id && post.status === 'REJECTED' ? (
+                          <Badge label={t ? 'Rechazado' : 'Rejected'} variant="danger" size="sm" outline />
+                        ) : null}
                       </View>
                       <View style={styles.timeRow}>
-                        <Text style={styles.timeAgo}>{relTime(post.createdAt)}</Text>
+                        <Text style={styles.timeAgo}>{relTime(post.createdAt, t)}</Text>
                         <Text style={styles.timeDot}>·</Text>
                         <Feather name="globe" size={11} color={Colors.textMuted} />
                         <Text style={styles.timeAgo}>{t ? 'Público' : 'Public'}</Text>
@@ -604,8 +590,15 @@ export default function PostDetail() {
                   </Pressable>
                 </View>
 
+                {/* ── Rejection reason (own, rejected) ── */}
+                {author?.id === me?.id && post.status === 'REJECTED' && post.rejectionReason ? (
+                  <View style={styles.rejectBox}>
+                    <Text style={styles.rejectText}>{post.rejectionReason}</Text>
+                  </View>
+                ) : null}
+
                 {/* ── Text-only content (FB status bubble) ─────────── */}
-                {post.content && !post.imageUrl ? (
+                {post.content && media.length === 0 ? (
                   <View style={styles.statusCard}>
                     <Text
                       style={[
@@ -618,20 +611,24 @@ export default function PostDetail() {
                   </View>
                 ) : null}
 
-                {/* ── Image (IG full-bleed) ─────── */}
-                {post.imageUrl ? (
-                  <Pressable onPress={handleImagePress} style={styles.imgWrapper}>
-                    <Image source={{ uri: post.imageUrl }} style={styles.img} resizeMode="cover" />
-                    {showLikeBurst && (
-                      <View pointerEvents="none" style={styles.likeBurst}>
-                        <Heart filled size={110} color="#fff" />
-                      </View>
-                    )}
-                  </Pressable>
+                {/* ── Media (IG full-bleed, multi-image) ────── */}
+                {media.length > 0 ? (
+                  <MediaCarousel
+                    urls={media}
+                    onPress={handleMediaPress}
+                    accessibilityLabel={t ? 'Fotos de la publicación' : 'Post photos'}
+                    overlay={
+                      showLikeBurst ? (
+                        <View style={styles.likeBurst}>
+                          <Heart filled size={110} color="#fff" />
+                        </View>
+                      ) : null
+                    }
+                  />
                 ) : null}
 
                 {/* ── Stats strip (FB) ───────────── */}
-                {(likeCount > 0 || comments.length > 0) && (
+                {(likeCount > 0 || totalComments > 0) && (
                   <View style={styles.statsStrip}>
                     {likeCount > 0 ? (
                       <View style={styles.statsStripLeft}>
@@ -652,10 +649,10 @@ export default function PostDetail() {
                     ) : (
                       <View style={styles.statsStripLeft} />
                     )}
-                    {comments.length > 0 && (
+                    {totalComments > 0 && (
                       <Text style={styles.statsStripText}>
-                        {comments.length}{' '}
-                        {comments.length === 1
+                        {totalComments}{' '}
+                        {totalComments === 1
                           ? t
                             ? 'comentario'
                             : 'comment'
@@ -761,7 +758,7 @@ export default function PostDetail() {
                 )}
 
                 {/* ── Caption for image posts (IG) ── */}
-                {post.content && post.imageUrl ? (
+                {post.content && media.length > 0 ? (
                   <View style={styles.captionBox}>
                     <Text style={styles.caption}>
                       <Text style={styles.authorNameInline}>{authorName}</Text>{' '}
@@ -773,7 +770,7 @@ export default function PostDetail() {
                 {/* ── Comments header ─────────── */}
                 <View style={styles.commentsHdrRow}>
                   <Text style={styles.commentsHdrTitle}>
-                    {t ? `Comentarios (${comments.length})` : `Comments (${comments.length})`}
+                    {t ? `Comentarios (${totalComments})` : `Comments (${totalComments})`}
                   </Text>
                   {comments.length > 0 && (
                     <Pressable
@@ -993,12 +990,14 @@ export default function PostDetail() {
           visible={showReport}
           onClose={() => setShowReport(false)}
           title={t ? 'Reportar post' : 'Report post'}
+          t={t}
           onSubmit={async (reason, details) => {
             try {
               await communityApi.reportPost(id!, { reason, description: details });
               toast(t ? 'Gracias. Revisaremos el reporte.' : 'Thanks. We will review.', 'success');
             } catch (err) {
               toast(apiError(err, t ? 'No se pudo enviar el reporte.' : 'Report failed.'), 'danger');
+              throw err;
             }
           }}
         />
@@ -1022,7 +1021,7 @@ export default function PostDetail() {
         onClose={() => setReactPickerFor(null)}
       />
 
-      {post?.imageUrl && (
+      {media.length > 0 && (
         <Modal
           visible={previewVisible}
           transparent
@@ -1041,7 +1040,7 @@ export default function PostDetail() {
             <View style={styles.previewContent}>
               <Pressable style={styles.previewImageHitbox} onPress={(e) => e.stopPropagation()}>
                 <Image
-                  source={{ uri: post.imageUrl }}
+                  source={{ uri: media[previewIndex] ?? media[0] }}
                   style={styles.previewImage}
                   resizeMode="contain"
                 />
@@ -1051,6 +1050,134 @@ export default function PostDetail() {
         </Modal>
       )}
 
+      {/* ── Own-post header menu ("…") ─────── */}
+      <Sheet open={postMenuOpen} onClose={() => setPostMenuOpen(false)} title={t ? 'Tu publicación' : 'Your post'}>
+        <View style={{ paddingBottom: Spacing[4] }}>
+          <ListItem
+            title={t ? 'Editar publicación' : 'Edit post'}
+            leftIcon={<Feather name="edit-2" size={18} color={Colors.textPrimary} />}
+            showChevron={false}
+            onPress={() => {
+              setPostMenuOpen(false);
+              router.push(`/(app)/community/new-post?editId=${id}` as never);
+            }}
+          />
+          <ListItem
+            title={t ? 'Eliminar publicación' : 'Delete post'}
+            destructive
+            leftIcon={<Feather name="trash-2" size={18} color={Colors.accentDanger} />}
+            showChevron={false}
+            onPress={() => {
+              setPostMenuOpen(false);
+              setConfirmDeletePost(true);
+            }}
+          />
+        </View>
+      </Sheet>
+
+      <ConfirmDialog
+        open={confirmDeletePost}
+        onClose={() => setConfirmDeletePost(false)}
+        onConfirm={async () => {
+          await communityApi.deletePost(id!);
+          setConfirmDeletePost(false);
+          toast(t ? 'Publicación eliminada.' : 'Post deleted.', 'success');
+          router.back();
+        }}
+        title={t ? '¿Eliminar publicación?' : 'Delete post?'}
+        description={
+          t
+            ? 'Se quitará del feed de inmediato. Esta acción no se puede deshacer.'
+            : 'It will be removed from the feed immediately. This cannot be undone.'
+        }
+        confirmLabel={t ? 'Eliminar' : 'Delete'}
+        confirmVariant="danger"
+      />
+
+      {/* ── Comment "…" menu ──────────────── */}
+      <Sheet open={!!commentMenu} onClose={() => setCommentMenu(null)} title={t ? 'Comentario' : 'Comment'}>
+        {commentMenu ? (
+          <View style={{ paddingBottom: Spacing[4] }}>
+            {commentMenu.user?.id === me?.id ? (
+              <ListItem
+                title={t ? 'Editar' : 'Edit'}
+                leftIcon={<Feather name="edit-2" size={18} color={Colors.textPrimary} />}
+                showChevron={false}
+                onPress={() => {
+                  const c = commentMenu;
+                  setCommentMenu(null);
+                  setEditingComment({ id: c.id });
+                  setReplyTo(null);
+                  setComment(c.content ?? '');
+                }}
+              />
+            ) : null}
+            {isStaffUser ? (
+              <ListItem
+                title={t ? 'Borrar comentario' : 'Delete comment'}
+                destructive
+                leftIcon={<Feather name="trash-2" size={18} color={Colors.accentDanger} />}
+                showChevron={false}
+                onPress={() => {
+                  const c = commentMenu;
+                  setCommentMenu(null);
+                  setConfirmDeleteComment(c);
+                }}
+              />
+            ) : null}
+            {commentMenu.user?.id !== me?.id ? (
+              <ListItem
+                title={t ? 'Reportar' : 'Report'}
+                leftIcon={<Feather name="flag" size={18} color={Colors.textPrimary} />}
+                showChevron={false}
+                onPress={() => {
+                  const c = commentMenu;
+                  setCommentMenu(null);
+                  setReportComment(c);
+                }}
+              />
+            ) : null}
+          </View>
+        ) : (
+          <View />
+        )}
+      </Sheet>
+
+      <ConfirmDialog
+        open={!!confirmDeleteComment}
+        onClose={() => setConfirmDeleteComment(null)}
+        onConfirm={async () => {
+          if (!confirmDeleteComment) return;
+          await communityApi.deleteComment(confirmDeleteComment.id);
+          setConfirmDeleteComment(null);
+          toast(t ? 'Comentario eliminado.' : 'Comment deleted.', 'success');
+          await load();
+        }}
+        title={t ? '¿Borrar comentario?' : 'Delete comment?'}
+        description={t ? 'No se puede deshacer.' : 'Cannot be undone.'}
+        confirmLabel={t ? 'Borrar' : 'Delete'}
+        confirmVariant="danger"
+      />
+
+      <ReportSheet
+        visible={!!reportComment}
+        onClose={() => setReportComment(null)}
+        title={t ? 'Reportar comentario' : 'Report comment'}
+        t={t}
+        onSubmit={async (reason, details) => {
+          if (!reportComment) return;
+          try {
+            await communityApi.reportComment(reportComment.id, {
+              reason,
+              description: details || undefined,
+            });
+            toast(t ? 'Comentario reportado. Gracias.' : 'Comment reported. Thanks.', 'success');
+          } catch (err) {
+            toast(apiError(err, t ? 'No se pudo reportar.' : 'Report failed.'), 'danger');
+            throw err;
+          }
+        }}
+      />
     </>
   );
 }
@@ -1145,7 +1272,7 @@ function CommentBubble({
         <Pressable
           ref={bubbleRef}
           onPress={handleBubbleTap}
-          onLongPress={openReactionsFromBubble}
+          onLongPress={onOptions}
           delayLongPress={320}
           style={({ pressed }) => [
             styles.bubble,
@@ -1208,7 +1335,7 @@ function CommentBubble({
         )}
 
         <View style={styles.commentActions}>
-          <Text style={styles.commentTime}>{relTime(createdAt)}</Text>
+          <Text style={styles.commentTime}>{relTime(createdAt, t)}</Text>
           <Pressable
             onPress={onLike}
             hitSlop={6}
@@ -1279,7 +1406,8 @@ function CommentItem({
 }) {
   const user = comment.user;
   const name =
-    `${user?.profile?.firstName ?? ''} ${user?.profile?.lastName ?? ''}`.trim() || 'Usuario';
+    `${user?.profile?.firstName ?? ''} ${user?.profile?.lastName ?? ''}`.trim() ||
+    (t ? 'Usuario' : 'User');
   const rootFirstName = (user?.profile?.firstName ?? '').trim();
   const likes = comment.likesCount ?? 0;
   const liked = !!comment.hasLiked;
@@ -1302,7 +1430,8 @@ function CommentItem({
     return ordered.map((r: any, idx: number) => {
       const rUser = r.user;
       const rName =
-        `${rUser?.profile?.firstName ?? ''} ${rUser?.profile?.lastName ?? ''}`.trim() || 'Usuario';
+        `${rUser?.profile?.firstName ?? ''} ${rUser?.profile?.lastName ?? ''}`.trim() ||
+        (t ? 'Usuario' : 'User');
       const rLikes = r.likesCount ?? 0;
       const rLiked = !!r.hasLiked;
       const childReplies = sortByDateAsc(r.replies || []);
@@ -1480,6 +1609,22 @@ const styles = StyleSheet.create({
   },
   timeAgo: { color: Colors.textMuted, fontSize: 11 },
   timeDot: { color: Colors.textMuted, fontSize: 11 },
+
+  // Rejection reason (own, rejected post)
+  rejectBox: {
+    marginHorizontal: 14,
+    marginBottom: Spacing[3],
+    padding: Spacing[3],
+    borderRadius: Radius.sm,
+    backgroundColor: 'rgba(196,104,104,0.10)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.accentDanger,
+  },
+  rejectText: {
+    color: Colors.accentDanger,
+    fontSize: 12,
+    lineHeight: 17,
+  },
 
   // Text-only post (FB status bubble)
   statusCard: {

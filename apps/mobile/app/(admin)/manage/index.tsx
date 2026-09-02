@@ -11,6 +11,7 @@ import { Feather } from '@expo/vector-icons';
 import { Colors, Radius, Spacing, TypePresets } from '@/constants/tokens';
 import { Caption, Heading, Kicker, Subhead } from '@/components/ui';
 import { useAdminCounts } from '@/hooks/useAdminCounts';
+import { useAuthStore } from '@/stores/auth.store';
 
 // ─────────────────────────────────────────────
 //  Manage Hub — Editorial Premium
@@ -63,20 +64,20 @@ const GROUPS: Group[] = [
     ],
   },
   {
-    title: 'Moderacion',
+    title: 'Moderación',
     items: [
       {
         id: 'community',
         icon: 'message-square',
         label: 'Comunidad',
-        sub: 'Posts pendientes de revision',
+        sub: 'Posts pendientes de revisión',
         path: '/(admin)/manage/community',
         pendingKey: 'posts',
       },
       {
         id: 'reviews',
         icon: 'star',
-        label: 'Resenas',
+        label: 'Reseñas',
         sub: 'Opiniones de usuarios',
         path: '/(admin)/manage/reviews',
         pendingKey: 'reviews',
@@ -97,7 +98,7 @@ const GROUPS: Group[] = [
         id: 'marketing',
         icon: 'mail',
         label: 'Email marketing',
-        sub: 'Envia campanas desde el telefono',
+        sub: 'Envía campañas desde el teléfono',
         path: '/(admin)/marketing',
       },
       {
@@ -124,19 +125,19 @@ const GROUPS: Group[] = [
         id: 'messages',
         icon: 'message-circle',
         label: 'Chats privados',
-        sub: 'Supervision de DMs',
+        sub: 'Supervisión de DMs',
         path: '/(admin)/manage/messages',
       },
     ],
   },
   {
-    title: 'Configuracion',
+    title: 'Configuración',
     items: [
       {
         id: 'venue',
         icon: 'map-pin',
         label: 'Datos del bar',
-        sub: 'Foto, ubicacion y contacto',
+        sub: 'Foto, ubicación y contacto',
         path: '/(admin)/manage/venue',
       },
       {
@@ -159,6 +160,11 @@ const QUICK_ACTIONS: { icon: FeatherIcon; label: string; path: string }[] = [
 export default function ManageHub() {
   const router = useRouter();
   const { counts } = useAdminCounts();
+  const me = useAuthStore((s) => s.user);
+  // Backend: offers create is ADMIN/SUPER_ADMIN only — MODERATOR gets a
+  // read-only form, so don't offer it as a quick "create" action.
+  const canCreateOffer = me?.role === 'ADMIN' || me?.role === 'SUPER_ADMIN';
+  const quickActions = QUICK_ACTIONS.filter((q) => q.label !== 'Oferta' || canCreateOffer);
 
   const totalPending =
     counts.posts + counts.reviews + counts.tickets + counts.reservations;
@@ -172,8 +178,8 @@ export default function ManageHub() {
         {/* Header */}
         <View style={styles.header}>
           <View>
-            <Kicker tone="muted">Panel de administracion</Kicker>
-            <Heading size="lg" style={{ marginTop: 4 }}>Gestion</Heading>
+            <Kicker tone="muted">Panel de administración</Kicker>
+            <Heading size="lg" style={{ marginTop: 4 }}>Gestión</Heading>
           </View>
           {totalPending > 0 && (
             <View style={styles.pendingPill}>
@@ -187,7 +193,7 @@ export default function ManageHub() {
 
         {/* Quick actions */}
         <View style={styles.quickRow}>
-          {QUICK_ACTIONS.map((q) => (
+          {quickActions.map((q) => (
             <Pressable
               key={q.label}
               style={({ pressed }) => [styles.quickBtn, pressed && styles.pressed]}
@@ -244,7 +250,7 @@ export default function ManageHub() {
         ))}
 
         <Caption tone="muted" align="center" style={styles.footerNote}>
-          Toca en Gestion otra vez para regresar a este panel
+          Toca en Gestión otra vez para regresar a este panel
         </Caption>
       </ScrollView>
     </SafeAreaView>

@@ -46,6 +46,12 @@ export class FriendshipsController {
     return this.friendships.listOutgoing(me.id, parseInt(limit || '50', 10));
   }
 
+  @Get('blocked')
+  @ApiOperation({ summary: 'List users I have blocked' })
+  blocked(@CurrentUser() me: User) {
+    return this.friendships.listBlocked(me.id);
+  }
+
   @Post('request/:userId')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Send a friend request to a user' })

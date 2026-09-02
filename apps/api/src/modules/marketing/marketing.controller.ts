@@ -69,6 +69,7 @@ export class AdminMarketingController {
   }
 
   @Post('campaigns')
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @ApiOperation({ summary: 'Create a campaign (DRAFT or SCHEDULED)' })
   createCampaign(@CurrentUser() admin: User, @Body() dto: CreateCampaignDto) {
     return this.marketing.createCampaign(dto, admin.id);
@@ -81,24 +82,28 @@ export class AdminMarketingController {
   }
 
   @Post('campaigns/:id/send')
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @ApiOperation({ summary: 'Trigger send now (runs in background)' })
   sendNow(@Param('id') id: string) {
     return this.marketing.sendCampaignNow(id);
   }
 
   @Patch('campaigns/:id/cancel')
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @ApiOperation({ summary: 'Cancel a DRAFT or SCHEDULED campaign' })
   cancel(@Param('id') id: string) {
     return this.marketing.cancelCampaign(id);
   }
 
   @Delete('campaigns/:id')
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @ApiOperation({ summary: 'Delete a campaign (cascades recipients)' })
   deleteCampaign(@Param('id') id: string) {
     return this.marketing.deleteCampaign(id);
   }
 
   @Post('assets')
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @ApiOperation({ summary: 'Upload hero image as data URI; returns public URL' })
   uploadAsset(@CurrentUser() admin: User, @Body() dto: UploadAssetDto) {
     return this.marketing.uploadAsset(dto, admin.id);

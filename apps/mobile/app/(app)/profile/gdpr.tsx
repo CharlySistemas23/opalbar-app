@@ -3,13 +3,14 @@
 //
 //  Magazine layout:
 //   · Kicker + Heading header + Lead intro about your rights
-//   · Two action cards: EXPORT (info) and DELETE (danger)
-//   · Deletion is confirmed via <ConfirmDialog> with a typed "DELETE"
-//     input and optional reason. No legacy collapsible panel.
+//   · EXPORT card: request → POST /users/me/export (dedupes server-side)
+//   · "MIS SOLICITUDES": status of exports (download when COMPLETED) and
+//     deletions — GET /users/me/data-requests. Skeleton / ErrorState / Empty.
+//   · DELETE card → dedicated /profile/delete-account screen
 //   · Final caption footer with the legal fine print.
 // ─────────────────────────────────────────────
-import { useState } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { Linking, ScrollView, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
@@ -22,46 +23,122 @@ import { useFeedback } from '@/hooks/useFeedback';
 import { Colors, EditorialSpacing, Radius, Spacing } from '@/constants/tokens';
 import { HitSlop, Roles } from '@/constants/a11y';
 import {
+  Badge,
   Body,
   Caption,
-  ConfirmDialog,
   FadeIn,
   Heading,
-  Input,
   Kicker,
   Lead,
   Pressy,
+  Skeleton,
   Subhead,
 } from '@/components/ui';
+import { ErrorState } from '@/components/ErrorState';
 import { toast } from '@/components/Toast';
+
+type RequestStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
+
+interface ExportRow {
+  id: string;
+  status: RequestStatus;
+  createdAt: string;
+  processedAt?: string | null;
+  downloadUrl?: string | null;
+  expiresAt?: string | null;
+  expired?: boolean;
+}
+
+interface DeletionRow {
+  id: string;
+  status: RequestStatus;
+  createdAt: string;
+  scheduledFor: string;
+  processedAt?: string | null;
+}
+
+interface DataRequests {
+  exports: ExportRow[];
+  deletions: DeletionRow[];
+}
+
+function statusVariant(s: RequestStatus): 'warning' | 'info' | 'success' | 'danger' {
+  if (s === 'COMPLETED') return 'success';
+  if (s === 'FAILED') return 'danger';
+  if (s === 'PROCESSING') return 'info';
+  return 'warning';
+}
 
 export default function Gdpr() {
   const router = useRouter();
-  const { logout, user } = useAuthStore();
+  const { user } = useAuthStore();
   const { language } = useAppStore();
   const t = language === 'es';
   const fb = useFeedback();
 
   const [exporting, setExporting] = useState(false);
-  const [deleteOpen, setDeleteOpen] = useState(false);
-  const [deleteConfirm, setDeleteConfirm] = useState('');
-  const [deleteReason, setDeleteReason] = useState('');
+  const [requests, setRequests] = useState<DataRequests | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const CONFIRM_WORD = t ? 'ELIMINAR' : 'DELETE';
+  const statusLabel = (s: RequestStatus) =>
+    s === 'COMPLETED'
+      ? t ? 'Lista' : 'Ready'
+      : s === 'FAILED'
+        ? t ? 'Falló' : 'Failed'
+        : s === 'PROCESSING'
+          ? t ? 'En proceso' : 'Processing'
+          : t ? 'Pendiente' : 'Pending';
+
+  const formatDate = (iso?: string | null) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    return d.toLocaleDateString(t ? 'es-MX' : 'en-US', { day: 'numeric', month: 'short', year: 'numeric' });
+  };
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await usersApi.dataRequests();
+      const data = res?.data?.data ?? {};
+      setRequests({
+        exports: Array.isArray(data.exports) ? data.exports : [],
+        deletions: Array.isArray(data.deletions) ? data.deletions : [],
+      });
+    } catch (err) {
+      setError(apiError(err, t ? 'No se pudieron cargar tus solicitudes.' : 'Could not load your requests.'));
+    } finally {
+      setLoading(false);
+    }
+  }, [t]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const hasOpenExport = !!requests?.exports.some((e) => e.status === 'PENDING' || e.status === 'PROCESSING');
 
   async function handleExport() {
     if (exporting) return;
     setExporting(true);
     try {
-      await usersApi.exportData();
+      const res = await usersApi.exportData();
+      const already = !!res?.data?.data?.alreadyRequested;
       fb.success();
       toast(
-        t
-          ? `Te enviaremos un email a ${user?.email ?? 'tu cuenta'} en 72 h.`
-          : `We'll email a ZIP to ${user?.email ?? 'your account'} within 72 h.`,
+        already
+          ? t
+            ? 'Ya tienes una exportación en curso. Te avisaremos por email.'
+            : 'An export is already in progress. We will email you.'
+          : t
+            ? `Listo. Te enviaremos un email a ${user?.email ?? 'tu cuenta'} en máximo 72 h.`
+            : `Done. We'll email ${user?.email ?? 'your account'} within 72 h.`,
         'success',
       );
-    } catch (err: any) {
+      load();
+    } catch (err) {
       fb.error();
       toast(apiError(err, t ? 'No se pudo solicitar.' : 'Request failed.'), 'danger');
     } finally {
@@ -69,30 +146,14 @@ export default function Gdpr() {
     }
   }
 
-  async function performDelete() {
-    if (deleteConfirm.trim().toUpperCase() !== CONFIRM_WORD) {
-      toast(
-        t ? `Escribe ${CONFIRM_WORD} para confirmar.` : `Type ${CONFIRM_WORD} to confirm.`,
-        'warning',
-      );
-      throw new Error('confirm-word-missing');
-    }
+  async function openDownload(row: ExportRow) {
+    if (!row.downloadUrl) return;
     try {
-      await usersApi.deleteAccount(deleteReason.trim() || undefined);
-      fb.destructive();
-      toast(
-        t
-          ? 'Cuenta marcada. 30 días para reactivar iniciando sesión.'
-          : 'Account scheduled. 30-day grace — log back in to cancel.',
-        'success',
-      );
-      setDeleteOpen(false);
-      await logout();
-      router.replace('/(auth)/welcome' as never);
-    } catch (err: any) {
-      fb.error();
-      toast(apiError(err, t ? 'No se pudo eliminar.' : "Couldn't delete."), 'danger');
-      throw err;
+      const ok = await Linking.canOpenURL(row.downloadUrl);
+      if (!ok) throw new Error('cannot-open');
+      await Linking.openURL(row.downloadUrl);
+    } catch {
+      toast(t ? 'No se pudo abrir la descarga.' : 'Could not open the download.', 'danger');
     }
   }
 
@@ -131,26 +192,125 @@ export default function Gdpr() {
             <Subhead>{t ? 'Exportar mis datos' : 'Export my data'}</Subhead>
             <Body size="sm" tone="muted">
               {t
-                ? 'Recibirás un ZIP por email con todo lo que guardamos sobre ti.'
-                : 'Get a ZIP by email with everything we store about you.'}
+                ? 'Preparamos un archivo con todo lo que guardamos sobre ti y te avisamos por email cuando esté listo (máximo 72 h).'
+                : 'We prepare a file with everything we store about you and email you when it is ready (within 72 h).'}
             </Body>
             <Pressy
               onPress={handleExport}
               haptic="select"
               accessibilityRole={Roles.button}
               accessibilityLabel={t ? 'Exportar mis datos' : 'Export my data'}
-              disabled={exporting}
-              style={[styles.linkCta, exporting && { opacity: 0.5 }]}
+              disabled={exporting || hasOpenExport}
+              style={[styles.linkCta, (exporting || hasOpenExport) && { opacity: 0.5 }]}
             >
               <Body size="sm" tone="accent" weight="semiBold">
-                {exporting ? (t ? 'Solicitando…' : 'Requesting…') : (t ? 'Solicitar exportación →' : 'Request export →')}
+                {exporting
+                  ? t ? 'Solicitando…' : 'Requesting…'
+                  : hasOpenExport
+                    ? t ? 'Exportación en curso' : 'Export in progress'
+                    : t ? 'Solicitar exportación →' : 'Request export →'}
               </Body>
             </Pressy>
           </View>
         </FadeIn>
 
+        {/* ── Requests status ── */}
+        <FadeIn delay={160} style={styles.section}>
+          <Kicker tone="muted" style={{ marginBottom: Spacing[3] }}>
+            {t ? 'MIS SOLICITUDES' : 'MY REQUESTS'}
+          </Kicker>
+          {loading ? (
+            <View style={{ gap: Spacing[3] }}>
+              <Skeleton height={64} radius={Radius.card} />
+              <Skeleton height={64} radius={Radius.card} />
+            </View>
+          ) : error ? (
+            <ErrorState
+              message={error}
+              retryLabel={t ? 'Reintentar' : 'Retry'}
+              onRetry={load}
+              icon="file-text"
+            />
+          ) : !requests || (requests.exports.length === 0 && requests.deletions.length === 0) ? (
+            <View style={styles.emptyShell}>
+              <Feather name="inbox" size={18} color={Colors.textMuted} />
+              <Body size="sm" tone="muted" style={{ flex: 1 }}>
+                {t
+                  ? 'Aún no has solicitado exportaciones ni eliminaciones.'
+                  : "You haven't requested any exports or deletions yet."}
+              </Body>
+            </View>
+          ) : (
+            <View style={{ gap: Spacing[3] }}>
+              {requests.exports.map((row) => {
+                const ready = row.status === 'COMPLETED' && !!row.downloadUrl && !row.expired;
+                return (
+                  <View key={`exp-${row.id}`} style={styles.requestRow}>
+                    <View style={styles.requestIcon}>
+                      <Feather name="download" size={16} color={Colors.accentInfo} />
+                    </View>
+                    <View style={{ flex: 1, gap: 2 }}>
+                      <View style={styles.requestTitleRow}>
+                        <Body size="sm" weight="semiBold" style={{ flex: 1 }}>
+                          {t ? 'Exportación de datos' : 'Data export'}
+                        </Body>
+                        <Badge
+                          label={row.expired ? (t ? 'Expiró' : 'Expired') : statusLabel(row.status)}
+                          variant={row.expired ? 'default' : statusVariant(row.status)}
+                          size="sm"
+                        />
+                      </View>
+                      <Caption tone="muted">
+                        {t ? 'Solicitada el ' : 'Requested on '}
+                        {formatDate(row.createdAt)}
+                        {row.status === 'COMPLETED' && row.expiresAt && !row.expired
+                          ? ` · ${t ? 'disponible hasta el' : 'available until'} ${formatDate(row.expiresAt)}`
+                          : ''}
+                      </Caption>
+                      {ready ? (
+                        <Pressy
+                          onPress={() => openDownload(row)}
+                          haptic="select"
+                          accessibilityRole={Roles.button}
+                          accessibilityLabel={t ? 'Descargar archivo' : 'Download file'}
+                          style={styles.linkCta}
+                        >
+                          <Body size="sm" tone="accent" weight="semiBold">
+                            {t ? 'Descargar archivo →' : 'Download file →'}
+                          </Body>
+                        </Pressy>
+                      ) : null}
+                    </View>
+                  </View>
+                );
+              })}
+
+              {requests.deletions.map((row) => (
+                <View key={`del-${row.id}`} style={[styles.requestRow, styles.requestRowDanger]}>
+                  <View style={[styles.requestIcon, styles.requestIconDanger]}>
+                    <Feather name="trash-2" size={16} color={Colors.accentDanger} />
+                  </View>
+                  <View style={{ flex: 1, gap: 2 }}>
+                    <View style={styles.requestTitleRow}>
+                      <Body size="sm" weight="semiBold" style={{ flex: 1 }}>
+                        {t ? 'Eliminación de cuenta' : 'Account deletion'}
+                      </Body>
+                      <Badge label={statusLabel(row.status)} variant={statusVariant(row.status)} size="sm" />
+                    </View>
+                    <Caption tone="muted">
+                      {row.status === 'COMPLETED'
+                        ? `${t ? 'Procesada el' : 'Processed on'} ${formatDate(row.processedAt ?? row.scheduledFor)}`
+                        : `${t ? 'Borrado definitivo programado para el' : 'Permanent deletion scheduled for'} ${formatDate(row.scheduledFor)}`}
+                    </Caption>
+                  </View>
+                </View>
+              ))}
+            </View>
+          )}
+        </FadeIn>
+
         {/* ── Delete card ── */}
-        <FadeIn delay={180} style={[styles.actionCard, styles.dangerCard]}>
+        <FadeIn delay={200} style={[styles.actionCard, styles.dangerCard]}>
           <View style={[styles.iconBox, styles.iconBoxDanger]}>
             <Feather name="trash-2" size={20} color={Colors.accentDanger} />
           </View>
@@ -158,15 +318,11 @@ export default function Gdpr() {
             <Subhead tone="danger">{t ? 'Eliminar cuenta' : 'Delete account'}</Subhead>
             <Body size="sm" tone="muted">
               {t
-                ? 'Se marca para borrado definitivo. 30 días de gracia para reactivar iniciando sesión.'
-                : 'Scheduled for permanent deletion. 30-day grace period — log back in to cancel.'}
+                ? 'Tu cuenta se desactiva de inmediato y se borra de forma definitiva a los 30 días. Durante ese periodo puedes pedir a soporte que la restaure.'
+                : 'Your account is deactivated immediately and permanently deleted after 30 days. During that window you can ask support to restore it.'}
             </Body>
             <Pressy
-              onPress={() => {
-                setDeleteConfirm('');
-                setDeleteReason('');
-                setDeleteOpen(true);
-              }}
+              onPress={() => router.push('/(app)/profile/delete-account' as never)}
               haptic="warning"
               accessibilityRole={Roles.button}
               accessibilityLabel={t ? 'Eliminar mi cuenta' : 'Delete my account'}
@@ -185,46 +341,6 @@ export default function Gdpr() {
             : 'Export and deletion are processed according to GDPR and local laws. Some records (billing, legal audit) may be retained as required.'}
         </Caption>
       </ScrollView>
-
-      <ConfirmDialog
-        open={deleteOpen}
-        onClose={() => setDeleteOpen(false)}
-        onConfirm={performDelete}
-        title={t ? 'Eliminar cuenta permanente' : 'Delete account permanently'}
-        confirmLabel={t ? 'Eliminar mi cuenta' : 'Delete my account'}
-        confirmVariant="danger"
-        description={
-          <View style={{ gap: Spacing[4] }}>
-            <Body tone="secondary">
-              {t
-                ? 'Perderás todos tus puntos, reservas, canjes y posts. Esta acción no se puede deshacer.'
-                : 'You will lose all your points, reservations, redemptions and posts. This cannot be undone.'}
-            </Body>
-            <Input
-              label={t ? 'MOTIVO (OPCIONAL)' : 'REASON (OPTIONAL)'}
-              placeholder={t ? 'Un comentario nos ayuda a mejorar.' : 'A comment helps us improve.'}
-              value={deleteReason}
-              onChangeText={setDeleteReason}
-              multiline
-              numberOfLines={3}
-            />
-            <Input
-              label={t ? 'CONFIRMACIÓN' : 'CONFIRMATION'}
-              placeholder={CONFIRM_WORD}
-              value={deleteConfirm}
-              onChangeText={setDeleteConfirm}
-              autoCapitalize="characters"
-              autoCorrect={false}
-              required
-              helper={
-                t
-                  ? `Escribe ${CONFIRM_WORD} para activar el botón.`
-                  : `Type ${CONFIRM_WORD} to enable the button.`
-              }
-            />
-          </View>
-        }
-      />
     </SafeAreaView>
   );
 }
@@ -251,6 +367,9 @@ const styles = StyleSheet.create({
   hero: {
     paddingVertical: Spacing[4],
     gap: Spacing[2],
+  },
+  section: {
+    marginTop: Spacing[8],
   },
   actionCard: {
     flexDirection: 'row',
@@ -282,6 +401,46 @@ const styles = StyleSheet.create({
     minHeight: 36,
     justifyContent: 'center',
     marginTop: Spacing[1],
+  },
+  emptyShell: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing[3],
+    padding: Spacing[4],
+    borderRadius: Radius.card,
+    backgroundColor: Colors.bgCard,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+  },
+  requestRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing[3],
+    padding: Spacing[4],
+    borderRadius: Radius.card,
+    backgroundColor: Colors.bgCard,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+    borderTopColor: Colors.highlightTop,
+  },
+  requestRowDanger: {
+    borderColor: 'rgba(217,106,106,0.30)',
+  },
+  requestIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: Radius.full,
+    backgroundColor: 'rgba(133,173,206,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  requestIconDanger: {
+    backgroundColor: 'rgba(217,106,106,0.10)',
+  },
+  requestTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing[2],
   },
   fineprint: {
     marginTop: Spacing[8],

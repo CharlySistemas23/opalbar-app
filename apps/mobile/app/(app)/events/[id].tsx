@@ -6,7 +6,7 @@
 //  spots/points/price. Two CTAs at the foot: attend (secondary) + book
 //  table (primary).
 // ─────────────────────────────────────────────
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
   Dimensions,
@@ -39,21 +39,14 @@ import {
 } from '@/components/ui';
 import { Colors, EditorialSpacing, Radius, Spacing } from '@/constants/tokens';
 import { HitSlop, Roles } from '@/constants/a11y';
-import { eventsApi } from '@/api/client';
+import { eventsApi, usersApi, toAbsoluteImageUrl } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { useAuthStore } from '@/stores/auth.store';
 import { useAppStore } from '@/stores/app.store';
 import { shareEvent } from '@/utils/share';
+import { ErrorState } from '@/components/ErrorState';
 
 const HERO_RATIO = 16 / 10;
-
-function toAbsoluteImageUrl(url?: string): string | undefined {
-  if (!url) return undefined;
-  if (/^https?:\/\//i.test(url) || url.startsWith('data:image/')) return url;
-  const api = process.env['EXPO_PUBLIC_API_URL'] || 'http://localhost:3000/api/v1';
-  const base = api.replace(/\/api\/v1\/?$/, '').replace(/\/$/, '');
-  return `${base}${url.startsWith('/') ? '' : '/'}${url}`;
-}
 
 export default function EventDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -64,21 +57,59 @@ export default function EventDetail() {
 
   const [event, setEvent] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [notFound, setNotFound] = useState(false);
   const [attending, setAttending] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [savingBookmark, setSavingBookmark] = useState(false);
   const [busy, setBusy] = useState(false);
   const [previewVisible, setPreviewVisible] = useState(false);
 
-  useEffect(() => {
-    eventsApi
-      .get(id)
-      .then((r) => {
-        const data = r.data?.data;
+  const load = useCallback(async () => {
+    setLoadError(null);
+    setNotFound(false);
+    try {
+      const [eventRes, savedRes] = await Promise.allSettled([
+        eventsApi.get(id),
+        isAuthenticated ? usersApi.savedItems('EVENT') : Promise.reject(null),
+      ]);
+
+      if (eventRes.status === 'fulfilled') {
+        const data = eventRes.value.data?.data;
         setEvent(data);
         setAttending(!!data?.isAttending);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [id]);
+      } else {
+        setEvent(null);
+        if (eventRes.reason?.response?.status === 404) setNotFound(true);
+        else setLoadError(apiError(eventRes.reason));
+      }
+
+      if (savedRes.status === 'fulfilled') {
+        const rows: any[] = savedRes.value.data?.data ?? [];
+        setSaved(rows.some((r) => r.targetId === id));
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [id, isAuthenticated]);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function toggleBookmark() {
+    if (!isAuthenticated) { router.push('/(auth)/login'); return; }
+    setSavingBookmark(true);
+    const prev = saved;
+    setSaved(!prev); // optimistic
+    try {
+      const r = await usersApi.toggleSave('EVENT', id);
+      setSaved(!!r.data?.data?.saved);
+    } catch (err: any) {
+      setSaved(prev); // revert
+      Alert.alert(t ? 'Error' : 'Error', apiError(err));
+    } finally {
+      setSavingBookmark(false);
+    }
+  }
 
   async function toggleAttendance() {
     if (!isAuthenticated) { router.push('/(auth)/login'); return; }
@@ -116,11 +147,12 @@ export default function EventDetail() {
       setAttending(true);
       setEvent((e: any) => (e ? { ...e, currentCapacity: (e.currentCapacity ?? 0) + 1 } : e));
     } catch (err: any) {
-      const msg = apiError(err);
-      if (/already/i.test(err?.response?.data?.message ?? '')) {
+      // 409 = already registered server-side (e.g. a stale local state after
+      // a previous attend that the client never saw the response for).
+      if (err?.response?.status === 409) {
         setAttending(true);
       } else {
-        Alert.alert(t ? 'Error' : 'Error', msg);
+        Alert.alert(t ? 'Error' : 'Error', apiError(err));
       }
     } finally {
       setBusy(false);
@@ -166,8 +198,20 @@ export default function EventDetail() {
   }
   if (!event) {
     return (
-      <SafeAreaView style={[styles.root, styles.center]} edges={['top']}>
-        <Body tone="secondary">{t ? 'Evento no encontrado' : 'Event not found'}</Body>
+      <SafeAreaView style={styles.root} edges={['top']}>
+        <View style={styles.headerBar}>
+          <BackBtn onPress={() => router.back()} label={t ? 'Volver' : 'Back'} />
+        </View>
+        <ErrorState
+          title={notFound ? (t ? 'Evento no encontrado' : 'Event not found') : (t ? 'Algo no salió bien' : 'Something went wrong')}
+          message={
+            notFound
+              ? (t ? 'Es posible que ya no esté disponible.' : 'It may no longer be available.')
+              : loadError || (t ? 'No pudimos cargar el evento.' : "We couldn't load the event.")
+          }
+          retryLabel={t ? 'Reintentar' : 'Retry'}
+          onRetry={() => { setLoading(true); load(); }}
+        />
       </SafeAreaView>
     );
   }
@@ -190,6 +234,7 @@ export default function EventDetail() {
   const lng = venue?.lng != null ? Number(venue.lng) : null;
   const hasCoords = lat != null && lng != null && !Number.isNaN(lat) && !Number.isNaN(lng);
   const heroUri = toAbsoluteImageUrl(event.imageUrl);
+  const canAttend = event.status === 'PUBLISHED' && !!startDate && startDate.getTime() > Date.now();
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
@@ -216,14 +261,33 @@ export default function EventDetail() {
           )}
           <View style={styles.heroHeader}>
             <BackBtn onPress={() => router.back()} label={t ? 'Volver' : 'Back'} overlay />
-            <Pressy
-              onPress={handleShare}
-              accessibilityLabel={t ? 'Compartir' : 'Share'}
-              hitSlop={HitSlop.expand}
-              style={styles.iconOverlay}
-            >
-              <Feather name="share-2" size={18} color={Colors.textPrimary} />
-            </Pressy>
+            <View style={{ flexDirection: 'row', gap: Spacing[2] }}>
+              <Pressy
+                onPress={toggleBookmark}
+                disabled={savingBookmark}
+                accessibilityRole={Roles.button}
+                accessibilityLabel={t ? (saved ? 'Quitar de guardados' : 'Guardar evento') : (saved ? 'Remove from saved' : 'Save event')}
+                accessibilityState={{ selected: saved }}
+                hitSlop={HitSlop.expand}
+                haptic="select"
+                style={styles.iconOverlay}
+              >
+                <Feather
+                  name="bookmark"
+                  size={18}
+                  color={saved ? Colors.accentPrimary : Colors.textPrimary}
+                  style={saved ? { opacity: 1 } : undefined}
+                />
+              </Pressy>
+              <Pressy
+                onPress={handleShare}
+                accessibilityLabel={t ? 'Compartir' : 'Share'}
+                hitSlop={HitSlop.expand}
+                style={styles.iconOverlay}
+              >
+                <Feather name="share-2" size={18} color={Colors.textPrimary} />
+              </Pressy>
+            </View>
           </View>
         </View>
 
@@ -328,7 +392,7 @@ export default function EventDetail() {
                 label={attending ? (t ? 'Asistiendo' : 'Attending') : t ? 'Asistir' : 'Attend'}
                 onPress={toggleAttendance}
                 loading={busy}
-                disabled={busy}
+                disabled={busy || (!attending && !canAttend)}
                 variant={attending ? 'secondary' : 'secondary'}
                 size="lg"
                 haptic={attending ? 'warning' : 'success'}

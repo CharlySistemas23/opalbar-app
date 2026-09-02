@@ -44,21 +44,28 @@ export class ReviewsService {
     const existing = await this.prisma.review.findUnique({
       where: { userId_venueId: { userId, venueId: dto.venueId } },
     });
-    if (existing) throw new ConflictException('You already reviewed this venue');
+    if (existing && !existing.deletedAt) throw new ConflictException('You already reviewed this venue');
 
-    const created = await this.prisma.review.create({
-      data: {
-        userId,
-        venueId: dto.venueId,
-        rating: dto.rating,
-        title: dto.title,
-        body: dto.body,
-        pros: dto.pros,
-        cons: dto.cons,
-        visitDate: dto.visitDate ? new Date(dto.visitDate) : undefined,
-        status: ReviewStatus.PENDING_REVIEW,
-      },
-    });
+    const data = {
+      rating: dto.rating,
+      title: dto.title,
+      body: dto.body,
+      pros: dto.pros,
+      cons: dto.cons,
+      visitDate: dto.visitDate ? new Date(dto.visitDate) : undefined,
+      status: ReviewStatus.PENDING_REVIEW,
+    };
+
+    // @@unique([userId, venueId]) — a soft-deleted row would block a fresh
+    // review forever (409). Revive it with the new content instead.
+    const created = existing
+      ? await this.prisma.review.update({
+          where: { id: existing.id },
+          data: { ...data, deletedAt: null, rejectionReason: null },
+        })
+      : await this.prisma.review.create({
+          data: { userId, venueId: dto.venueId, ...data },
+        });
     // Starts as PENDING — no visible change yet, but sync keeps the venue row fresh
     // in case seed data had stale values.
     await this.syncVenueRating(dto.venueId);

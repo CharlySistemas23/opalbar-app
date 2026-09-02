@@ -11,15 +11,29 @@ export type ReportReason =
   | 'HATE_SPEECH'
   | 'VIOLENCE'
   | 'MISINFORMATION'
+  | 'COPYRIGHT'
   | 'OTHER';
 
-const REASONS: { key: ReportReason; label: string; sub: string }[] = [
+type ReasonCopy = { key: ReportReason; label: string; sub: string };
+
+const REASONS_ES: ReasonCopy[] = [
   { key: 'SPAM', label: 'Spam', sub: 'Publicidad no deseada o repetitiva' },
   { key: 'INAPPROPRIATE', label: 'Contenido inapropiado', sub: 'Desnudos o contenido ilegal' },
   { key: 'HATE_SPEECH', label: 'Acoso u odio', sub: 'Insultos, amenazas, discriminación' },
   { key: 'VIOLENCE', label: 'Violencia', sub: 'Contenido violento o peligroso' },
   { key: 'MISINFORMATION', label: 'Información falsa', sub: 'Estafa o contenido engañoso' },
+  { key: 'COPYRIGHT', label: 'Derechos de autor', sub: 'Usa contenido que me pertenece' },
   { key: 'OTHER', label: 'Otro', sub: 'Descríbelo abajo' },
+];
+
+const REASONS_EN: ReasonCopy[] = [
+  { key: 'SPAM', label: 'Spam', sub: 'Unwanted or repetitive promotion' },
+  { key: 'INAPPROPRIATE', label: 'Inappropriate content', sub: 'Nudity or illegal content' },
+  { key: 'HATE_SPEECH', label: 'Harassment or hate', sub: 'Insults, threats, discrimination' },
+  { key: 'VIOLENCE', label: 'Violence', sub: 'Violent or dangerous content' },
+  { key: 'MISINFORMATION', label: 'False information', sub: 'Scam or misleading content' },
+  { key: 'COPYRIGHT', label: 'Copyright', sub: 'Uses content that belongs to me' },
+  { key: 'OTHER', label: 'Other', sub: 'Describe it below' },
 ];
 
 interface Props {
@@ -27,9 +41,13 @@ interface Props {
   onClose: () => void;
   onSubmit: (reason: ReportReason, details: string) => Promise<void> | void;
   title?: string;
+  /** true = Spanish (app default), false = English. */
+  t?: boolean;
 }
 
-export function ReportSheet({ visible, onClose, onSubmit, title = 'Reportar contenido' }: Props) {
+export function ReportSheet({ visible, onClose, onSubmit, title, t = true }: Props) {
+  const REASONS = t ? REASONS_ES : REASONS_EN;
+  const heading = title ?? (t ? 'Reportar contenido' : 'Report content');
   const [reason, setReason] = useState<ReportReason | null>(null);
   const [details, setDetails] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -54,14 +72,16 @@ export function ReportSheet({ visible, onClose, onSubmit, title = 'Reportar cont
         <View style={styles.sheet}>
           <View style={styles.handle} />
           <View style={styles.header}>
-            <Text style={styles.title}>{title}</Text>
+            <Text style={styles.title}>{heading}</Text>
             <TouchableOpacity onPress={onClose} hitSlop={10}>
               <Feather name="x" size={22} color={Colors.textPrimary} />
             </TouchableOpacity>
           </View>
 
           <Text style={styles.lead}>
-            Cuéntanos qué pasa. Tu reporte es anónimo para quien publicó.
+            {t
+              ? 'Cuéntanos qué pasa. Tu reporte es anónimo para quien publicó.'
+              : 'Tell us what happened. Your report is anonymous to the author.'}
           </Text>
 
           <View style={{ gap: 8, marginTop: 8 }}>
@@ -86,13 +106,19 @@ export function ReportSheet({ visible, onClose, onSubmit, title = 'Reportar cont
             })}
           </View>
 
-          <Text style={styles.fieldLbl}>DETALLES {reason === 'OTHER' ? '*' : '(opcional)'}</Text>
+          <Text style={styles.fieldLbl}>
+            {t ? 'DETALLES ' : 'DETAILS '}
+            {reason === 'OTHER' ? '*' : t ? '(opcional)' : '(optional)'}
+          </Text>
           <TextInput
             style={styles.input}
             multiline
+            maxLength={500}
             value={details}
             onChangeText={setDetails}
-            placeholder="Cuéntanos más (5+ caracteres si elegiste Otro)"
+            placeholder={t
+              ? 'Cuéntanos más (5+ caracteres si elegiste Otro)'
+              : 'Tell us more (5+ characters if you picked Other)'}
             placeholderTextColor={Colors.textMuted}
           />
 
@@ -104,7 +130,7 @@ export function ReportSheet({ visible, onClose, onSubmit, title = 'Reportar cont
           >
             {submitting
               ? <ActivityIndicator color={Colors.textInverse} />
-              : <Text style={styles.submitLbl}>Enviar reporte</Text>}
+              : <Text style={styles.submitLbl}>{t ? 'Enviar reporte' : 'Send report'}</Text>}
           </TouchableOpacity>
         </View>
       </View>

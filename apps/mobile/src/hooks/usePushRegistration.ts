@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import Constants, { ExecutionEnvironment } from 'expo-constants';
 import * as Device from 'expo-device';
 import { apiClient } from '../api/client';
@@ -61,11 +61,33 @@ async function getExpoPushToken(): Promise<Diagnostic> {
   }
 }
 
+/**
+ * Clears the OS badge number. Called when the inbox is opened and whenever
+ * the app returns to the foreground — the in-app badges (unread store) are
+ * the source of truth once the user is inside.
+ */
+export async function clearOsBadge() {
+  if (Platform.OS === 'web') return;
+  try {
+    const Notifications = await import('expo-notifications');
+    await Notifications.setBadgeCountAsync(0);
+  } catch {
+    /* expo-notifications unavailable (web / Expo Go quirks) — nothing to clear */
+  }
+}
+
+// Module-level memo so a re-mount (fast refresh, layout remount) doesn't
+// re-register the same token for the same session.
+let lastRegisteredToken: string | null = null;
+
 export function usePushRegistration() {
-  const { isAuthenticated, tokens } = useAuthStore();
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
 
   useEffect(() => {
-    if (!isAuthenticated || !tokens?.accessToken) return;
+    if (!isAuthenticated) {
+      lastRegisteredToken = null;
+      return;
+    }
     let cancelled = false;
 
     (async () => {
@@ -73,12 +95,18 @@ export function usePushRegistration() {
       if (cancelled) return;
 
       if (!result.ok) {
-        // Surface the reason so the user knows why push silently disappeared.
-        // Without this, "no llegó la notif" is undebuggable from a release build.
-        toast(`Push no disponible: ${result.reason}`, 'danger');
-        try {
-          await apiClient.post('/push/register-failed', { reason: result.reason }).catch(() => {});
-        } catch {}
+        // Diagnostics only for developers — end users must never see raw
+        // reasons like "permiso=denied" as a red toast on every launch.
+        if (__DEV__) toast(`Push no disponible: ${result.reason}`, 'danger');
+        apiClient.post('/push/register-failed', { reason: result.reason }).catch(() => {});
+        return;
+      }
+
+      // Dedupe: same token already registered this session (or persisted
+      // from a previous one) → skip the network round-trip.
+      const cached = lastRegisteredToken ?? (await pushTokenStore.get());
+      if (cached === result.token) {
+        lastRegisteredToken = result.token;
         return;
       }
 
@@ -90,12 +118,24 @@ export function usePushRegistration() {
         // Cache the token so logout can unregister it server-side. Without
         // this, the token stays in pushToken table until Expo reports
         // DeviceNotRegistered (can take days). Audit ref: P1 #5, 2026-05-18.
+        lastRegisteredToken = result.token;
         await pushTokenStore.set(result.token);
       } catch (err: any) {
-        toast(`Push register API error: ${err?.message ?? 'unknown'}`, 'danger');
+        if (__DEV__) toast(`Push register API error: ${err?.message ?? 'unknown'}`, 'danger');
       }
     })();
 
     return () => { cancelled = true; };
-  }, [isAuthenticated, tokens?.accessToken]);
+  }, [isAuthenticated]);
+
+  // OS badge hygiene: coming back to the app clears the tray count; the
+  // in-app badges take over from there.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    clearOsBadge();
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') clearOsBadge();
+    });
+    return () => sub.remove();
+  }, [isAuthenticated]);
 }

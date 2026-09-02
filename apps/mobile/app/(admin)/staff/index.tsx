@@ -35,6 +35,17 @@ export default function AdminStaff() {
   const [inviteLoading, setInviteLoading] = useState(false);
 
   async function changeRole(id: string, role: StaffUser['role']) {
+    const target = editing;
+    if (target && role !== target.role) {
+      if (target.id === me?.id && role !== 'SUPER_ADMIN') {
+        Alert.alert('No permitido', 'No puedes quitarte tu propio rol de super admin.');
+        return;
+      }
+      if (target.role === 'SUPER_ADMIN' && role !== 'SUPER_ADMIN' && counts.SUPER_ADMIN <= 1) {
+        Alert.alert('No permitido', 'Debe existir al menos un super admin.');
+        return;
+      }
+    }
     setSaving(true);
     try {
       await adminApi.updateUserRole(id, role);
@@ -60,9 +71,20 @@ export default function AdminStaff() {
   const load = useCallback(async () => {
     try {
       setError(null);
-      const r = await adminApi.users({ limit: 200 });
-      const rows = r.data?.data?.data ?? r.data?.data ?? [];
-      setUsers(rows.filter((u: StaffUser) => STAFF_ROLES.includes(u.role)));
+      // PaginationDto caps `limit` at 100 — asking for 200 always 400s.
+      // Filter server-side by role instead (one request per staff role);
+      // the `role` filter only accepts a single UserRole value.
+      const responses = await Promise.all(
+        STAFF_ROLES.map((role) => adminApi.users({ role, limit: 100 })),
+      );
+      const rows = responses.flatMap((r) => r.data?.data?.data ?? r.data?.data ?? []);
+      const seen = new Set<string>();
+      const staff = rows.filter((u: StaffUser) => {
+        if (seen.has(u.id)) return false;
+        seen.add(u.id);
+        return true;
+      });
+      setUsers(staff);
     } catch (err) {
       setError(apiError(err));
     } finally {

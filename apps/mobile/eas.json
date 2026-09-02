@@ -23,6 +23,7 @@
     },
     "production": {
       "autoIncrement": true,
+      "credentialsSource": "local",
       "env": {
         "EXPO_PUBLIC_API_URL": "https://opalbar-app-production.up.railway.app/api/v1",
         "EXPO_PUBLIC_CLOUDINARY_CLOUD": "dl9o0umy3",
@@ -37,6 +38,13 @@
         "track": "internal",
         "releaseStatus": "draft",
         "serviceAccountKeyPath": "./google-service-account.json"
+      },
+      "ios": {
+        "ascApiKeyPath": "C:/Users/Charly/.opal-eas/AuthKey_6ACF6P3P94.p8",
+        "ascApiKeyId": "6ACF6P3P94",
+        "ascApiKeyIssuerId": "e07bf7a3-bce0-4ebe-95f4-deab54bcef4b",
+        "appleTeamId": "839B7R4WQG",
+        "ascAppId": "6788227267"
       }
     }
   }

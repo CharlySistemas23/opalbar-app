@@ -1,13 +1,25 @@
+// ─────────────────────────────────────────────
+//  Session expired — shown by SessionGuard when the refresh token dies.
+//  Both CTAs clear `sessionExpired` so the guard stops redirecting here.
+// ─────────────────────────────────────────────
+import { useEffect } from 'react';
 import { useRouter } from 'expo-router';
 import { AuthStatusScreen } from '@/components/AuthStatusScreen';
 import { useAuthStore } from '@/stores/auth.store';
 import { useAppStore } from '@/stores/app.store';
+import { useFeedback } from '@/hooks/useFeedback';
 
 export default function SessionExpired() {
   const router = useRouter();
   const { clearSessionExpired } = useAuthStore();
   const { language } = useAppStore();
   const t = language === 'es';
+  const fb = useFeedback();
+
+  useEffect(() => {
+    fb.warning();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function goLogin() {
     clearSessionExpired();

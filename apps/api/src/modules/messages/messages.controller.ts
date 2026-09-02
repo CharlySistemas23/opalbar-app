@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { User } from '@prisma/client';
-import { IsInt, IsOptional, IsString, Length, Max, Min } from 'class-validator';
+import { ReportReason, User } from '@prisma/client';
+import { IsEnum, IsInt, IsOptional, IsString, Length, Max, MaxLength, Min } from 'class-validator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { ThrottleWrite } from '../../common/decorators/throttle-custom.decorator';
 import { MessagesService } from './messages.service';
@@ -39,6 +39,15 @@ class ReactToMessageDto {
   emoji: string;
 }
 
+class ReportThreadDto {
+  @IsEnum(ReportReason)
+  reason: ReportReason;
+  @IsOptional() @IsString() @MaxLength(400)
+  description?: string;
+  @IsOptional() @IsString() @Length(1, 64)
+  messageId?: string;
+}
+
 @ApiTags('Messages')
 @ApiBearerAuth()
 @Controller('messages')
@@ -61,6 +70,12 @@ export class MessagesController {
   @ApiOperation({ summary: 'Count of pending requests (for inbox badge)' })
   requestsCount(@CurrentUser() me: User) {
     return this.messagesService.requestsCount(me.id);
+  }
+
+  @Get('unread-count')
+  @ApiOperation({ summary: 'Unread counters for the tab badge → { threads, messages }' })
+  unreadCount(@CurrentUser() me: User) {
+    return this.messagesService.unreadCount(me.id);
   }
 
   @Post('requests/:id/accept')
@@ -126,9 +141,21 @@ export class MessagesController {
     });
   }
 
+  @Post('threads/:id/report')
+  @HttpCode(HttpStatus.CREATED)
+  @ThrottleWrite()
+  @ApiOperation({ summary: 'Report the other participant of a conversation' })
+  reportThread(
+    @CurrentUser() me: User,
+    @Param('id') id: string,
+    @Body() dto: ReportThreadDto,
+  ) {
+    return this.messagesService.reportThread(me.id, id, dto);
+  }
+
   @Delete(':messageId')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Soft-delete a message I sent' })
+  @ApiOperation({ summary: 'Soft-delete a message I sent (within 15 minutes)' })
   deleteMessage(@CurrentUser() me: User, @Param('messageId') messageId: string) {
     return this.messagesService.deleteMessage(me.id, messageId);
   }

@@ -6,8 +6,9 @@
 //  Lista: ListItem-style con avatar + nombre + preview + timestamp + unread dot.
 //
 //  Loading → SkeletonList. Empty → <EmptyState>. Error → <ErrorState>.
+//  Live: re-fetch on focus + on /rt `message` / `thread` envelopes (debounced).
 // ─────────────────────────────────────────────
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
   Image,
@@ -16,7 +17,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 
@@ -26,7 +27,6 @@ import {
   Caption,
   Display,
   FadeIn,
-  Hairline,
   Kicker,
   Pressy,
   SkeletonList,
@@ -35,64 +35,108 @@ import {
 } from '@/components/ui';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
+import { toast } from '@/components/Toast';
+import { relTime, threadPreview } from '@/components/messages';
 import { Colors, EditorialSpacing, Radius, Spacing, Typography } from '@/constants/tokens';
 import { HitSlop, Roles } from '@/constants/a11y';
 import { playUiSound } from '@/hooks/useFeedback';
+import { useRealtime } from '@/hooks/useRealtime';
 import { messagesApi } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { useAppStore } from '@/stores/app.store';
 import { useAuthStore } from '@/stores/auth.store';
+import { useUnreadStore } from '@/stores/unread.store';
 
 const AVATAR_COLORS = ['#C9A961', '#7FA0BC', '#9F8DBE', '#6FA88A', '#C46868', '#C48A8A'];
 function colorFor(id: string) {
   const idx = Math.abs([...id].reduce((a, c) => a + c.charCodeAt(0), 0)) % AVATAR_COLORS.length;
   return AVATAR_COLORS[idx];
 }
-function relTime(d?: string, t?: boolean) {
-  if (!d) return '';
-  const diff = Math.max(0, Math.floor((Date.now() - new Date(d).getTime()) / 1000));
-  if (diff < 60) return t ? 'ahora' : 'now';
-  if (diff < 3600) return `${Math.floor(diff / 60)}m`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
-  if (diff < 86400 * 7) return `${Math.floor(diff / 86400)}d`;
-  const dt = new Date(d);
-  return dt.toLocaleDateString(t ? 'es' : 'en', { day: 'numeric', month: 'short' });
-}
 
 type TabKey = 'active' | 'requests';
 
+interface Thread {
+  id: string;
+  status?: 'ACCEPTED' | 'PENDING' | 'BLOCKED';
+  requestedById?: string | null;
+  lastMessageAt?: string | null;
+  unreadCount?: number;
+  otherUser?: {
+    id: string;
+    profile?: { firstName?: string | null; lastName?: string | null; avatarUrl?: string | null } | null;
+  } | null;
+  lastMessage?: {
+    id: string;
+    content?: string | null;
+    imageUrl?: string | null;
+    stickerKey?: string | null;
+    audioUrl?: string | null;
+    audioDurationSec?: number | null;
+    senderId?: string | null;
+    isRead?: boolean;
+    deletedAt?: string | null;
+  } | null;
+}
+
 export default function MessagesList() {
   const router = useRouter();
-  const { language } = useAppStore();
-  const { user: me } = useAuthStore();
+  const language = useAppStore((s) => s.language);
+  const meId = useAuthStore((s) => s.user?.id);
   const t = language === 'es';
 
-  const [threads, setThreads] = useState<any[]>([]);
+  const [threads, setThreads] = useState<Thread[]>([]);
   const [requestsCount, setRequestsCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [tab, setTab] = useState<TabKey>('active');
+  const loadedOnce = useRef(false);
 
-  const load = useCallback(async () => {
-    setError(null);
+  const load = useCallback(async (opts: { silent?: boolean } = {}) => {
+    if (!opts.silent) setError(null);
     try {
       const [threadsRes, reqRes] = await Promise.all([
         messagesApi.threads(),
         messagesApi.requestsCount().catch(() => null),
       ]);
       setThreads(threadsRes.data?.data ?? []);
-      setRequestsCount(reqRes?.data?.data?.count ?? 0);
+      const count = reqRes?.data?.data?.count;
+      if (typeof count === 'number') {
+        setRequestsCount(count);
+        useUnreadStore.getState().set({ messageRequests: count });
+      }
+      setError(null);
+      loadedOnce.current = true;
     } catch (err) {
-      setError(apiError(err));
+      // Silent (background) refreshes must not blank a list we already show.
+      if (opts.silent && loadedOnce.current) toast(apiError(err), 'danger');
+      else setError(apiError(err));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  // First mount → skeleton. Every re-focus (back from a thread that marked
+  // itself read, from requests after accepting) → silent refresh.
+  useFocusEffect(
+    useCallback(() => {
+      load({ silent: loadedOnce.current });
+    }, [load]),
+  );
+
+  // Live updates: new/read/deleted messages and thread lifecycle (request
+  // accepted / declined / blocked). Debounced so a burst = one fetch.
+  const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (debounce.current) clearTimeout(debounce.current); }, []);
+  useRealtime(['message', 'thread'], () => {
+    if (debounce.current) clearTimeout(debounce.current);
+    debounce.current = setTimeout(() => {
+      debounce.current = null;
+      load({ silent: true });
+    }, 300);
+  });
 
   // Switching to Solicitudes pushes the dedicated screen — there's no
   // shared list shape that fits both, and the requests screen has its own
@@ -112,10 +156,10 @@ export default function MessagesList() {
     return threads.filter((thr) => {
       const o = thr.otherUser;
       const name = `${o?.profile?.firstName ?? ''} ${o?.profile?.lastName ?? ''}`.toLowerCase();
-      const preview = (thr.lastMessage?.content ?? '').toLowerCase();
+      const preview = threadPreview(thr.lastMessage, meId, t).toLowerCase();
       return name.includes(q) || preview.includes(q);
     });
-  }, [threads, query]);
+  }, [threads, query, meId, t]);
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
@@ -217,7 +261,7 @@ export default function MessagesList() {
             <FadeIn delay={Math.min(index, 6) * 60}>
               <ThreadRow
                 thread={item}
-                meId={me?.id}
+                meId={meId}
                 t={t}
                 onPress={() => router.push(`/(app)/messages/${item.id}` as never)}
               />
@@ -260,7 +304,7 @@ function ThreadRow({
   t,
   onPress,
 }: {
-  thread: any;
+  thread: Thread;
   meId?: string;
   t: boolean;
   onPress: () => void;
@@ -272,21 +316,22 @@ function ThreadRow({
   const initials = ((first[0] || '') + (last[0] || '')).toUpperCase() || 'U';
   const lastMsg = thread.lastMessage;
   const isMine = !!lastMsg && lastMsg.senderId === meId;
-  const hasUnread = thread.unreadCount > 0;
-  const previewBody = lastMsg?.stickerKey
-    ? `${lastMsg.stickerKey}  ${t ? 'Sticker' : 'Sticker'}`
-    : lastMsg?.imageUrl
-      ? (t ? 'Foto' : 'Photo')
-      : (lastMsg?.content ?? '');
-  const preview = isMine && previewBody
-    ? `${t ? 'Tú' : 'You'}: ${previewBody}`
-    : previewBody;
+  const unread = thread.unreadCount ?? 0;
+  const hasUnread = unread > 0;
+  const pendingMine = thread.status === 'PENDING' && thread.requestedById === meId;
+  const preview = threadPreview(lastMsg, meId, t);
+
+  const a11yState = pendingMine
+    ? (t ? 'Solicitud pendiente.' : 'Request pending.')
+    : hasUnread
+      ? (t ? `${unread} sin leer.` : `${unread} unread.`)
+      : '';
 
   return (
     <Pressy
       onPress={onPress}
       accessibilityRole={Roles.button}
-      accessibilityLabel={`${name}. ${preview || (t ? 'Sin mensajes' : 'No messages')}`}
+      accessibilityLabel={`${name}. ${a11yState} ${preview || (t ? 'Sin mensajes' : 'No messages')}`}
       style={styles.row}
     >
       <View style={styles.avatarWrap}>
@@ -304,6 +349,11 @@ function ThreadRow({
           <Subhead numberOfLines={1} style={{ flex: 1 }}>
             {name}
           </Subhead>
+          {pendingMine ? (
+            <View style={{ marginLeft: Spacing[2] }}>
+              <Badge label={t ? 'Pendiente' : 'Pending'} variant="warning" size="sm" outline />
+            </View>
+          ) : null}
           <Caption
             size="sm"
             tone={hasUnread ? 'accent' : 'muted'}
@@ -313,7 +363,7 @@ function ThreadRow({
           </Caption>
         </View>
         <View style={styles.rowBottom}>
-          {isMine && lastMsg && (
+          {isMine && lastMsg && !lastMsg.deletedAt && (
             <Feather
               name={lastMsg.isRead ? 'check-circle' : 'check'}
               size={11}
@@ -325,15 +375,18 @@ function ThreadRow({
             size="sm"
             tone={hasUnread ? 'primary' : 'secondary'}
             numberOfLines={1}
-            style={{ flex: 1 }}
+            style={[{ flex: 1 }, ...(lastMsg?.deletedAt ? [{ fontStyle: 'italic' as const }] : [])]}
             weight={hasUnread ? 'semiBold' : 'regular'}
           >
-            {preview || (t ? 'Empieza a conversar' : 'Start the conversation')}
+            {preview
+              || (pendingMine
+                ? (t ? 'Esperando que acepte tu solicitud' : 'Waiting for them to accept')
+                : (t ? 'Empieza a conversar' : 'Start the conversation'))}
           </Body>
           {hasUnread && (
             <View style={{ marginLeft: Spacing[2] }}>
               <Badge
-                label={thread.unreadCount > 99 ? '99+' : String(thread.unreadCount)}
+                label={unread > 99 ? '99+' : String(unread)}
                 variant="accent"
                 size="sm"
               />
@@ -463,6 +516,3 @@ const styles = StyleSheet.create({
     gap: Spacing[2],
   },
 });
-
-// Hairline kept for future use (separator pattern).
-void Hairline;

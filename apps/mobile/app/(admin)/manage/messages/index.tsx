@@ -12,6 +12,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { adminApi } from '@/api/client';
+import { apiError } from '@/api/errors';
 import { useSafeBack } from '@/hooks/useSafeBack';
 import { Colors, Radius, Spacing } from '@/constants/tokens';
 import {
@@ -23,6 +24,7 @@ import {
   Sheet,
   Subhead,
 } from '@/components/ui';
+import { ErrorState } from '@/components/ErrorState';
 import { AdminHeader, StatusPill } from '@/components/admin';
 import { UserPicker, type PickedUser } from '@/components/admin/UserPicker';
 
@@ -60,23 +62,28 @@ export default function MessagesModerationList() {
     setSending(true);
     try {
       await adminApi.sendMessageAsAdmin({ userId: picked.id, content: body.trim() });
-      Alert.alert('Mensaje enviado', `Llego como un DM tuyo a ${picked.email}.`);
+      Alert.alert('Mensaje enviado', `Llegó como un DM tuyo a ${picked.email}.`);
       setComposing(false);
       setPicked(null);
       setBody('');
-      load();
-    } catch (e: any) {
-      Alert.alert('Error', e?.response?.data?.message ?? 'No se pudo enviar');
+      load(appliedSearch);
+    } catch (err) {
+      Alert.alert('Error', apiError(err));
     } finally {
       setSending(false);
     }
   }
 
+  const [error, setError] = useState<string | null>(null);
+
   const load = useCallback(async (q = '') => {
+    setError(null);
     try {
       const r = await adminApi.allThreads(q.trim() || undefined);
       setThreads(r.data?.data ?? r.data ?? []);
-    } catch {}
+    } catch (err) {
+      setError(apiError(err));
+    }
     finally {
       setLoading(false);
       setRefreshing(false);
@@ -95,7 +102,7 @@ export default function MessagesModerationList() {
     <SafeAreaView style={styles.root} edges={['top']}>
       <AdminHeader
         title="Conversaciones"
-        kicker={`${threads.length} hilos · moderacion`}
+        kicker={`${threads.length} hilos · moderación`}
         onBack={goBack}
         right={
           <Pressable
@@ -129,7 +136,7 @@ export default function MessagesModerationList() {
                 }
               : undefined
           }
-          rightIconLabel="Limpiar busqueda"
+          rightIconLabel="Limpiar búsqueda"
           returnKeyType="search"
         />
       </View>
@@ -145,6 +152,8 @@ export default function MessagesModerationList() {
         <View style={styles.center}>
           <ActivityIndicator color={Colors.accentPrimary} />
         </View>
+      ) : error ? (
+        <ErrorState message={error} onRetry={() => load(appliedSearch)} />
       ) : (
         <FlatList
           data={threads}
@@ -163,7 +172,7 @@ export default function MessagesModerationList() {
               <Caption tone="muted" align="center" style={{ marginTop: Spacing[2] }}>
                 {appliedSearch
                   ? `Sin resultados para "${appliedSearch}".`
-                  : 'Sin conversaciones todavia.'}
+                  : 'Sin conversaciones todavía.'}
               </Caption>
             </View>
           }
@@ -180,7 +189,7 @@ export default function MessagesModerationList() {
                 style={({ pressed }) => [styles.card, pressed && styles.pressed]}
                 onPress={() => router.push(`/(admin)/manage/messages/${item.id}` as never)}
                 accessibilityRole="button"
-                accessibilityLabel={`Conversacion entre ${nA} y ${nB}`}
+                accessibilityLabel={`Conversación entre ${nA} y ${nB}`}
               >
                 <View style={styles.avatars}>
                   <View style={styles.avatar}>

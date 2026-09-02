@@ -41,6 +41,12 @@ export default function AdminLayout() {
     }
   }, [_hasHydrated, user]);
 
+  // Until the persisted session hydrates we don't know the role — rendering
+  // the admin shell for a split second would flash gated UI (and fire fetches
+  // that 403). Same for a non-staff user waiting on the redirect above.
+  if (!_hasHydrated) return null;
+  if (!user || !ADMIN_ROLES.includes(user.role)) return null;
+
   return (
     <Tabs
       screenOptions={{ headerShown: false, tabBarHideOnKeyboard: true }}

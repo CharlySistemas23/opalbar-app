@@ -16,6 +16,9 @@ import { Feather } from '@expo/vector-icons';
 import { adminApi, messagesApi } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { useAuthStore } from '@/stores/auth.store';
+import { useFeedback } from '@/hooks/useFeedback';
+import { toast } from '@/components/Toast';
+import { ReasonSheet } from '@/components/admin';
 import { Colors } from '@/constants/tokens';
 
 // ─────────────────────────────────────────────
@@ -99,6 +102,7 @@ export default function AdminUserDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const { user: me } = useAuthStore();
+  const fb = useFeedback();
   const isSuperAdmin = me?.role === 'SUPER_ADMIN';
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -106,6 +110,8 @@ export default function AdminUserDetail() {
   const [note, setNote] = useState('');
   const [savingNote, setSavingNote] = useState(false);
   const [showSessions, setShowSessions] = useState(false);
+  const [pointsSheet, setPointsSheet] = useState<{ initial: number } | null>(null);
+  const [pointsBusy, setPointsBusy] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -212,23 +218,27 @@ export default function AdminUserDetail() {
     );
   }
 
-  async function adjustPoints(delta: number) {
-    Alert.prompt?.(
-      `${delta > 0 ? 'Agregar' : 'Descontar'} puntos`,
-      `Razón del ajuste ${delta > 0 ? `+${delta}` : delta}:`,
-      async (reason) => {
-        if (!reason?.trim()) return;
-        setBusy(true);
-        try {
-          await adminApi.adjustUserPoints(id, delta, reason.trim());
-          await load();
-        } catch (err) {
-          Alert.alert('Error', apiError(err));
-        } finally {
-          setBusy(false);
-        }
-      },
-    );
+  // Alert.prompt is iOS-only — on Android it silently no-ops, so the points
+  // sheet below (numeric field + reason) replaces it on both platforms.
+  function openPointsSheet(initial: number) {
+    setPointsSheet({ initial });
+  }
+
+  async function submitPointsAdjust(reason: string, delta?: number) {
+    if (delta == null) return;
+    setPointsBusy(true);
+    try {
+      await adminApi.adjustUserPoints(id, delta, reason);
+      setPointsSheet(null);
+      fb.success();
+      toast(`${delta > 0 ? '+' : ''}${delta} puntos aplicados`, 'success');
+      await load();
+    } catch (err) {
+      fb.error();
+      toast(apiError(err), 'danger');
+    } finally {
+      setPointsBusy(false);
+    }
   }
 
   if (loading) {
@@ -336,8 +346,8 @@ export default function AdminUserDetail() {
         {/* ── Quick action buttons ─────────────── */}
         <View style={styles.quickRow}>
           <QuickAction icon="send" label="Mensaje" onPress={openChat} />
-          <QuickAction icon="plus-circle" label="+ Puntos" onPress={() => adjustPoints(50)} />
-          <QuickAction icon="minus-circle" label="− Puntos" onPress={() => adjustPoints(-50)} />
+          <QuickAction icon="plus-circle" label="+ Puntos" onPress={() => openPointsSheet(50)} />
+          <QuickAction icon="minus-circle" label="− Puntos" onPress={() => openPointsSheet(-50)} />
         </View>
 
         {/* ── Dossier card (at-a-glance summary) ───── */}
@@ -776,22 +786,46 @@ export default function AdminUserDetail() {
             <Text style={styles.actionRowLbl}>Resetear contraseña</Text>
           </Pressable>
 
-          {/* Resend verification (solo si no está verificado) */}
+          {/* Marcar verificado sin OTP (override de admin) */}
+          {!user.isVerified && (
+            <Pressable
+              style={({ pressed }) => [styles.actionRow, pressed && { opacity: 0.7 }]}
+              onPress={async () => {
+                setBusy(true);
+                try {
+                  await adminApi.markUserVerified(user.id);
+                  fb.success();
+                  toast('Usuario marcado como verificado', 'success');
+                  await load();
+                } catch (e) {
+                  fb.error();
+                  toast(apiError(e), 'danger');
+                } finally {
+                  setBusy(false);
+                }
+              }}
+              disabled={busy}
+            >
+              <Feather name="check-circle" size={16} color={Colors.accentInfo} />
+              <Text style={styles.actionRowLbl}>Marcar como verificado (sin OTP)</Text>
+            </Pressable>
+          )}
+
+          {/* Reenviar correo de verificación (envía un nuevo OTP) */}
           {!user.isVerified && (
             <Pressable
               style={({ pressed }) => [styles.actionRow, pressed && { opacity: 0.7 }]}
               onPress={async () => {
                 try {
                   await adminApi.resendUserVerification(user.id);
-                  Alert.alert('OK', 'Usuario marcado como verificado.');
-                  load();
-                } catch (e: any) {
-                  Alert.alert('Error', apiError(e));
+                  toast('Correo de verificación reenviado', 'success');
+                } catch (e) {
+                  toast(apiError(e), 'danger');
                 }
               }}
             >
-              <Feather name="mail" size={16} color={Colors.accentInfo} />
-              <Text style={styles.actionRowLbl}>Marcar como verificado</Text>
+              <Feather name="mail" size={16} color={Colors.textPrimary} />
+              <Text style={styles.actionRowLbl}>Reenviar correo de verificación</Text>
             </Pressable>
           )}
 
@@ -827,6 +861,21 @@ export default function AdminUserDetail() {
         userId={user.id}
         onClose={() => setShowSessions(false)}
       />
+
+      {/* Points adjustment — replaces the iOS-only Alert.prompt */}
+      <ReasonSheet
+        open={!!pointsSheet}
+        onClose={() => setPointsSheet(null)}
+        title="Ajustar puntos"
+        subtitle={`Se aplicará al saldo de ${name}. Usa un valor negativo para descontar.`}
+        label="Motivo del ajuste"
+        minLength={3}
+        maxLength={300}
+        confirmLabel="Aplicar"
+        loading={pointsBusy}
+        number={{ label: 'Puntos (+/-)', placeholder: 'Ej. 50 o -50', initial: pointsSheet?.initial, nonZero: true }}
+        onConfirm={submitPointsAdjust}
+      />
     </SafeAreaView>
   );
 }
@@ -837,14 +886,18 @@ export default function AdminUserDetail() {
 function SessionsModal({ visible, userId, onClose }: { visible: boolean; userId: string; onClose: () => void }) {
   const [sessions, setSessions] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const r = await adminApi.listUserSessions(userId);
       const list = r.data?.data ?? r.data ?? [];
       setSessions(Array.isArray(list) ? list : []);
-    } catch {} finally { setLoading(false); }
+    } catch (err) {
+      setError(apiError(err));
+    } finally { setLoading(false); }
   }, [userId]);
 
   useFocusEffect(useCallback(() => { if (visible) load(); }, [visible, load]));
@@ -896,6 +949,13 @@ function SessionsModal({ visible, userId, onClose }: { visible: boolean; userId:
           <ScrollView>
             {loading ? (
               <ActivityIndicator color={Colors.accentPrimary} style={{ marginVertical: 32 }} />
+            ) : error ? (
+              <View style={{ alignItems: 'center', padding: 24, gap: 8 }}>
+                <Text style={{ color: Colors.accentDanger, textAlign: 'center', fontSize: 13 }}>{error}</Text>
+                <Pressable onPress={load} hitSlop={8}>
+                  <Text style={{ color: Colors.accentPrimary, fontWeight: '700', fontSize: 13 }}>Reintentar</Text>
+                </Pressable>
+              </View>
             ) : sessions.length === 0 ? (
               <Text style={{ color: Colors.textMuted, textAlign: 'center', padding: 24 }}>Sin sesiones registradas.</Text>
             ) : sessions.map((s) => (

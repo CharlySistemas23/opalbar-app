@@ -7,15 +7,32 @@
 //  callback (typically refetch + setState) whenever the server pushes
 //  an event for that resource.
 //
+//  Lifecycle: the socket singleton is torn down on logout and rebuilt on
+//  the next login. `useSocketGeneration()` tracks that so listeners that
+//  live for the whole app session (NotificationListener, unread badges)
+//  re-attach to the fresh instance instead of a dead one.
+//
 //  Usage:
 //    useRealtime('reservation', () => loadMyReservations());
 //    useRealtime(['post', 'comment'], () => loadFeed());
 //    useRealtime('*', (env) => console.log(env)); // every event
 // ─────────────────────────────────────────────
-import { useEffect, useRef } from 'react';
-import { getRtSocket, type RealtimeEnvelope, type RealtimeResource } from '../api/rt-socket';
+import { useEffect, useRef, useSyncExternalStore } from 'react';
+import {
+  getRtSocket,
+  getSocketGeneration,
+  subscribeSocketGeneration,
+  type RealtimeEnvelope,
+  type RealtimeResource,
+} from '../api/rt-socket';
+import { tokenStore } from '../api/client';
 
 type ResourceFilter = RealtimeResource | RealtimeResource[] | '*';
+
+/** Increments every time the `/rt` socket singleton is closed or recreated. */
+export function useSocketGeneration(): number {
+  return useSyncExternalStore(subscribeSocketGeneration, getSocketGeneration, getSocketGeneration);
+}
 
 export function useRealtime(
   resource: ResourceFilter,
@@ -23,6 +40,8 @@ export function useRealtime(
 ) {
   const cbRef = useRef(onEvent);
   useEffect(() => { cbRef.current = onEvent; }, [onEvent]);
+  const generation = useSocketGeneration();
+  const key = Array.isArray(resource) ? resource.join(',') : resource;
 
   useEffect(() => {
     const socket = getRtSocket();
@@ -41,7 +60,8 @@ export function useRealtime(
     return () => {
       socket.off('rt:event', handler);
     };
-  }, [Array.isArray(resource) ? resource.join(',') : resource]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, generation]);
 }
 
 /**
@@ -50,10 +70,12 @@ export function useRealtime(
  * screens use `useRealtime(resource, cb)` for that.
  */
 export function useRealtimeConnection(enabled: boolean) {
+  const generation = useSocketGeneration();
   useEffect(() => {
     if (!enabled) return;
     const socket = getRtSocket();
-    // Touch the socket so it reconnects with the latest token.
-    if (!socket.connected) socket.connect();
-  }, [enabled]);
+    // Touch the socket so it reconnects with the latest token. `getRtSocket`
+    // itself refuses to dial without a token (guest sessions).
+    if (!socket.connected && !socket.active && tokenStore.getAccessToken()) socket.connect();
+  }, [enabled, generation]);
 }

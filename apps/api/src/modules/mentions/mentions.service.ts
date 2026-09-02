@@ -292,7 +292,46 @@ export class MentionsService {
         },
       },
     });
-    return rows;
+    if (rows.length === 0) return [];
+
+    // Hydrate the underlying post/story so the request row can show a
+    // thumbnail + preview. I'm the tagged user, so no privacy gating applies:
+    // the author chose to tag me. Rows whose target vanished are dropped.
+    const postIds = rows.filter((r) => r.targetType === MentionTargetType.POST).map((r) => r.targetId);
+    const storyIds = rows.filter((r) => r.targetType === MentionTargetType.STORY).map((r) => r.targetId);
+    const [posts, stories] = await Promise.all([
+      postIds.length
+        ? this.prisma.post.findMany({
+            where: { id: { in: postIds }, deletedAt: null },
+            select: { id: true, content: true, imageUrl: true, mediaUrls: true, createdAt: true, status: true },
+          })
+        : Promise.resolve([]),
+      storyIds.length
+        ? this.prisma.story.findMany({
+            where: { id: { in: storyIds }, expiresAt: { gt: new Date() } },
+            select: { id: true, mediaUrl: true, caption: true, createdAt: true, expiresAt: true, userId: true },
+          })
+        : Promise.resolve([]),
+    ]);
+    const postMap = new Map(
+      posts.map((p) => [
+        p.id,
+        {
+          ...p,
+          mediaUrls: (p.mediaUrls ?? []).filter((u) => !u.startsWith('__')),
+          imageUrl: p.imageUrl ?? (p.mediaUrls ?? []).find((u) => !u.startsWith('__')) ?? null,
+        },
+      ]),
+    );
+    const storyMap = new Map(stories.map((s) => [s.id, s]));
+
+    return rows
+      .map((r) => {
+        const item = r.targetType === MentionTargetType.POST ? postMap.get(r.targetId) : storyMap.get(r.targetId);
+        if (!item) return null;
+        return { ...r, item };
+      })
+      .filter((r): r is NonNullable<typeof r> => r !== null);
   }
 
   async pendingCount(meId: string) {
@@ -329,9 +368,9 @@ export class MentionsService {
         ? this.prisma.post.findMany({
             where: { id: { in: postIds }, deletedAt: null },
             select: {
-              id: true, content: true, imageUrl: true, createdAt: true, userId: true,
+              id: true, content: true, imageUrl: true, mediaUrls: true, createdAt: true, userId: true,
               user: { select: { id: true, isPrivate: true, profile: { select: { firstName: true, lastName: true, avatarUrl: true } } } },
-              _count: { select: { reactions: true, comments: true } },
+              _count: { select: { emojiReactions: true, comments: true } },
             },
           })
         : Promise.resolve([] as any[]),

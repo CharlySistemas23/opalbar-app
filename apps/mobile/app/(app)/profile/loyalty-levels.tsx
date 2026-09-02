@@ -8,13 +8,14 @@
 //     icon (or padlock) + name + range + benefits paragraph. Current
 //     level gets accent border; locked levels dim by 0.55.
 // ─────────────────────────────────────────────
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 
 import { loyaltyApi } from '@/api/client';
+import { apiError } from '@/api/errors';
 import { useAuthStore } from '@/stores/auth.store';
 import { useAppStore } from '@/stores/app.store';
 import { Colors, EditorialSpacing, Radius, Spacing } from '@/constants/tokens';
@@ -30,6 +31,7 @@ import {
   Pressy,
   SkeletonList,
 } from '@/components/ui';
+import { ErrorState } from '@/components/ErrorState';
 
 type FeatherName = React.ComponentProps<typeof Feather>['name'];
 
@@ -45,11 +47,12 @@ function resolveIcon(raw?: string | null): FeatherName {
 interface Level {
   id: string;
   name: string;
+  nameEn?: string | null;
   minPoints?: number;
   maxPoints?: number;
   color?: string;
   icon?: string | null;
-  benefits?: string;
+  benefits?: string[];
 }
 
 export default function LoyaltyLevels() {
@@ -60,18 +63,23 @@ export default function LoyaltyLevels() {
 
   const [levels, setLevels] = useState<Level[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const load = useCallback(() => {
+    setError(null);
     loyaltyApi
       .levels()
       .then((r) => {
         const payload = r.data?.data;
-        const items: Level[] = Array.isArray(payload) ? payload : payload?.items ?? [];
+        const items: Level[] = Array.isArray(payload) ? payload : payload?.data ?? payload?.items ?? [];
         const sorted = [...items].sort((a, b) => (a.minPoints ?? 0) - (b.minPoints ?? 0));
         setLevels(sorted);
       })
+      .catch((err) => setError(apiError(err)))
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => { load(); }, [load]);
 
   const currentPoints = user?.points ?? 0;
 
@@ -114,13 +122,19 @@ export default function LoyaltyLevels() {
           <SkeletonList count={1} itemHeight={200} />
           <SkeletonList count={4} itemHeight={92} />
         </View>
+      ) : error && levels.length === 0 ? (
+        <ErrorState
+          message={error}
+          retryLabel={t ? 'Reintentar' : 'Retry'}
+          onRetry={() => { setLoading(true); load(); }}
+        />
       ) : (
         <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
           {/* ── Hero ── */}
           <FadeIn style={styles.hero}>
             <Kicker tone="muted">{t ? 'NIVEL ACTUAL' : 'CURRENT TIER'}</Kicker>
             <Heading size="lg" style={{ marginTop: Spacing[2] }}>
-              {currentLevel?.name ?? '—'}
+              {currentLevel ? (t ? currentLevel.name : currentLevel.nameEn || currentLevel.name) : '—'}
             </Heading>
             <View style={{ flexDirection: 'row', alignItems: 'baseline', marginTop: Spacing[5], gap: Spacing[2] }}>
               <Numeric size="md">{currentPoints.toLocaleString(language)}</Numeric>
@@ -135,7 +149,7 @@ export default function LoyaltyLevels() {
                 <Caption tone="muted" style={{ marginTop: Spacing[3] }}>
                   {t
                     ? `${Math.max(0, (nextLevel.minPoints ?? 0) - currentPoints)} pts para ${nextLevel.name}`
-                    : `${Math.max(0, (nextLevel.minPoints ?? 0) - currentPoints)} pts to ${nextLevel.name}`}
+                    : `${Math.max(0, (nextLevel.minPoints ?? 0) - currentPoints)} pts to ${nextLevel.nameEn || nextLevel.name}`}
                 </Caption>
               </View>
             ) : (
@@ -183,7 +197,7 @@ export default function LoyaltyLevels() {
                       <View style={{ flex: 1 }}>
                         <View style={styles.levelRow}>
                           <Heading size="sm" tone={achieved ? 'primary' : 'muted'}>
-                            {level.name}
+                            {t ? level.name : level.nameEn || level.name}
                           </Heading>
                           {isCurrent ? (
                             <Caption tone="champagne" style={{ marginLeft: Spacing[2] }}>
@@ -195,9 +209,9 @@ export default function LoyaltyLevels() {
                           {level.minPoints ?? 0}
                           {level.maxPoints ? ` – ${level.maxPoints}` : '+'} {t ? 'pts' : 'pts'}
                         </Caption>
-                        {level.benefits ? (
+                        {level.benefits && level.benefits.length > 0 ? (
                           <Body size="sm" tone="secondary" style={{ marginTop: Spacing[3] }} numberOfLines={4}>
-                            {level.benefits}
+                            {level.benefits.join('  ·  ')}
                           </Body>
                         ) : null}
                       </View>

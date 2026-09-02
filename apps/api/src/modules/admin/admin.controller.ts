@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Patch, Post, Query } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { ReportStatus, UserRole, UserStatus } from '@prisma/client';
+import { PostStatus, UserRole } from '@prisma/client';
 import { IsEnum, IsOptional, IsString, MaxLength } from 'class-validator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -23,6 +23,29 @@ class UpdateInternalNoteDto {
 }
 import { PaginationDto } from '../../common/dto/pagination.dto';
 import { AdminListUsersDto } from './dto/admin-list-users.dto';
+import {
+  AdjustPointsDto,
+  AdminPostsFilterDto,
+  AdminReportsFilterDto,
+  BanUserDto,
+  BroadcastPushDto,
+  BulkPostIdsDto,
+  BulkReviewIdsDto,
+  CreateFeatureFlagDto,
+  CreateLoyaltyLevelDto,
+  CreateManualReservationDto,
+  CreateTicketForUserDto,
+  CreateUserManuallyDto,
+  GdprProcessDto,
+  PinPostDto,
+  RejectPostDto,
+  ResolveReportDto,
+  SendMessageAsAdminDto,
+  UpdateFeatureFlagDto,
+  UpdateLoyaltyLevelDto,
+  UpdatePostStatusDto,
+  VenueBlockDto,
+} from './dto/admin-actions.dto';
 import { User } from '@prisma/client';
 import { AdminService } from './admin.service';
 import { ReservationsService } from '../reservations/reservations.service';
@@ -76,25 +99,22 @@ export class AdminController {
 
   @Patch('gdpr/export/:id') @ApiOperation({ summary: 'Process / approve export request' })
   @Audit('gdpr.export.process', { targetType: 'GDPR_EXPORT' })
-  processExport(@Param('id') id: string, @Body('action') action: 'APPROVE' | 'REJECT') {
-    return this.adminService.processExportRequest(id, action);
+  processExport(@Param('id') id: string, @Body() dto: GdprProcessDto) {
+    return this.adminService.processExportRequest(id, dto.action);
   }
 
   @Patch('gdpr/deletion/:id') @ApiOperation({ summary: 'Process / approve deletion request' })
   @Audit('gdpr.deletion.process', { targetType: 'GDPR_DELETION' })
-  processDeletion(@Param('id') id: string, @Body('action') action: 'APPROVE' | 'REJECT') {
-    return this.adminService.processDeletionRequest(id, action);
+  processDeletion(@Param('id') id: string, @Body() dto: GdprProcessDto) {
+    return this.adminService.processDeletionRequest(id, dto.action);
   }
 
   @Post('notifications/broadcast')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @Audit('push.broadcast')
   @ApiOperation({ summary: 'Send a push notification to all users' })
-  broadcast(
-    @CurrentUser() admin: User,
-    @Body() body: { title: string; body: string; audience?: 'ALL' | 'ADMINS' },
-  ) {
-    return this.adminService.broadcastPush(body.title, body.body, body.audience ?? 'ALL', admin.id);
+  broadcast(@CurrentUser() admin: User, @Body() dto: BroadcastPushDto) {
+    return this.adminService.broadcastPush(dto.title, dto.body, dto.audience ?? 'ALL', admin.id);
   }
 
   @Get('users') @ApiOperation({ summary: 'List all users' })
@@ -105,11 +125,8 @@ export class AdminController {
   @Post('users') @Roles(UserRole.SUPER_ADMIN)
   @Audit('user.create_admin', { targetType: 'USER' })
   @ApiOperation({ summary: 'Create a user manually (staff onboarding, VIP). Returns temp password.' })
-  createUser(
-    @CurrentUser() admin: User,
-    @Body() body: { email: string; firstName?: string; lastName?: string; role?: UserRole; phone?: string },
-  ) {
-    return this.adminService.createUserManually(admin.id, body);
+  createUser(@CurrentUser() admin: User, @Body() dto: CreateUserManuallyDto) {
+    return this.adminService.createUserManually(admin.id, dto);
   }
 
   @Post('users/:id/reset-password') @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
@@ -128,6 +145,14 @@ export class AdminController {
     return this.adminService.resendVerification(id);
   }
 
+  @Post('users/:id/mark-verified') @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @Audit('user.mark_verified', { targetType: 'USER', targetIdParam: 'id' })
+  @ApiOperation({ summary: 'Mark the account as verified without the OTP round-trip (admin override)' })
+  markUserVerified(@CurrentUser() admin: User, @Param('id') id: string) {
+    return this.adminService.markUserVerified(admin.id, id);
+  }
+
   @Get('users/:id') @ApiOperation({ summary: 'User detail with interests, stats, consent, activity' })
   getUser(@Param('id') id: string) {
     return this.adminService.getUserDetail(id);
@@ -143,19 +168,15 @@ export class AdminController {
   @Post('users/:id/points')
   @Audit('user.points.adjust', { targetType: 'USER' })
   @ApiOperation({ summary: 'Manually adjust points (+/-) with reason' })
-  adjustPoints(
-    @CurrentUser() admin: User,
-    @Param('id') id: string,
-    @Body() body: { delta: number; reason: string },
-  ) {
-    return this.adminService.adjustUserPoints(admin.id, id, body.delta, body.reason);
+  adjustPoints(@CurrentUser() admin: User, @Param('id') id: string, @Body() dto: AdjustPointsDto) {
+    return this.adminService.adjustUserPoints(admin.id, id, dto.delta, dto.reason);
   }
 
   @Patch('users/:id/ban')
   @Audit('user.ban', { targetType: 'USER' })
   @ApiOperation({ summary: 'Ban a user' })
-  banUser(@CurrentUser() user: User, @Param('id') id: string, @Body('reason') reason: string) {
-    return this.adminService.banUser(user.id, id, reason);
+  banUser(@CurrentUser() user: User, @Param('id') id: string, @Body() dto: BanUserDto) {
+    return this.adminService.banUser(user.id, id, dto.reason ?? '');
   }
 
   @Patch('users/:id/unban')
@@ -195,8 +216,34 @@ export class AdminController {
     return this.adminService.getAudienceInsights();
   }
 
-  @Get('posts/pending') @ApiOperation({ summary: 'Get posts pending moderation' })
-  getPendingPosts(@Query() pagination: PaginationDto) { return this.adminService.getPendingPosts(pagination); }
+  // ── Community moderation feed ─────────────
+  // Posts publish immediately; admins verify afterwards. The feed lists every
+  // status by default — filter with ?status=… or ?reported=1.
+
+  @Get('community/posts') @ApiOperation({ summary: 'Moderation feed — all posts, filter by status / reported / search' })
+  getPosts(@Query() filter: AdminPostsFilterDto) { return this.adminService.getPosts(filter); }
+
+  @Get('posts/pending') @ApiOperation({ summary: '(legacy) Posts pending moderation' })
+  getPendingPosts(@Query() pagination: PaginationDto) {
+    return this.adminService.getPosts({ ...pagination, status: PostStatus.PENDING_REVIEW });
+  }
+
+  @Get('community/posts/:id') @ApiOperation({ summary: 'Post detail (any status) with author email, reports and moderation log' })
+  getPostDetail(@Param('id') id: string) { return this.adminService.getPostDetail(id); }
+
+  @Patch('community/posts/:id/status')
+  @Audit('post.status', { targetType: 'POST', targetIdParam: 'id' })
+  @ApiOperation({ summary: 'Set post status: PUBLISHED (verify) / HIDDEN / REJECTED (+reason). Notifies the author.' })
+  setPostStatus(@CurrentUser() user: User, @Param('id') id: string, @Body() dto: UpdatePostStatusDto) {
+    return this.adminService.setPostStatus(user.id, id, dto.status, dto.reason);
+  }
+
+  @Delete('community/posts/:id') @HttpCode(HttpStatus.NO_CONTENT)
+  @Audit('post.delete', { targetType: 'POST', targetIdParam: 'id' })
+  @ApiOperation({ summary: 'Soft-delete a post from the moderation panel' })
+  deletePost(@CurrentUser() user: User, @Param('id') id: string) {
+    return this.adminService.deletePost(user.id, id, user.role);
+  }
 
   @Patch('posts/:id/approve')
   @Audit('post.approve', { targetType: 'POST' })
@@ -208,37 +255,33 @@ export class AdminController {
   @Patch('posts/:id/reject')
   @Audit('post.reject', { targetType: 'POST' })
   @ApiOperation({ summary: 'Reject a post' })
-  rejectPost(@CurrentUser() user: User, @Param('id') id: string, @Body('reason') reason: string) {
-    return this.adminService.moderatePost(user.id, id, 'reject', reason);
+  rejectPost(@CurrentUser() user: User, @Param('id') id: string, @Body() dto: RejectPostDto) {
+    return this.adminService.moderatePost(user.id, id, 'reject', dto.reason);
   }
 
   @Patch('posts/:id/pin') @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
   @Audit('post.pin', { targetType: 'POST', targetIdParam: 'id' })
   @ApiOperation({ summary: 'Toggle pinned state of a post (anuncio fijo en el feed)' })
-  togglePinPost(@Param('id') id: string, @Body() body: { pinned: boolean }) {
-    return this.adminService.togglePinPost(id, !!body.pinned);
+  togglePinPost(@Param('id') id: string, @Body() dto: PinPostDto) {
+    return this.adminService.togglePinPost(id, !!dto.pinned);
   }
 
   @Post('posts/bulk/approve')
   @Audit('post.bulk.approve')
   @ApiOperation({ summary: 'Approve multiple posts at once (max 100)' })
-  bulkApprovePosts(@CurrentUser() user: User, @Body('ids') ids: string[]) {
-    return this.adminService.bulkModeratePosts(user.id, ids ?? [], 'approve');
+  bulkApprovePosts(@CurrentUser() user: User, @Body() dto: BulkPostIdsDto) {
+    return this.adminService.bulkModeratePosts(user.id, dto.ids ?? [], 'approve');
   }
 
   @Post('posts/bulk/reject')
   @Audit('post.bulk.reject')
   @ApiOperation({ summary: 'Reject multiple posts at once (max 100)' })
-  bulkRejectPosts(
-    @CurrentUser() user: User,
-    @Body('ids') ids: string[],
-    @Body('reason') reason?: string,
-  ) {
-    return this.adminService.bulkModeratePosts(user.id, ids ?? [], 'reject', reason);
+  bulkRejectPosts(@CurrentUser() user: User, @Body() dto: BulkPostIdsDto) {
+    return this.adminService.bulkModeratePosts(user.id, dto.ids ?? [], 'reject', dto.reason);
   }
 
-  @Get('reports') @ApiOperation({ summary: 'Get pending content reports' })
-  getReports(@Query() pagination: PaginationDto) { return this.adminService.getReports(pagination); }
+  @Get('reports') @ApiOperation({ summary: 'Content reports — status defaults to PENDING (use status=ALL for everything), search by reporter/target' })
+  getReports(@Query() filter: AdminReportsFilterDto) { return this.adminService.getReports(filter); }
 
   @Get('reports/:id') @ApiOperation({ summary: 'Get report detail with target content + all reporters' })
   getReportDetail(@Param('id') id: string) { return this.adminService.getReportDetail(id); }
@@ -246,16 +289,19 @@ export class AdminController {
   @Patch('reports/:id/resolve')
   @Audit('report.resolve', { targetType: 'REPORT' })
   @ApiOperation({ summary: 'Resolve a report' })
-  resolveReport(@CurrentUser() user: User, @Param('id') id: string, @Body('status') status: ReportStatus) {
-    return this.adminService.resolveReport(id, user.id, status);
+  resolveReport(@CurrentUser() user: User, @Param('id') id: string, @Body() dto: ResolveReportDto) {
+    return this.adminService.resolveReport(id, user.id, dto.status);
   }
 
+  @Get('loyalty/levels') @ApiOperation({ summary: 'All loyalty levels incl. inactive (admin view)' })
+  listLoyaltyLevels() { return this.adminService.listLoyaltyLevels(); }
+
   @Post('loyalty-levels') @Roles(UserRole.SUPER_ADMIN) @ApiOperation({ summary: 'Create loyalty level' })
-  createLoyaltyLevel(@Body() data: any) { return this.adminService.createLoyaltyLevel(data); }
+  createLoyaltyLevel(@Body() dto: CreateLoyaltyLevelDto) { return this.adminService.createLoyaltyLevel(dto); }
 
   @Patch('loyalty-levels/:id') @Roles(UserRole.SUPER_ADMIN) @ApiOperation({ summary: 'Update loyalty level' })
-  updateLoyaltyLevel(@Param('id') id: string, @Body() data: any) {
-    return this.adminService.updateLoyaltyLevel(id, data);
+  updateLoyaltyLevel(@Param('id') id: string, @Body() dto: UpdateLoyaltyLevelDto) {
+    return this.adminService.updateLoyaltyLevel(id, dto);
   }
 
   @Delete('loyalty-levels/:id') @Roles(UserRole.SUPER_ADMIN) @ApiOperation({ summary: 'Delete loyalty level' })
@@ -269,20 +315,15 @@ export class AdminController {
   @Post('flags') @Roles(UserRole.SUPER_ADMIN)
   @Audit('feature_flag.create', { targetType: 'FEATURE_FLAG' })
   @ApiOperation({ summary: 'Create a new feature flag' })
-  createFlag(
-    @Body() body: { key: string; description?: string; enabled?: boolean },
-  ) {
-    return this.adminService.createFeatureFlag(body.key, body.description, body.enabled);
+  createFlag(@Body() dto: CreateFeatureFlagDto) {
+    return this.adminService.createFeatureFlag(dto.key, dto.description, dto.enabled);
   }
 
   @Patch('flags/:key') @Roles(UserRole.SUPER_ADMIN)
   @Audit('feature_flag.update', { targetType: 'FEATURE_FLAG', targetIdParam: 'key' })
   @ApiOperation({ summary: 'Update feature flag (toggle and/or description)' })
-  toggleFlag(
-    @Param('key') key: string,
-    @Body() body: { enabled?: boolean; description?: string },
-  ) {
-    return this.adminService.updateFeatureFlag(key, body);
+  toggleFlag(@Param('key') key: string, @Body() dto: UpdateFeatureFlagDto) {
+    return this.adminService.updateFeatureFlag(key, dto);
   }
 
   @Delete('flags/:key') @Roles(UserRole.SUPER_ADMIN)
@@ -298,11 +339,8 @@ export class AdminController {
   @Post('support/tickets')
   @Audit('ticket.create_admin', { targetType: 'TICKET' })
   @ApiOperation({ summary: 'Crear ticket de soporte en nombre de un usuario (telefono, email)' })
-  createTicketForUser(
-    @CurrentUser() admin: User,
-    @Body() body: { userId: string; subject: string; description: string; priority?: string; category?: string },
-  ) {
-    return this.adminService.createTicketForUser(admin.id, body);
+  createTicketForUser(@CurrentUser() admin: User, @Body() dto: CreateTicketForUserDto) {
+    return this.adminService.createTicketForUser(admin.id, dto);
   }
 
   @Delete('reviews/:id') @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
@@ -316,11 +354,8 @@ export class AdminController {
   @Post('messages/send')
   @Audit('message.send_as_platform', { targetType: 'MESSAGE' })
   @ApiOperation({ summary: 'Enviar mensaje al usuario como plataforma (advertencia, aviso de moderación)' })
-  sendMessageAsAdmin(
-    @CurrentUser() admin: User,
-    @Body() body: { userId: string; content: string },
-  ) {
-    return this.adminService.sendMessageAsAdmin(admin.id, body.userId, body.content);
+  sendMessageAsAdmin(@CurrentUser() admin: User, @Body() dto: SendMessageAsAdminDto) {
+    return this.adminService.sendMessageAsAdmin(admin.id, dto.userId, dto.content);
   }
 
   @Post('events/:id/duplicate')
@@ -360,8 +395,13 @@ export class AdminController {
   @HttpCode(HttpStatus.OK)
   @Audit('review.bulk_delete', { targetType: 'REVIEW' })
   @ApiOperation({ summary: 'Eliminar varias reseñas a la vez' })
-  bulkDeleteReviews(@Body() body: { ids: string[] }) {
-    return this.adminService.bulkDeleteReviews(body.ids ?? []);
+  bulkDeleteReviews(@Body() dto: BulkReviewIdsDto) {
+    return this.adminService.bulkDeleteReviews(dto.ids ?? []);
+  }
+
+  @Get('venues') @ApiOperation({ summary: 'Todos los venues, activos e inactivos (pickers del admin)' })
+  listVenues() {
+    return this.adminService.listVenues();
   }
 
   @Get('venues/:id/blocks') @ApiOperation({ summary: 'Listar bloqueos de horarios de un venue' })
@@ -371,12 +411,8 @@ export class AdminController {
 
   @Post('venues/:id/blocks') @ApiOperation({ summary: 'Crear bloqueo de horario (privado, mantenimiento)' })
   @Audit('venue.create_block', { targetType: 'VENUE', targetIdParam: 'id' })
-  createVenueBlock(
-    @CurrentUser() admin: User,
-    @Param('id') id: string,
-    @Body() body: { startsAt: string; endsAt: string; reason?: string },
-  ) {
-    return this.adminService.createVenueBlock(admin.id, id, body);
+  createVenueBlock(@CurrentUser() admin: User, @Param('id') id: string, @Body() dto: VenueBlockDto) {
+    return this.adminService.createVenueBlock(admin.id, id, dto);
   }
 
   @Delete('venues/:id/blocks/:blockId') @HttpCode(HttpStatus.NO_CONTENT)
@@ -395,19 +431,8 @@ export class AdminController {
 
   @Post('reservations') @ApiOperation({ summary: 'Crear reserva manual (walk-in, telefónica, VIP)' })
   @Audit('reservation.create_admin', { targetType: 'RESERVATION' })
-  createManualReservation(
-    @CurrentUser() admin: User,
-    @Body() body: {
-      userId: string;
-      venueId: string;
-      date: string;
-      timeSlot: string;
-      partySize: number;
-      notes?: string;
-      internalNotes?: string;
-    },
-  ) {
-    return this.adminService.createManualReservation(admin.id, body);
+  createManualReservation(@CurrentUser() admin: User, @Body() dto: CreateManualReservationDto) {
+    return this.adminService.createManualReservation(admin.id, dto);
   }
 
   @Patch('reservations/:id/status') @ApiOperation({ summary: 'Update reservation status' })
@@ -420,6 +445,11 @@ export class AdminController {
   @Get('support/tickets') @ApiOperation({ summary: 'List all support tickets' })
   listTickets(@Query() filter: TicketFilterDto) {
     return this.supportService.findAllTickets(filter);
+  }
+
+  @Get('support/tickets/:id') @ApiOperation({ summary: 'Ticket detail with user, agent and full message thread' })
+  getTicket(@Param('id') id: string) {
+    return this.adminService.getTicketDetail(id);
   }
 
   @Patch('support/tickets/:id') @ApiOperation({ summary: 'Update ticket (assign / change status)' })

@@ -4,10 +4,12 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { Platform } from 'react-native';
-import { apiClient, authApi, tokenStore, onAuthFailed, onTokensRefreshed } from '../api/client';
+import { apiClient, authApi, usersApi, tokenStore, onAuthFailed, onTokensRefreshed } from '../api/client';
+import { apiError } from '../api/errors';
 import { closeSocket, updateSocketToken } from '../api/socket';
 import { closeRtSocket, getRtSocket, updateRtToken } from '../api/rt-socket';
 import { setUser as setErrorReporterUser } from '../lib/error-reporter';
+import { useAppStore } from './app.store';
 
 // Cross-platform storage: localStorage on web, AsyncStorage on native
 function getPlatformStorage() {
@@ -55,6 +57,17 @@ interface AuthTokens {
   expiresIn: number;
 }
 
+export interface LoginCredentials {
+  email?: string;
+  phone?: string;
+  password: string;
+  deviceToken?: string;
+  /** e.g. "iPhone 15" — shown in Profile → Sesiones activas. */
+  deviceName?: string;
+  /** e.g. "iOS 17.4". */
+  deviceOs?: string;
+}
+
 interface AuthState {
   user: AuthUser | null;
   tokens: AuthTokens | null;
@@ -66,7 +79,7 @@ interface AuthState {
   _hasHydrated: boolean;
 
   // Actions
-  login: (credentials: { email?: string; phone?: string; password: string; deviceToken?: string }) => Promise<void>;
+  login: (credentials: LoginCredentials) => Promise<void>;
   logout: () => Promise<void>;
   setUser: (user: AuthUser) => void;
   setTokens: (tokens: AuthTokens) => void;
@@ -95,7 +108,10 @@ export const useAuthStore = create<AuthState>()(
           const { data: response } = await authApi.login(credentials);
 
           if (response?.data?.requires2FA) {
-            const msg = 'Esta cuenta requiere 2FA. Inicia sesión desde el panel admin web.';
+            const es = useAppStore.getState().language !== 'en';
+            const msg = es
+              ? 'Esta cuenta requiere 2FA. Inicia sesión desde el panel admin web.'
+              : 'This account requires 2FA. Sign in from the admin web panel.';
             set({ isLoading: false, error: msg });
             throw new Error(msg);
           }
@@ -134,8 +150,13 @@ export const useAuthStore = create<AuthState>()(
             error: null,
           });
         } catch (err: any) {
-          const message = err.response?.data?.message || 'Login failed. Please try again.';
-          set({ isLoading: false, error: message });
+          // EMAIL_NOT_VERIFIED is a routing signal, not an error to display —
+          // the login screen sends the user to the OTP screen.
+          if (err?.code === 'EMAIL_NOT_VERIFIED') {
+            set({ isLoading: false, error: null });
+            throw err;
+          }
+          set({ isLoading: false, error: apiError(err) });
           throw err;
         }
       },
@@ -199,17 +220,26 @@ export const useAuthStore = create<AuthState>()(
       clearSessionExpired: () => set({ sessionExpired: false }),
 
       refreshUser: async () => {
+        if (!get().isAuthenticated) return;
         try {
-          const { data: response } = await authApi.me();
-          const fresh = response.data as AuthUser | undefined;
-          if (fresh?.id) {
-            // Keep error-reporter user context in sync (id/email can change on
-            // first profile completion during onboarding).
-            setErrorReporterUser(fresh.id, fresh.email);
+          // /users/me is the rich profile (profile.loyaltyLevel, _count,
+          // notificationSettings) — /auth/me is the bare JWT principal.
+          const { data: response } = await usersApi.me();
+          const fresh = response?.data as AuthUser | undefined;
+          if (!fresh?.id) return;
+          // Keep error-reporter user context in sync (id/email can change on
+          // first profile completion during onboarding).
+          setErrorReporterUser(fresh.id, fresh.email);
+          set({ user: fresh });
+        } catch (err: any) {
+          const status = err?.response?.status;
+          if (status === 401 || status === 403) {
+            // Session is truly dead (refresh already failed inside the
+            // interceptor) → drop local state so we stop acting logged-in.
+            await get().logout();
+            return;
           }
-          set({ user: fresh ?? null });
-        } catch {
-          // Silent fail
+          // Network / 5xx: keep the cached user, callers show their own error.
         }
       },
     }),
@@ -267,6 +297,7 @@ export const useAuthStore = create<AuthState>()(
           // action will fail with a friendly API error (they can then log in
           // manually from Profile). This avoids the "estaba usando la app y
           // de repente me sacó" UX.
+          const hadSession = useAuthStore.getState().isAuthenticated;
           tokenStore.clear();
           closeSocket();
           closeRtSocket();
@@ -276,8 +307,16 @@ export const useAuthStore = create<AuthState>()(
             tokens: null,
             isAuthenticated: false,
             isGuest: true, // ← key change: prevents auto-redirect to welcome
+            sessionExpired: hadSession,
             error: null,
           });
+          // A real session died (refresh token revoked/expired): tell the
+          // user instead of silently degrading every action into an error.
+          if (hadSession) {
+            import('expo-router')
+              .then(({ router }) => router.replace('/(auth)/session-expired' as never))
+              .catch(() => {});
+          }
         });
         // Mark hydration as complete so auth guard can safely navigate
         useAuthStore.setState({ _hasHydrated: true });

@@ -49,6 +49,15 @@ type RequestRow = {
     id: string;
     profile?: { firstName?: string; lastName?: string; avatarUrl?: string };
   };
+  // Hydrated post/story so the row can show what you're actually tagged in.
+  item?: {
+    id: string;
+    content?: string | null;
+    imageUrl?: string | null;
+    mediaUrl?: string | null;
+    mediaUrls?: string[];
+    userId?: string;
+  };
 };
 
 export default function MentionRequests() {
@@ -109,6 +118,7 @@ export default function MentionRequests() {
     try {
       await mentionsApi.reject(row.id);
       fb.tap();
+      toast(t ? 'Etiqueta rechazada.' : 'Tag rejected.', 'info', 1800);
     } catch (err: any) {
       setItems(prev);
       fb.error();
@@ -121,6 +131,9 @@ export default function MentionRequests() {
   function openTarget(row: RequestRow) {
     if (row.targetType === 'POST') {
       router.push(`/(app)/community/posts/${row.targetId}` as never);
+    } else {
+      const ownerId = row.item?.userId ?? row.author.id;
+      router.push(`/(app)/community/story-viewer?userId=${ownerId}&single=1` as never);
     }
   }
 
@@ -211,6 +224,7 @@ function Row({
   const name = `${fn} ${ln}`.trim() || (t ? 'Usuario' : 'User');
   const initials = ((fn[0] || '') + (ln[0] || '')).toUpperCase() || 'U';
   const isStory = row.targetType === 'STORY';
+  const thumbUrl = isStory ? row.item?.mediaUrl : (row.item?.imageUrl ?? row.item?.mediaUrls?.[0]);
 
   return (
     <View style={styles.requestRow}>
@@ -240,6 +254,21 @@ function Row({
                 : 'Wants to tag you in a post.'}
           </Caption>
         </View>
+        {thumbUrl ? (
+          <Image
+            source={{ uri: thumbUrl }}
+            style={styles.rowThumb}
+            accessibilityLabel={
+              isStory ? (t ? 'Vista previa de la historia' : 'Story preview') : (t ? 'Vista previa de la publicación' : 'Post preview')
+            }
+          />
+        ) : !isStory && row.item?.content ? (
+          <View style={styles.rowThumbText}>
+            <Caption tone="secondary" numberOfLines={3}>
+              {row.item.content}
+            </Caption>
+          </View>
+        ) : null}
       </Pressy>
 
       <View style={styles.rowActions}>
@@ -310,6 +339,20 @@ const styles = StyleSheet.create({
     height: 56,
     borderRadius: Radius.full,
     alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rowThumb: {
+    width: 48,
+    height: 48,
+    borderRadius: Radius.sm,
+    backgroundColor: Colors.bgElevated,
+  },
+  rowThumbText: {
+    width: 64,
+    height: 48,
+    borderRadius: Radius.sm,
+    backgroundColor: Colors.bgElevated,
+    padding: Spacing[2],
     justifyContent: 'center',
   },
   rowActions: {

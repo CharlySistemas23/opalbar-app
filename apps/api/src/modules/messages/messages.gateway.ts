@@ -50,7 +50,10 @@ export class MessagesGateway implements OnGatewayConnection, OnGatewayDisconnect
     try {
       const token = this.extractToken(socket);
       if (!token) {
-        socket.emit('error', { message: 'No token' });
+        // `auth_error` is a dedicated event: socket.io reserves `error` for
+        // transport-level failures and the mobile client can't reliably tell
+        // them apart. The client refreshes its token and reconnects on it.
+        socket.emit('auth_error', { code: 'NO_TOKEN', message: 'No token' });
         socket.disconnect(true);
         return;
       }
@@ -64,7 +67,7 @@ export class MessagesGateway implements OnGatewayConnection, OnGatewayDisconnect
         RedisService.sessionBlocklistKey(payload.jti),
       );
       if (isBlocked) {
-        socket.emit('error', { message: 'Token revoked' });
+        socket.emit('auth_error', { code: 'TOKEN_REVOKED', message: 'Token revoked' });
         socket.disconnect(true);
         return;
       }
@@ -87,7 +90,11 @@ export class MessagesGateway implements OnGatewayConnection, OnGatewayDisconnect
       this.logger.log(`user ${payload.sub} connected (sockets=${count})`);
     } catch (err) {
       this.logger.warn(`auth failed: ${(err as Error).message}`);
-      socket.emit('error', { message: 'Invalid token' });
+      const expired = /expired/i.test((err as Error).message ?? '');
+      socket.emit('auth_error', {
+        code: expired ? 'TOKEN_EXPIRED' : 'INVALID_TOKEN',
+        message: expired ? 'Token expired' : 'Invalid token',
+      });
       socket.disconnect(true);
     }
   }
@@ -284,8 +291,8 @@ export class MessagesGateway implements OnGatewayConnection, OnGatewayDisconnect
     try {
       const [followers, friendships, staff] = await Promise.all([
         this.prisma.follow.findMany({
-          where: { targetUserId: userId },
-          select: { userId: true },
+          where: { followingId: userId },
+          select: { followerId: true },
         }),
         this.prisma.friendship.findMany({
           where: {
@@ -301,7 +308,7 @@ export class MessagesGateway implements OnGatewayConnection, OnGatewayDisconnect
       ]);
 
       const recipientIds = new Set<string>();
-      followers.forEach((f) => recipientIds.add(f.userId));
+      followers.forEach((f) => recipientIds.add(f.followerId));
       friendships.forEach((f) => {
         recipientIds.add(f.requesterId === userId ? f.addresseeId : f.requesterId);
       });

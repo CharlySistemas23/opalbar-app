@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, RefreshControl, Alert } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, RefreshControl, Alert, Linking } from 'react-native';
 import { useCallback, useMemo, useState } from 'react';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -6,6 +6,7 @@ import { Feather } from '@expo/vector-icons';
 import { adminApi } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { Colors } from '@/constants/tokens';
+import { ErrorState } from '@/components/ErrorState';
 
 type Tab = 'export' | 'deletion';
 
@@ -41,15 +42,19 @@ export default function GdprRequests() {
   const [deletions, setDeletions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [processingId, setProcessingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    setError(null);
     try {
       const r = await adminApi.gdprRequests();
       const d = r.data?.data ?? r.data ?? {};
       setExports(d.exports ?? []);
       setDeletions(d.deletions ?? []);
-    } catch {} finally {
+    } catch (err) {
+      setError(apiError(err));
+    } finally {
       setLoading(false); setRefreshing(false);
     }
   }, []);
@@ -129,6 +134,8 @@ export default function GdprRequests() {
 
       {loading ? (
         <View style={styles.center}><ActivityIndicator color={Colors.accentPrimary} /></View>
+      ) : error ? (
+        <ErrorState message={error} onRetry={load} />
       ) : (
         <FlatList
           data={list}
@@ -193,14 +200,23 @@ export default function GdprRequests() {
                 )}
 
                 {tab === 'export' && item.downloadUrl && item.status === 'COMPLETED' && (
-                  <View style={styles.downloadRow}>
+                  <TouchableOpacity
+                    style={styles.downloadRow}
+                    activeOpacity={0.8}
+                    onPress={() => {
+                      Linking.openURL(item.downloadUrl).catch(() =>
+                        Alert.alert('Error', 'No se pudo abrir el enlace de descarga.'),
+                      );
+                    }}
+                  >
                     <Feather name="download" size={13} color={Colors.accentSuccess} />
                     <Text style={styles.downloadText} numberOfLines={1}>
                       {item.expiresAt
                         ? `Descargable hasta ${new Date(item.expiresAt).toLocaleDateString('es')}`
                         : 'Listo para descargar'}
                     </Text>
-                  </View>
+                    <Feather name="external-link" size={12} color={Colors.accentSuccess} />
+                  </TouchableOpacity>
                 )}
 
                 {isPending && (

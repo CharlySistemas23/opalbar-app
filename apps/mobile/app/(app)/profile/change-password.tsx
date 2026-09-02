@@ -4,11 +4,14 @@
 //  Magazine-style form:
 //   · Header with back glyph + serif Heading
 //   · Kicker + Lead intro copy
-//   · Three Inputs with required dots and inline validation
+//   · Three Inputs with required dots, show/hide toggles and a live
+//     requirement checklist mirroring the backend DTO regex
+//     (8–64 chars, uppercase, number, special char)
 //   · Primary Button submit (loading state)
-//   · Replaces Alert.alert with toast + inline error states.
+//   · Success → toast + stay logged in (backend keeps THIS session and
+//     revokes the rest)
 // ─────────────────────────────────────────────
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -17,11 +20,13 @@ import { Feather } from '@expo/vector-icons';
 import { authApi } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { useAppStore } from '@/stores/app.store';
-import { Colors, EditorialSpacing, Spacing } from '@/constants/tokens';
+import { useFeedback } from '@/hooks/useFeedback';
+import { Colors, EditorialSpacing, Radius, Spacing } from '@/constants/tokens';
 import { HitSlop, Roles } from '@/constants/a11y';
 import {
   Body,
   Button,
+  Caption,
   FadeIn,
   Heading,
   Input,
@@ -30,24 +35,47 @@ import {
 } from '@/components/ui';
 import { toast } from '@/components/Toast';
 
+// Mirrors apps/api ChangePasswordDto: @MinLength(8) @MaxLength(64)
+// @Matches(/^(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).*$/)
+const PASSWORD_RE = /^(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,64}$/;
+
 export default function ChangePassword() {
   const router = useRouter();
   const { language } = useAppStore();
   const t = language === 'es';
+  const fb = useFeedback();
 
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
   const [confirm, setConfirm] = useState('');
+  const [showCurrent, setShowCurrent] = useState(false);
+  const [showNext, setShowNext] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [errors, setErrors] = useState<{ next?: string; confirm?: string }>({});
+  const [errors, setErrors] = useState<{ current?: string; next?: string; confirm?: string }>({});
+
+  const checks = useMemo(
+    () => [
+      { ok: next.length >= 8 && next.length <= 64, label: t ? 'Entre 8 y 64 caracteres' : '8 to 64 characters' },
+      { ok: /[A-Z]/.test(next), label: t ? 'Una letra mayúscula' : 'One uppercase letter' },
+      { ok: /\d/.test(next), label: t ? 'Un número' : 'One number' },
+      { ok: /[^A-Za-z0-9]/.test(next), label: t ? 'Un símbolo (!, #, $, …)' : 'One symbol (!, #, $, …)' },
+      { ok: next.length > 0 && next !== current, label: t ? 'Distinta a la actual' : 'Different from current' },
+    ],
+    [next, current, t],
+  );
+
+  const nextValid = PASSWORD_RE.test(next) && next !== current;
+  const canSubmit = !!current && nextValid && confirm === next && !loading;
 
   async function handleChange() {
     const nextErrors: typeof errors = {};
-    if (next.length < 8) {
-      nextErrors.next = t ? 'Mínimo 8 caracteres.' : 'At least 8 characters.';
+    if (!PASSWORD_RE.test(next)) {
+      nextErrors.next = t ? 'Revisa los requisitos de abajo.' : 'Check the requirements below.';
+    } else if (next === current) {
+      nextErrors.next = t ? 'Debe ser distinta a la actual.' : 'Must differ from the current one.';
     }
     if (next !== confirm) {
-      nextErrors.confirm = t ? 'No coincide con la nueva contraseña.' : "Doesn't match new password.";
+      nextErrors.confirm = t ? 'No coincide con la nueva contraseña.' : "Doesn't match the new password.";
     }
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length) return;
@@ -55,17 +83,33 @@ export default function ChangePassword() {
     setLoading(true);
     try {
       await authApi.changePassword({ currentPassword: current, newPassword: next });
-      toast(t ? 'Contraseña actualizada.' : 'Password updated.', 'success');
-      router.back();
-    } catch (err: any) {
+      fb.success();
       toast(
-        apiError(err, t ? 'No se pudo cambiar la contraseña.' : 'Could not change password.'),
-        'danger',
+        t
+          ? 'Contraseña actualizada. Cerramos sesión en tus otros dispositivos.'
+          : 'Password updated. Your other devices were signed out.',
+        'success',
       );
+      router.back();
+    } catch (err) {
+      fb.error();
+      const msg = apiError(err, t ? 'No se pudo cambiar la contraseña.' : 'Could not change password.');
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      if (status === 401) {
+        setErrors({ current: msg });
+      } else {
+        toast(msg, 'danger');
+      }
     } finally {
       setLoading(false);
     }
   }
+
+  const eye = (shown: boolean) => (
+    <Feather name={shown ? 'eye-off' : 'eye'} size={18} color={Colors.textMuted} />
+  );
+  const eyeLabel = (shown: boolean) =>
+    shown ? (t ? 'Ocultar contraseña' : 'Hide password') : (t ? 'Mostrar contraseña' : 'Show password');
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
@@ -96,8 +140,8 @@ export default function ChangePassword() {
             <Heading size="md">{t ? 'Cambiar contraseña' : 'Change password'}</Heading>
             <Body tone="secondary" style={{ marginTop: Spacing[2] }}>
               {t
-                ? 'Confirma tu contraseña actual y elige una nueva con al menos 8 caracteres.'
-                : 'Confirm your current password and pick a new one with at least 8 characters.'}
+                ? 'Confirma tu contraseña actual y elige una nueva. Seguirás conectado en este dispositivo; los demás tendrán que volver a iniciar sesión.'
+                : 'Confirm your current password and pick a new one. You stay signed in on this device; other devices will need to sign in again.'}
             </Body>
           </FadeIn>
 
@@ -105,10 +149,19 @@ export default function ChangePassword() {
             <Input
               label={t ? 'CONTRASEÑA ACTUAL' : 'CURRENT PASSWORD'}
               value={current}
-              onChangeText={setCurrent}
-              secureTextEntry
+              onChangeText={(v) => {
+                setCurrent(v);
+                if (errors.current) setErrors((e) => ({ ...e, current: undefined }));
+              }}
+              secureTextEntry={!showCurrent}
               autoCapitalize="none"
+              autoCorrect={false}
+              textContentType="password"
               required
+              error={errors.current}
+              rightIcon={eye(showCurrent)}
+              onRightIconPress={() => setShowCurrent((s) => !s)}
+              rightIconLabel={eyeLabel(showCurrent)}
             />
             <Input
               label={t ? 'NUEVA CONTRASEÑA' : 'NEW PASSWORD'}
@@ -117,23 +170,50 @@ export default function ChangePassword() {
                 setNext(v);
                 if (errors.next) setErrors((e) => ({ ...e, next: undefined }));
               }}
-              secureTextEntry
+              secureTextEntry={!showNext}
               autoCapitalize="none"
+              autoCorrect={false}
+              textContentType="newPassword"
+              maxLength={64}
               required
               error={errors.next}
-              helper={!errors.next ? (t ? 'Mínimo 8 caracteres.' : 'At least 8 characters.') : undefined}
+              rightIcon={eye(showNext)}
+              onRightIconPress={() => setShowNext((s) => !s)}
+              rightIconLabel={eyeLabel(showNext)}
             />
+
+            <View style={styles.checklist} accessibilityRole="list">
+              {checks.map((c) => (
+                <View key={c.label} style={styles.checkRow}>
+                  <Feather
+                    name={c.ok ? 'check-circle' : 'circle'}
+                    size={14}
+                    color={c.ok ? Colors.accentSuccess : Colors.textMuted}
+                  />
+                  <Caption tone={c.ok ? 'success' : 'muted'}>{c.label}</Caption>
+                </View>
+              ))}
+            </View>
+
             <Input
-              label={t ? 'CONFIRMAR' : 'CONFIRM'}
+              label={t ? 'CONFIRMAR NUEVA CONTRASEÑA' : 'CONFIRM NEW PASSWORD'}
               value={confirm}
               onChangeText={(v) => {
                 setConfirm(v);
                 if (errors.confirm) setErrors((e) => ({ ...e, confirm: undefined }));
               }}
-              secureTextEntry
+              secureTextEntry={!showNext}
               autoCapitalize="none"
+              autoCorrect={false}
+              textContentType="newPassword"
+              maxLength={64}
               required
               error={errors.confirm}
+              helper={
+                !errors.confirm && confirm.length > 0 && confirm !== next
+                  ? t ? 'Todavía no coincide.' : "Doesn't match yet."
+                  : undefined
+              }
             />
           </FadeIn>
         </ScrollView>
@@ -143,10 +223,11 @@ export default function ChangePassword() {
             label={t ? 'Cambiar contraseña' : 'Change password'}
             onPress={handleChange}
             loading={loading}
-            disabled={!current || !next || !confirm}
+            disabled={!canSubmit}
             variant="primary"
             size="lg"
             fullWidth
+            haptic="success"
           />
         </View>
       </KeyboardAvoidingView>
@@ -181,6 +262,20 @@ const styles = StyleSheet.create({
     marginTop: Spacing[6],
     paddingHorizontal: EditorialSpacing.pageGutter,
     gap: Spacing[5],
+  },
+  checklist: {
+    gap: Spacing[2],
+    padding: Spacing[4],
+    borderRadius: Radius.card,
+    backgroundColor: Colors.bgCard,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+    marginTop: -Spacing[2],
+  },
+  checkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing[2],
   },
   footer: {
     paddingHorizontal: EditorialSpacing.pageGutter,

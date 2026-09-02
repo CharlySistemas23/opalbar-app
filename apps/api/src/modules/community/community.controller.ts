@@ -10,7 +10,7 @@ import { CommunityService } from './community.service';
 import {
   CreatePostDto, UpdatePostDto, CreateCommentDto, UpdateCommentDto,
   ReactDto, CreateReportDto, PostFilterDto,
-  CreateStoryDto, StoryFeedFilterDto,
+  CreateStoryDto, StoryFeedFilterDto, EmojiDto,
 } from './dto/community.dto';
 
 @ApiTags('Community')
@@ -39,7 +39,7 @@ export class CommunityController {
     return this.communityService.updatePost(id, user.id, dto);
   }
 
-  @Delete('posts/:id') @HttpCode(HttpStatus.NO_CONTENT) @ApiOperation({ summary: 'Delete a post (staff only)' })
+  @Delete('posts/:id') @HttpCode(HttpStatus.NO_CONTENT) @ApiOperation({ summary: 'Delete a post (owner or staff)' })
   deletePost(@Param('id') id: string, @CurrentUser() user: User) {
     return this.communityService.deletePost(id, user.id, user.role);
   }
@@ -59,7 +59,7 @@ export class CommunityController {
     return this.communityService.updateComment(id, user.id, dto.content);
   }
 
-  @Delete('comments/:id') @HttpCode(HttpStatus.NO_CONTENT) @ApiOperation({ summary: 'Delete a comment (staff only)' })
+  @Delete('comments/:id') @HttpCode(HttpStatus.NO_CONTENT) @ApiOperation({ summary: 'Delete a comment (owner or staff)' })
   deleteComment(@Param('id') id: string, @CurrentUser() user: User) {
     return this.communityService.deleteComment(id, user.id, user.role);
   }
@@ -70,8 +70,8 @@ export class CommunityController {
   }
 
   @Post('comments/:id/react') @HttpCode(HttpStatus.OK) @ApiOperation({ summary: 'Toggle emoji reaction on a comment' })
-  reactToComment(@Param('id') id: string, @CurrentUser() user: User, @Body() body: { emoji: string }) {
-    return this.communityService.toggleCommentReaction(id, user.id, body.emoji);
+  reactToComment(@Param('id') id: string, @CurrentUser() user: User, @Body() dto: EmojiDto) {
+    return this.communityService.toggleCommentReaction(id, user.id, dto.emoji);
   }
 
   @Post('posts/:id/react') @HttpCode(HttpStatus.OK) @ApiOperation({ summary: 'React to a post' })
@@ -80,8 +80,8 @@ export class CommunityController {
   }
 
   @Post('posts/:id/emoji-react') @HttpCode(HttpStatus.OK) @ApiOperation({ summary: 'Toggle emoji reaction on a post' })
-  emojiReactToPost(@Param('id') id: string, @CurrentUser() user: User, @Body() body: { emoji: string }) {
-    return this.communityService.togglePostEmojiReaction(id, user.id, body.emoji);
+  emojiReactToPost(@Param('id') id: string, @CurrentUser() user: User, @Body() dto: EmojiDto) {
+    return this.communityService.togglePostEmojiReaction(id, user.id, dto.emoji);
   }
 
   @Get('posts/:id/reactors') @Public() @SkipThrottle() @ApiOperation({ summary: 'List users who reacted with emojis to a post (respects isPrivate)' })
@@ -131,14 +131,20 @@ export class CommunityController {
     return this.communityService.deleteStory(id, { id: user.id, role: user.role });
   }
 
+  @Get('stories/:id/viewers') @SkipThrottle()
+  @ApiOperation({ summary: 'Who viewed a story (owner only; staff for venue stories)' })
+  getStoryViewers(@Param('id') id: string, @CurrentUser() user: User) {
+    return this.communityService.getStoryViewers(id, { id: user.id, role: user.role });
+  }
+
   @Post('stories/:id/view') @HttpCode(HttpStatus.OK) @ApiOperation({ summary: 'Mark a story as viewed' })
   viewStory(@Param('id') id: string, @CurrentUser() user: User) {
     return this.communityService.markStoryViewed(id, user.id);
   }
 
   @Post('stories/:id/react') @HttpCode(HttpStatus.OK) @ApiOperation({ summary: 'Toggle emoji reaction on a story' })
-  reactToStory(@Param('id') id: string, @CurrentUser() user: User, @Body() body: { emoji: string }) {
-    return this.communityService.toggleStoryReaction(id, user.id, body.emoji);
+  reactToStory(@Param('id') id: string, @CurrentUser() user: User, @Body() dto: EmojiDto) {
+    return this.communityService.toggleStoryReaction(id, user.id, dto.emoji);
   }
 }
 

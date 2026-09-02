@@ -852,14 +852,26 @@ model Report {
   reviewedAt   DateTime?
   createdAt    DateTime         @default(now())
 
+  // `targetId` is the polymorphic pointer used by every query/index. It must
+  // NOT carry a foreign key: Postgres enforces ALL constraints on a column, so
+  // pointing it at User + Post + Comment at once made *every* insert fail
+  // ("Report_targetId_user_fkey violated"). The typed columns below carry the
+  // real referential integrity — exactly one is set, matching `targetType`.
+  reportedUserId    String?
+  reportedPostId    String?
+  reportedCommentId String?
+
   reporter     User     @relation("reporter", fields: [reporterId], references: [id], onDelete: Cascade)
-  reportedUser User?    @relation("reportedUser", fields: [targetId], references: [id], onDelete: Cascade, map: "Report_targetId_user_fkey")
-  post         Post?    @relation("postReports", fields: [targetId], references: [id], onDelete: Cascade, map: "Report_targetId_post_fkey")
-  comment      Comment? @relation("commentReports", fields: [targetId], references: [id], onDelete: Cascade, map: "Report_targetId_comment_fkey")
+  reportedUser User?    @relation("reportedUser", fields: [reportedUserId], references: [id], onDelete: Cascade)
+  post         Post?    @relation("postReports", fields: [reportedPostId], references: [id], onDelete: Cascade)
+  comment      Comment? @relation("commentReports", fields: [reportedCommentId], references: [id], onDelete: Cascade)
 
   @@index([targetType, targetId])
   @@index([reporterId])
   @@index([status])
+  @@index([reportedPostId])
+  @@index([reportedCommentId])
+  @@index([reportedUserId])
 }
 
 model ModerationLog {

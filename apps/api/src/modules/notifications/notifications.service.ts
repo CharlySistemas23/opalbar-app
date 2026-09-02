@@ -6,6 +6,15 @@ import { paginate, getPaginationOffset, PaginationDto } from '../../common/dto/p
 import { PushService } from '../push/push.service';
 import { RealtimeService } from '../realtime/realtime.service';
 
+/** Per-type boolean toggles that exist as columns on `NotificationSettings`. */
+type NotificationSettingToggle =
+  | 'eventReminders'
+  | 'newEvents'
+  | 'newOffers'
+  | 'communityReplies'
+  | 'communityReactions'
+  | 'pointsUpdates';
+
 @Injectable()
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
@@ -97,8 +106,16 @@ export class NotificationsService {
     });
     await this.invalidateUnreadCache(data.userId);
 
-    // Send push notification (placeholder — integrate FCM/APNs)
-    await this.sendPush(data.userId, data.title, data.body, data.data, data.imageUrl);
+    // Push payload carries type + notificationId so the mobile tap handler
+    // can route (`routeForNotifData`) and mark the row read without an
+    // extra fetch.
+    await this.sendPush(
+      data.userId,
+      data.title,
+      data.body,
+      { ...(data.data ?? {}), type: data.type, notificationId: notification.id },
+      data.imageUrl,
+    );
 
     // Real-time push to the user's open sockets
     this.realtime.toUser(data.userId, 'notification', 'created', {
@@ -212,7 +229,13 @@ export class NotificationsService {
       const throttleKey = RedisService.cacheKey('notif', 'agg', input.userId, input.aggregationKey);
       const recentlySent = await this.redis.get(throttleKey).catch(() => null);
       if (!recentlySent) {
-        await this.sendPush(input.userId, title, input.body ?? '', nextData, input.imageUrl ?? input.actor.avatarUrl);
+        await this.sendPush(
+          input.userId,
+          title,
+          input.body ?? '',
+          { ...nextData, type: input.type, notificationId: updated.id },
+          input.imageUrl ?? input.actor.avatarUrl,
+        );
         await this.redis.set(throttleKey, '1', 60).catch(() => {});
       }
 
@@ -352,30 +375,24 @@ export class NotificationsService {
   // Mapea NotificationType al boolean correspondiente en NotificationSettings.
   // Devuelve null para tipos sin granular control (siempre se respeta
   // pushEnabled global). Mantener sincronizado al agregar tipos nuevos.
-  private static notificationSettingFieldFor(type: NotificationType): keyof Pick<
-    {
-      pushEnabled: boolean; emailEnabled: boolean; eventReminders: boolean;
-      newEvents: boolean; newOffers: boolean; communityReplies: boolean;
-      communityReactions: boolean; pointsUpdates: boolean;
-      marketingEmails: boolean; weeklyDigest: boolean;
-    },
-    'eventReminders' | 'newEvents' | 'newOffers' | 'communityReplies' | 'communityReactions' | 'pointsUpdates'
-  > | null {
-    // Audit fix: VENUE_STORY_NEW was missing → broadcast bypassed the user's
-    // newEvents toggle. LOYALTY_LEVEL_UP did not exist in the enum (correct
-    // value is LEVEL_UP), so the pointsUpdates toggle never applied to that
-    // type. Both fixed below.
-    const map: Record<string, any> = {
+  private static notificationSettingFieldFor(type: NotificationType): NotificationSettingToggle | null {
+    // Keys are real `NotificationType` enum members only — the previous map
+    // carried COMMUNITY_COMMENT / POST_LIKE / POST_REACTION which don't exist
+    // in the enum, so reply/reaction toggles were silently ignored. Typed as
+    // Partial<Record<NotificationType, …>> so a typo fails the build.
+    const map: Partial<Record<NotificationType, NotificationSettingToggle>> = {
       EVENT_NEW: 'newEvents',
       EVENT_REMINDER: 'eventReminders',
       VENUE_STORY_NEW: 'newEvents',
       OFFER_NEW: 'newOffers',
       OFFER_EXPIRING: 'newOffers',
-      COMMUNITY_COMMENT: 'communityReplies',
+      COMMUNITY_REPLY: 'communityReplies',
+      COMMUNITY_MENTION: 'communityReplies',
+      COMMENT_MENTION: 'communityReplies',
+      POST_MENTION: 'communityReplies',
       COMMUNITY_REACTION: 'communityReactions',
-      POST_LIKE: 'communityReactions',
-      POST_REACTION: 'communityReactions',
       POINTS_EARNED: 'pointsUpdates',
+      POINTS_REDEEMED: 'pointsUpdates',
       LEVEL_UP: 'pointsUpdates',
     };
     return map[type] ?? null;

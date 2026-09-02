@@ -9,7 +9,7 @@ import { RedisService } from '../../database/redis.service';
 import { paginate, getPaginationOffset } from '../../common/dto/pagination.dto';
 import { RealtimeService } from '../realtime/realtime.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import { CreateEventDto, UpdateEventDto, EventFilterDto } from './dto/event.dto';
+import { CreateCategoryDto, CreateEventDto, UpdateEventDto, EventFilterDto } from './dto/event.dto';
 
 // Cache TTLs in seconds — public reads only. Tune per hotness.
 const CACHE_TTL_LIST = 30;  // list refreshes often enough (new events, attendance)
@@ -242,6 +242,7 @@ export class EventsService {
     const event = await this.prisma.event.findUnique({ where: { id: eventId } });
     if (!event) throw new NotFoundException('Event not found');
     if (event.status !== EventStatus.PUBLISHED) throw new BadRequestException('Event is not available for registration');
+    if (event.endDate < new Date()) throw new BadRequestException('Event has already ended');
     if (event.maxCapacity && event.currentCapacity >= event.maxCapacity) {
       throw new ConflictException('Event is at full capacity');
     }
@@ -366,7 +367,7 @@ export class EventsService {
     };
   }
 
-  async createCategory(body: { name: string; nameEn?: string; icon?: string; color?: string }) {
+  async createCategory(body: CreateCategoryDto) {
     const name = body.name?.trim();
     if (!name) throw new BadRequestException('Nombre requerido');
     const slug = name.toLowerCase()
@@ -386,9 +387,12 @@ export class EventsService {
   }
 
   async listAttendees(eventId: string) {
+    // AttendanceStatus has no CONFIRMED member — the old literal silently
+    // matched nothing, so the attendee list was always empty.
     const rows = await this.prisma.eventAttendee.findMany({
-      where: { eventId, status: { in: ['CONFIRMED', 'ATTENDED'] } },
-      include: {
+      where: { eventId, status: { in: [AttendanceStatus.REGISTERED, AttendanceStatus.ATTENDED] } },
+      select: {
+        status: true,
         user: {
           select: {
             id: true,
@@ -399,6 +403,6 @@ export class EventsService {
       orderBy: { createdAt: 'desc' },
       take: 100,
     });
-    return rows.map((r) => r.user);
+    return rows.map((r) => ({ ...r.user, attendanceStatus: r.status }));
   }
 }

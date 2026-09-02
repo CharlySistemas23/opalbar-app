@@ -2,16 +2,18 @@ import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator,
   Alert, Switch, TextInput, Image, KeyboardAvoidingView, Platform, Linking,
 } from 'react-native';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { venueApi } from '@/api/client';
+import { adminApi, venueApi } from '@/api/client';
 import { apiError } from '@/api/errors';
+import { useAuthStore } from '@/stores/auth.store';
 import { useSafeBack } from '@/hooks/useSafeBack';
 import { Colors, Radius } from '@/constants/tokens';
 import { uploadImage, UploadError } from '@/utils/uploadImage';
+import { ErrorState } from '@/components/ErrorState';
 
 // ─────────────────────────────────────────────
 //  Admin · Venue editor
@@ -62,6 +64,8 @@ function staticMapUrl(lat: number, lng: number, apiKey?: string): string | null 
 export default function AdminVenueEdit() {
   const router = useRouter();
   const goBack = useSafeBack('/(admin)/manage');
+  const me = useAuthStore((s) => s.user);
+  const canSave = me?.role === 'ADMIN' || me?.role === 'SUPER_ADMIN';
   const googleKey = (process.env as any).EXPO_PUBLIC_GOOGLE_MAPS_KEY as string | undefined;
 
   const [venue, setVenue] = useState<any>(null);
@@ -88,13 +92,18 @@ export default function AdminVenueEdit() {
   const [isActive, setIsActive] = useState(true);
   const [uploadingCover, setUploadingCover] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const r = await venueApi.list({ limit: 1 });
-        const first = r.data?.data?.data?.[0] ?? r.data?.data?.[0];
-        if (first) {
+  const loadVenue = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      // Admin endpoint — the public list filters isActive:true, which made
+      // a deactivated venue disappear from this screen with no way back.
+      const r = await adminApi.venues();
+      const list = r.data?.data ?? r.data ?? [];
+      const first = Array.isArray(list) ? list[0] : undefined;
+      if (first) {
           setVenue(first);
           setName(first.name ?? '');
           setDescription(first.description ?? '');
@@ -111,13 +120,16 @@ export default function AdminVenueEdit() {
           setInstagram(first.instagram ?? '');
           setImageUrl(first.imageUrl ?? '');
           setCoverUrl(first.coverUrl ?? '');
-          setIsActive(first.isActive ?? true);
-        }
-      } catch {} finally {
-        setLoading(false);
+        setIsActive(first.isActive ?? true);
       }
-    })();
+    } catch (err) {
+      setLoadError(apiError(err));
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => { loadVenue(); }, [loadVenue]);
 
   const latNum = parseFloat(lat);
   const lngNum = parseFloat(lng);
@@ -170,7 +182,7 @@ export default function AdminVenueEdit() {
   }
 
   async function save() {
-    if (!venue) return;
+    if (!venue || !canSave) return;
     if (!name.trim()) {
       Alert.alert('Falta el nombre');
       return;
@@ -212,6 +224,11 @@ export default function AdminVenueEdit() {
   }
 
   if (loading) return <View style={styles.center}><ActivityIndicator color={Colors.accentPrimary} /></View>;
+  if (loadError) return (
+    <SafeAreaView style={styles.root} edges={['top']}>
+      <ErrorState message={loadError} onRetry={loadVenue} />
+    </SafeAreaView>
+  );
   if (!venue) return (
     <View style={styles.center}>
       <Text style={{ color: Colors.textMuted }}>Sin venue registrado</Text>
@@ -229,16 +246,20 @@ export default function AdminVenueEdit() {
             <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
           </TouchableOpacity>
           <Text style={styles.title}>Editar bar</Text>
-          <TouchableOpacity
-            onPress={save}
-            disabled={saving}
-            style={[styles.saveBtn, saving && { opacity: 0.5 }]}
-            hitSlop={8}
-          >
-            {saving
-              ? <ActivityIndicator color={Colors.textInverse} size="small" />
-              : <Text style={styles.saveBtnText}>Guardar</Text>}
-          </TouchableOpacity>
+          {canSave ? (
+            <TouchableOpacity
+              onPress={save}
+              disabled={saving}
+              style={[styles.saveBtn, saving && { opacity: 0.5 }]}
+              hitSlop={8}
+            >
+              {saving
+                ? <ActivityIndicator color={Colors.textInverse} size="small" />
+                : <Text style={styles.saveBtnText}>Guardar</Text>}
+            </TouchableOpacity>
+          ) : (
+            <View style={styles.iconBtn} />
+          )}
         </View>
 
         <ScrollView
@@ -246,6 +267,13 @@ export default function AdminVenueEdit() {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
+          {!canSave ? (
+            <View style={styles.roModeBox}>
+              <Feather name="lock" size={12} color={Colors.textMuted} />
+              <Text style={styles.roModeText}>Solo lectura — necesitas rol de admin para guardar cambios.</Text>
+            </View>
+          ) : null}
+
           {/* Cover image */}
           <TouchableOpacity
             onPress={() => pickImage('cover')}
@@ -452,6 +480,15 @@ const styles = StyleSheet.create({
   saveBtnText: { color: Colors.textInverse, fontSize: 13, fontWeight: '700' },
 
   scroll: { padding: 16, paddingBottom: 40, gap: 20 },
+
+  roModeBox: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: 12, paddingVertical: 8,
+    backgroundColor: Colors.bgCard,
+    borderRadius: Radius.button,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: Colors.border,
+  },
+  roModeText: { color: Colors.textMuted, fontSize: 11, flex: 1 },
 
   // Cover
   coverBox: {

@@ -1,5 +1,5 @@
 import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, ActivityIndicator, Alert, Switch, Image, Modal } from 'react-native';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
@@ -7,18 +7,33 @@ import * as ImagePicker from 'expo-image-picker';
 import { adminApi, eventsApi, venueApi } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { DateTimeField } from '@/components/DateTimeField';
+import { useAuthStore } from '@/stores/auth.store';
 import { useSafeBack } from '@/hooks/useSafeBack';
 import { Colors } from '@/constants/tokens';
 import { uploadImage, UploadError } from '@/utils/uploadImage';
+import { ErrorState } from '@/components/ErrorState';
+import { OptionSheet } from '@/components/admin';
+import type { OptionSheetItem } from '@/components/admin';
 
 interface EventFormProps {
   eventId?: string;
 }
 
+const TITLE_MIN = 3;
+const DESCRIPTION_MIN = 10;
+
 export function EventForm({ eventId }: EventFormProps) {
   const router = useRouter();
   const goBack = useSafeBack('/(admin)/manage/events');
+  const me = useAuthStore((s) => s.user);
+  // Backend: events create/update are open to MODERATOR too — only hard
+  // delete is ADMIN/SUPER_ADMIN-only (events.controller.ts `@Delete(':id')`).
+  const canDelete = me?.role === 'ADMIN' || me?.role === 'SUPER_ADMIN';
   const isEdit = !!eventId;
+
+  const [showVenuePicker, setShowVenuePicker] = useState(false);
+  const [showCategoryPicker, setShowCategoryPicker] = useState(false);
+  const [showStatusPicker, setShowStatusPicker] = useState(false);
 
   const [title, setTitle] = useState('');
   const [titleEn, setTitleEn] = useState('');
@@ -34,11 +49,12 @@ export function EventForm({ eventId }: EventFormProps) {
   const [pointsReward, setPointsReward] = useState('50');
   const [isFree, setIsFree] = useState(true);
   const [price, setPrice] = useState('');
-  const [status, setStatus] = useState<'DRAFT' | 'PUBLISHED' | 'CANCELLED'>('PUBLISHED');
+  const [status, setStatus] = useState<'DRAFT' | 'PUBLISHED' | 'CANCELLED' | 'COMPLETED' | 'FULL'>('PUBLISHED');
 
   const [venues, setVenues] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
   const [loading, setLoading] = useState(isEdit);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [pickingImage, setPickingImage] = useState(false);
@@ -57,7 +73,9 @@ export function EventForm({ eventId }: EventFormProps) {
       const r = await adminApi.allCategories();
       const all = r.data?.data ?? r.data ?? [];
       setArchivedCategories(all.filter((c: any) => !c.isActive));
-    } catch {}
+    } catch (err) {
+      Alert.alert('Error', apiError(err));
+    }
     finally { setLoadingArchived(false); }
   }
 
@@ -154,68 +172,88 @@ export function EventForm({ eventId }: EventFormProps) {
     } finally { setPickingImage(false); }
   }
 
-  useEffect(() => {
-    (async () => {
-      const [vRes, cRes] = await Promise.all([
-        venueApi.list({}).catch(() => null),
-        eventsApi.categories().catch(() => null),
-      ]);
-      const vs = vRes?.data?.data?.data ?? vRes?.data?.data ?? [];
-      const cs = cRes?.data?.data ?? [];
-      setVenues(vs);
-      setCategories(cs);
-      if (!isEdit) {
-        if (vs[0]) { setVenueId(vs[0].id); setVenueName(vs[0].name); }
-        if (cs[0]) { setCategoryId(cs[0].id); setCategoryName(cs[0].name); }
-      }
+  const loadEvent = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    const [vRes, cRes] = await Promise.all([
+      venueApi.list({}).catch(() => null),
+      eventsApi.categories().catch(() => null),
+    ]);
+    const vs = vRes?.data?.data?.data ?? vRes?.data?.data ?? [];
+    const cs = cRes?.data?.data ?? [];
+    setVenues(vs);
+    setCategories(cs);
+    if (!isEdit) {
+      if (vs[0]) { setVenueId(vs[0].id); setVenueName(vs[0].name); }
+      if (cs[0]) { setCategoryId(cs[0].id); setCategoryName(cs[0].name); }
+      setLoading(false);
+      return;
+    }
 
-      if (isEdit && eventId) {
-        try {
-          const r = await eventsApi.get(eventId);
-          const e = r.data?.data;
-          if (e) {
-            setTitle(e.title ?? '');
-            setTitleEn(e.titleEn ?? '');
-            setDescription(e.description ?? '');
-            setImageUrl(e.imageUrl ?? '');
-            setVenueId(e.venueId ?? '');
-            setVenueName(e.venue?.name ?? '');
-            setCategoryId(e.categoryId ?? '');
-            setCategoryName(e.category?.name ?? '');
-            setStartDate(e.startDate ? toLocal(e.startDate) : '');
-            setEndDate(e.endDate ? toLocal(e.endDate) : '');
-            setMaxCapacity(e.maxCapacity ? String(e.maxCapacity) : '');
-            setPointsReward(String(e.pointsReward ?? 50));
-            setIsFree(!!e.isFree);
-            setPrice(e.price ? String(e.price) : '');
-            setStatus(e.status ?? 'PUBLISHED');
-          }
-        } catch {}
-        finally { setLoading(false); }
+    if (eventId) {
+      try {
+        const r = await eventsApi.get(eventId);
+        const e = r.data?.data;
+        if (e) {
+          setTitle(e.title ?? '');
+          setTitleEn(e.titleEn ?? '');
+          setDescription(e.description ?? '');
+          setImageUrl(e.imageUrl ?? '');
+          setVenueId(e.venueId ?? '');
+          setVenueName(e.venue?.name ?? '');
+          setCategoryId(e.categoryId ?? '');
+          setCategoryName(e.category?.name ?? '');
+          setStartDate(e.startDate ? toLocal(e.startDate) : '');
+          setEndDate(e.endDate ? toLocal(e.endDate) : '');
+          setMaxCapacity(e.maxCapacity ? String(e.maxCapacity) : '');
+          setPointsReward(String(e.pointsReward ?? 50));
+          setIsFree(!!e.isFree);
+          setPrice(e.price ? String(e.price) : '');
+          setStatus(e.status ?? 'PUBLISHED');
+        }
+      } catch (err) {
+        // A failed edit-load must not silently fall back to a blank "new
+        // event" form — that would let someone overwrite an existing event
+        // with empty fields without realizing the load actually failed.
+        setLoadError(apiError(err));
       }
-    })();
+      finally { setLoading(false); }
+    }
   }, [eventId, isEdit]);
+
+  useEffect(() => { loadEvent(); }, [loadEvent]);
 
   async function handleSave() {
     if (!title.trim() || !description.trim() || !venueId || !categoryId || !startDate || !endDate) {
       Alert.alert('Faltan datos', 'Completa los campos requeridos.');
       return;
     }
+    if (title.trim().length < TITLE_MIN) {
+      Alert.alert('Nombre muy corto', `Usa al menos ${TITLE_MIN} caracteres.`);
+      return;
+    }
+    if (description.trim().length < DESCRIPTION_MIN) {
+      Alert.alert('Descripción muy corta', `Usa al menos ${DESCRIPTION_MIN} caracteres.`);
+      return;
+    }
     setSaving(true);
     try {
+      // The service only writes a field when it's !== undefined, so an
+      // emptied optional field must be sent as `null` (not omitted/undefined)
+      // to actually clear it — otherwise the old value just sticks around.
       const payload: any = {
         title: title.trim(),
-        titleEn: titleEn.trim() || undefined,
+        titleEn: titleEn.trim() || null,
         description: description.trim(),
-        imageUrl: imageUrl.trim() || undefined,
+        imageUrl: imageUrl.trim() || null,
         venueId,
         categoryId,
         startDate: new Date(startDate).toISOString(),
         endDate: new Date(endDate).toISOString(),
-        maxCapacity: maxCapacity ? Number(maxCapacity) : undefined,
+        maxCapacity: maxCapacity ? Number(maxCapacity) : null,
         pointsReward: Number(pointsReward) || 0,
         isFree,
-        price: !isFree && price ? Number(price) : undefined,
+        price: !isFree && price ? Number(price) : null,
         status,
       };
       if (isEdit && eventId) {
@@ -248,30 +286,40 @@ export function EventForm({ eventId }: EventFormProps) {
     ]);
   }
 
-  function pickVenue() {
-    Alert.alert('Elegir venue', '', [
-      { text: 'Cancelar', style: 'cancel' },
-      ...venues.map((v) => ({ text: v.name, onPress: () => { setVenueId(v.id); setVenueName(v.name); } })),
-    ]);
-  }
-  function pickCategory() {
-    Alert.alert('Elegir categoría', '', [
-      { text: 'Cancelar', style: 'cancel' },
-      ...categories.map((c) => ({ text: c.name, onPress: () => { setCategoryId(c.id); setCategoryName(c.name); } })),
-      { text: '+ Nueva categoría…', onPress: () => setShowNewCategory(true) },
-      { text: 'Administrar categorías…', onPress: () => setShowManageCategories(true) },
-    ]);
-  }
-  function pickStatus() {
-    Alert.alert('Status', '', [
-      { text: 'Cancelar', style: 'cancel' },
-      { text: 'Publicado', onPress: () => setStatus('PUBLISHED') },
-      { text: 'Borrador', onPress: () => setStatus('DRAFT') },
-      { text: 'Cancelado', onPress: () => setStatus('CANCELLED') },
-    ]);
-  }
+  // Alert.alert silently truncates past 3 buttons on Android — venue/category
+  // lists (and the extra category actions) blew past that easily. OptionSheet
+  // replaces all three pickers below.
+  function pickVenue() { setShowVenuePicker(true); }
+  function pickCategory() { setShowCategoryPicker(true); }
+  function pickStatus() { setShowStatusPicker(true); }
+
+  const venueOptions: OptionSheetItem<string>[] = venues.map((v) => ({ value: v.id, label: v.name }));
+  const categoryOptions: OptionSheetItem<string>[] = [
+    ...categories.map((c) => ({ value: c.id, label: c.name })),
+    { value: '__new__', label: 'Nueva categoría…', icon: 'plus-circle' as const, tone: 'accent' as const },
+    { value: '__manage__', label: 'Administrar categorías…', icon: 'sliders' as const },
+  ];
+  const statusOptions: OptionSheetItem<typeof status>[] = [
+    { value: 'PUBLISHED', label: 'Publicado' },
+    { value: 'DRAFT', label: 'Borrador' },
+    { value: 'CANCELLED', label: 'Cancelado', tone: 'danger' },
+    { value: 'COMPLETED', label: 'Finalizado' },
+    { value: 'FULL', label: 'Cupo lleno' },
+  ];
 
   if (loading) return <View style={styles.center}><ActivityIndicator color={Colors.accentPrimary} /></View>;
+  if (loadError) return (
+    <SafeAreaView style={styles.root} edges={['top']}>
+      <View style={styles.header}>
+        <TouchableOpacity style={styles.iconBtn} onPress={goBack} hitSlop={10}>
+          <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
+        </TouchableOpacity>
+        <Text style={styles.title}>{isEdit ? 'Editar Evento' : 'Nuevo Evento'}</Text>
+        <View style={{ width: 40 }} />
+      </View>
+      <ErrorState message={loadError} onRetry={loadEvent} />
+    </SafeAreaView>
+  );
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
@@ -384,7 +432,7 @@ export function EventForm({ eventId }: EventFormProps) {
 
         <PickerField label="Status" value={statusLabel(status)} onPress={pickStatus} />
 
-        {isEdit && (
+        {isEdit && canDelete && (
           <TouchableOpacity style={styles.deleteBtn} onPress={handleDelete} disabled={deleting} activeOpacity={0.85}>
             {deleting
               ? <ActivityIndicator color={Colors.accentDanger} size="small" />
@@ -393,6 +441,41 @@ export function EventForm({ eventId }: EventFormProps) {
           </TouchableOpacity>
         )}
       </ScrollView>
+
+      <OptionSheet<string>
+        open={showVenuePicker}
+        onClose={() => setShowVenuePicker(false)}
+        title="Elegir venue"
+        options={venueOptions}
+        value={venueId}
+        onSelect={(id) => {
+          const v = venues.find((x) => x.id === id);
+          if (v) { setVenueId(v.id); setVenueName(v.name); }
+        }}
+      />
+
+      <OptionSheet<string>
+        open={showCategoryPicker}
+        onClose={() => setShowCategoryPicker(false)}
+        title="Elegir categoría"
+        options={categoryOptions}
+        value={categoryId}
+        onSelect={(id) => {
+          if (id === '__new__') { setShowNewCategory(true); return; }
+          if (id === '__manage__') { setShowManageCategories(true); return; }
+          const c = categories.find((x) => x.id === id);
+          if (c) { setCategoryId(c.id); setCategoryName(c.name); }
+        }}
+      />
+
+      <OptionSheet<typeof status>
+        open={showStatusPicker}
+        onClose={() => setShowStatusPicker(false)}
+        title="Status del evento"
+        options={statusOptions}
+        value={status}
+        onSelect={setStatus}
+      />
 
       <Modal visible={showNewCategory} transparent animationType="fade" onRequestClose={() => setShowNewCategory(false)}>
         <View style={styles.modalBackdrop}>
@@ -575,7 +658,14 @@ function PickerField({ label, value, onPress }: any) {
 }
 
 function statusLabel(s: string) {
-  return s === 'PUBLISHED' ? 'Publicado' : s === 'DRAFT' ? 'Borrador' : 'Cancelado';
+  switch (s) {
+    case 'PUBLISHED': return 'Publicado';
+    case 'DRAFT': return 'Borrador';
+    case 'CANCELLED': return 'Cancelado';
+    case 'COMPLETED': return 'Finalizado';
+    case 'FULL': return 'Cupo lleno';
+    default: return s;
+  }
 }
 function toLocal(iso: string) {
   const d = new Date(iso);

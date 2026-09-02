@@ -27,6 +27,8 @@ import { Feather } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 
 import { usersApi } from '@/api/client';
+import { apiError } from '@/api/errors';
+import { toast } from '@/components/Toast';
 import { useAuthStore } from '@/stores/auth.store';
 import { useAppStore } from '@/stores/app.store';
 import {
@@ -126,29 +128,44 @@ export default function Step1Profile() {
   }
 
   async function handleNext() {
+    if (loading) return;
     fb.tap();
+    const payload: Record<string, string> = {};
+    if (birthDate) payload.birthDate = birthDate.toISOString();
+    if (city.trim()) payload.city = city.trim();
+    if (bio.trim()) payload.bio = bio.trim();
+    if (gender) payload.gender = gender;
+    if (occupation.trim()) payload.occupation = occupation.trim();
+    if (discoverySource) payload.discoverySource = discoverySource;
+
+    // Nothing to save → same as skip.
+    if (Object.keys(payload).length === 0) {
+      router.replace('/(auth)/register/step2-interests' as never);
+      return;
+    }
+
     setLoading(true);
     try {
-      const payload: any = {};
-      if (birthDate) payload.birthDate = birthDate.toISOString();
-      if (city.trim()) payload.city = city.trim();
-      if (bio.trim()) payload.bio = bio.trim();
-      if (gender) payload.gender = gender;
-      if (occupation.trim()) payload.occupation = occupation.trim();
-      if (discoverySource) payload.discoverySource = discoverySource;
-      if (Object.keys(payload).length > 0) {
-        await usersApi.updateProfile(payload);
-        await refreshUser();
-      }
-    } catch {
-      // Non-blocking — user can edit later from Profile
+      await usersApi.updateProfile(payload);
+      // Refresh is best-effort: the save already succeeded.
+      await refreshUser();
+      fb.success();
+      router.replace('/(auth)/register/step2-interests' as never);
+    } catch (err: any) {
+      // Stay on screen so nothing typed is lost; the user can retry or skip.
+      fb.error();
+      toast(
+        apiError(err, t ? 'No pudimos guardar tu perfil.' : 'Could not save your profile.'),
+        'danger',
+      );
     } finally {
       setLoading(false);
-      router.replace('/(auth)/register/step2-interests' as never);
     }
   }
 
   function handleSkip() {
+    if (loading) return;
+    fb.select();
     router.replace('/(auth)/register/step2-interests' as never);
   }
 
@@ -373,6 +390,7 @@ export default function Step1Profile() {
             accessibilityLabel={t ? 'Omitir por ahora' : 'Skip for now'}
             haptic="select"
             onPress={handleSkip}
+            disabled={loading}
             style={styles.skipBtn}
           >
             <Body size="sm" tone="muted">

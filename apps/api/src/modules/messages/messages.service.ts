@@ -1,5 +1,20 @@
-import { ForbiddenException, Inject, Injectable, NotFoundException, forwardRef } from '@nestjs/common';
-import { DmPolicy, FriendshipStatus, MessageThreadStatus, NotificationType, UserRole } from '@prisma/client';
+import {
+  ConflictException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+  NotFoundException,
+  forwardRef,
+} from '@nestjs/common';
+import {
+  DmPolicy,
+  FriendshipStatus,
+  MessageThreadStatus,
+  NotificationType,
+  ReportReason,
+  ReportTargetType,
+  UserRole,
+} from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { MessagesGateway } from './messages.gateway';
 import { RealtimeService } from '../realtime/realtime.service';
@@ -142,12 +157,35 @@ export class MessagesService {
     return MessageThreadStatus.PENDING;
   }
 
+  /**
+   * A BLOCKED `Friendship` row in either direction (set by
+   * FriendshipsService.block) must close DMs both ways, independent of the
+   * thread's own status. Throws Forbidden when found.
+   */
+  private async assertNotBlockedPair(meId: string, otherId: string) {
+    const blocked = await this.prisma.friendship.findFirst({
+      where: {
+        status: FriendshipStatus.BLOCKED,
+        OR: [
+          { requesterId: meId, addresseeId: otherId },
+          { requesterId: otherId, addresseeId: meId },
+        ],
+      },
+      select: { id: true },
+    });
+    if (blocked) throw new ForbiddenException('You have been blocked by this user');
+  }
+
   async getOrCreateThread(meId: string, otherId: string) {
     if (meId === otherId) throw new ForbiddenException("Can't message yourself");
     const [uA, uB] = this.pair(meId, otherId);
     const existing = await this.prisma.messageThread.findUnique({
       where: { userAId_userBId: { userAId: uA, userBId: uB } },
     });
+    if (existing?.status === MessageThreadStatus.BLOCKED) {
+      throw new ForbiddenException('You have been blocked by this user');
+    }
+    await this.assertNotBlockedPair(meId, otherId);
     if (existing) return existing;
 
     const status = await this.resolveInitialStatus(meId, otherId);
@@ -178,7 +216,18 @@ export class MessagesService {
         messages: {
           orderBy: { createdAt: 'desc' },
           take: 1,
-          select: { id: true, content: true, imageUrl: true, stickerKey: true, createdAt: true, senderId: true, isRead: true },
+          select: {
+            id: true,
+            content: true,
+            imageUrl: true,
+            stickerKey: true,
+            audioUrl: true,
+            audioDurationSec: true,
+            createdAt: true,
+            senderId: true,
+            isRead: true,
+            deletedAt: true,
+          },
         },
       },
       take: 100,
@@ -201,12 +250,45 @@ export class MessagesService {
       const other = thread.userAId === meId ? thread.userB : thread.userA;
       return {
         id: thread.id,
+        status: thread.status,
+        requestedById: thread.requestedById,
         lastMessageAt: thread.lastMessageAt,
         otherUser: other,
         lastMessage: thread.messages[0] ?? null,
         unreadCount: unreadByThread.get(thread.id) ?? 0,
       };
     });
+  }
+
+  /**
+   * Badge counters for the tab bar: number of ACCEPTED/own-PENDING threads
+   * with at least one unread message and total unread messages across them.
+   * Incoming (PENDING for me) requests are excluded — they have their own
+   * counter (`requestsCount`).
+   */
+  async unreadCount(meId: string) {
+    const counts = await this.prisma.message.groupBy({
+      by: ['threadId'],
+      where: {
+        isRead: false,
+        deletedAt: null,
+        senderId: { not: meId },
+        thread: {
+          OR: [{ userAId: meId }, { userBId: meId }],
+          AND: [
+            {
+              OR: [
+                { status: MessageThreadStatus.ACCEPTED },
+                { status: MessageThreadStatus.PENDING, requestedById: meId },
+              ],
+            },
+          ],
+        },
+      },
+      _count: { _all: true },
+    });
+    const messages = counts.reduce((sum, c) => sum + c._count._all, 0);
+    return { threads: counts.length, messages };
   }
 
   async getThread(meId: string, threadId: string) {
@@ -222,7 +304,13 @@ export class MessagesService {
     });
     if (!thread) throw new NotFoundException('Thread not found');
     const otherUser = thread.userAId === meId ? thread.userB : thread.userA;
-    return { id: thread.id, otherUser, lastMessageAt: thread.lastMessageAt };
+    return {
+      id: thread.id,
+      otherUser,
+      lastMessageAt: thread.lastMessageAt,
+      status: thread.status,
+      requestedById: thread.requestedById,
+    };
   }
 
   async listMessages(meId: string, threadId: string, cursor?: string, limit = 50) {
@@ -297,6 +385,12 @@ export class MessagesService {
       if (thread.status === MessageThreadStatus.BLOCKED) {
         throw new ForbiddenException('This conversation is blocked');
       }
+      // Friendship-level block (profile "Bloquear") also closes the DM even
+      // if the thread row itself is still ACCEPTED.
+      await this.assertNotBlockedPair(
+        meId,
+        thread.userAId === meId ? thread.userBId : thread.userAId,
+      );
     } else {
       // treat as userId — getOrCreateThread will run gating
       const targetUser = await this.prisma.user.findUnique({ where: { id: threadOrUserId } });
@@ -431,7 +525,16 @@ export class MessagesService {
         messages: {
           orderBy: { createdAt: 'desc' },
           take: 1,
-          select: { id: true, content: true, imageUrl: true, stickerKey: true, createdAt: true, senderId: true },
+          select: {
+            id: true,
+            content: true,
+            imageUrl: true,
+            stickerKey: true,
+            audioUrl: true,
+            audioDurationSec: true,
+            createdAt: true,
+            senderId: true,
+          },
         },
       },
       take: 100,
@@ -441,6 +544,8 @@ export class MessagesService {
       const other = t.userAId === meId ? t.userB : t.userA;
       return {
         id: t.id,
+        status: t.status,
+        requestedById: t.requestedById,
         lastMessageAt: t.lastMessageAt,
         otherUser: other,
         lastMessage: t.messages[0] ?? null,
@@ -475,10 +580,13 @@ export class MessagesService {
       where: { id: threadId },
       data: { status: MessageThreadStatus.ACCEPTED },
     });
-    this.realtime.toUsers([updated.userAId, updated.userBId], 'message', 'updated', {
+    // `thread` envelope is what the mobile inbox/chat consume; `message`
+    // is kept for the admin moderation feed which predates the split.
+    this.realtime.toUsers([updated.userAId, updated.userBId], 'thread', 'updated', {
       id: updated.id,
       data: updated,
     });
+    this.realtime.toStaff('message', 'updated', { id: updated.id, data: updated });
     return updated;
   }
 
@@ -486,7 +594,10 @@ export class MessagesService {
     const t = await this.assertRecipientOf(meId, threadId);
     // Hard-delete: declined requests should disappear, not linger as BLOCKED.
     await this.prisma.messageThread.delete({ where: { id: threadId } });
-    this.realtime.toUsers([t.userAId, t.userBId], 'message', 'deleted', { id: threadId });
+    // Both sides drop the thread: the requester's inbox row disappears and
+    // the recipient's requests list refreshes.
+    this.realtime.toUsers([t.userAId, t.userBId], 'thread', 'deleted', { id: threadId });
+    this.realtime.toStaff('message', 'deleted', { id: threadId, data: { threadId } });
     return { ok: true };
   }
 
@@ -496,21 +607,92 @@ export class MessagesService {
       where: { id: threadId },
       data: { status: MessageThreadStatus.BLOCKED },
     });
-    this.realtime.toUsers([t.userAId, t.userBId], 'message', 'updated', {
+    this.realtime.toUsers([t.userAId, t.userBId], 'thread', 'updated', {
       id: updated.id,
       data: updated,
     });
+    this.realtime.toStaff('message', 'updated', { id: updated.id, data: updated });
     return updated;
   }
 
-  async deleteMessage(_meId: string, _messageId: string) {
-    // Por politica de moderacion los usuarios NO pueden borrar mensajes.
-    // Solo el equipo (ADMIN/SUPER_ADMIN/MODERATOR) puede eliminar via
-    // /admin/messages/:id. Asi mantenemos la cadena de evidencia para
-    // moderacion + reportes.
-    throw new ForbiddenException(
-      'Los usuarios no pueden eliminar mensajes. Si necesitas reportar este mensaje, usa la opción Reportar.',
-    );
+  /** Window during which a sender may retract their own message. */
+  static readonly DELETE_WINDOW_MS = 15 * 60 * 1000;
+
+  /**
+   * Soft-delete of the caller's OWN message within 15 minutes of sending.
+   * Content is blanked so it disappears for both participants; the row is
+   * preserved (deletedAt) so moderation keeps its evidence chain — staff
+   * still see it via adminListMessages.
+   */
+  async deleteMessage(meId: string, messageId: string) {
+    const msg = await this.assertMessageMembership(meId, messageId);
+    if (msg.senderId !== meId) {
+      throw new ForbiddenException('You can only delete your own messages');
+    }
+    if (msg.deletedAt) return { id: msg.id, threadId: msg.threadId, deleted: true };
+    const age = Date.now() - new Date(msg.createdAt).getTime();
+    if (age > MessagesService.DELETE_WINDOW_MS) {
+      throw new ForbiddenException('Messages can only be deleted within 15 minutes');
+    }
+    await this.prisma.message.update({
+      where: { id: messageId },
+      data: { deletedAt: new Date() },
+    });
+    const thread = msg.thread!;
+    this.realtime.toUsers([thread.userAId, thread.userBId], 'message', 'deleted', {
+      id: messageId,
+      data: { messageId, threadId: msg.threadId, bySender: true },
+    });
+    this.realtime.toStaff('message', 'deleted', {
+      id: messageId,
+      data: { messageId, threadId: msg.threadId, bySender: true },
+    });
+    return { id: msg.id, threadId: msg.threadId, deleted: true };
+  }
+
+  /**
+   * Report a conversation. `Report.targetType` has no MESSAGE variant, so the
+   * report targets the OTHER participant (USER) and the thread id is folded
+   * into the description so moderators can open the DM from the admin panel.
+   */
+  async reportThread(
+    meId: string,
+    threadId: string,
+    dto: { reason: ReportReason; description?: string; messageId?: string },
+  ) {
+    const thread = await this.prisma.messageThread.findFirst({
+      where: { id: threadId, OR: [{ userAId: meId }, { userBId: meId }] },
+      select: { id: true, userAId: true, userBId: true },
+    });
+    if (!thread) throw new NotFoundException('Thread not found');
+    const otherId = thread.userAId === meId ? thread.userBId : thread.userAId;
+
+    const recent = await this.prisma.report.findFirst({
+      where: {
+        reporterId: meId,
+        targetType: ReportTargetType.USER,
+        targetId: otherId,
+        createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+      },
+      select: { id: true },
+    });
+    if (recent) throw new ConflictException('You already reported this user recently');
+
+    const context = [`[DM thread:${threadId}`, dto.messageId ? ` message:${dto.messageId}` : '', ']'].join('');
+    const description = `${context} ${dto.description?.trim() ?? ''}`.trim().slice(0, 500);
+
+    const report = await this.prisma.report.create({
+      data: {
+        reporterId: meId,
+        targetType: ReportTargetType.USER,
+        targetId: otherId,
+        reportedUserId: otherId,
+        reason: dto.reason,
+        description,
+      },
+    });
+    this.realtime.toStaff('report', 'created', { id: report.id, data: report });
+    return report;
   }
 
   // ─────────────────────────────────────────
@@ -684,7 +866,10 @@ export class MessagesService {
   }
 
   async adminDeleteMessage(messageId: string, adminId: string) {
-    const msg = await this.prisma.message.findUnique({ where: { id: messageId } });
+    const msg = await this.prisma.message.findUnique({
+      where: { id: messageId },
+      include: { thread: { select: { userAId: true, userBId: true } } },
+    });
     if (!msg) throw new NotFoundException('Message not found');
     const r = await this.prisma.message.update({
       where: { id: messageId },
@@ -693,8 +878,13 @@ export class MessagesService {
         content: `[Eliminado por moderación · ${new Date().toISOString()}]`,
       },
     });
-    this.realtime.toStaff('message', 'deleted', { id: messageId });
-    this.realtime.toUser(msg.senderId, 'message', 'deleted', { id: messageId });
+    const payload = { messageId, threadId: msg.threadId, byModeration: true, adminId };
+    this.realtime.toStaff('message', 'deleted', { id: messageId, data: payload });
+    // Both participants must drop the bubble, not just the author.
+    const recipients = msg.thread
+      ? [msg.thread.userAId, msg.thread.userBId]
+      : [msg.senderId];
+    this.realtime.toUsers(recipients, 'message', 'deleted', { id: messageId, data: payload });
     return r;
   }
 }

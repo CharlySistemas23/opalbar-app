@@ -60,6 +60,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     try {
       const token = this.extractToken(socket);
       if (!token) {
+        socket.emit('auth_error', { code: 'NO_TOKEN', message: 'No token' });
         socket.emit('error', { message: 'No token' });
         socket.disconnect(true);
         return;
@@ -73,6 +74,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
       if (payload.jti) {
         const blocked = await this.redis.exists(RedisService.sessionBlocklistKey(payload.jti));
         if (blocked) {
+          socket.emit('auth_error', { code: 'TOKEN_REVOKED', message: 'Token revoked' });
           socket.emit('error', { message: 'Token revoked' });
           socket.disconnect(true);
           return;
@@ -102,6 +104,11 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
       this.logger.debug(`rt connect user=${userId} role=${role} sockets=${count}`);
     } catch (err) {
       this.logger.warn(`rt auth failed: ${(err as Error).message}`);
+      const expired = /expired/i.test((err as Error).message ?? '');
+      socket.emit('auth_error', {
+        code: expired ? 'TOKEN_EXPIRED' : 'INVALID_TOKEN',
+        message: expired ? 'Token expired' : 'Invalid token',
+      });
       socket.emit('error', { message: 'Invalid token' });
       socket.disconnect(true);
     }

@@ -3,7 +3,7 @@
 //  Tabs by emoji (All / 😂 / ❤️ / ...). Each row: avatar + name + emoji.
 //  Tap a user → push to their profile.
 // ─────────────────────────────────────────────
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -18,6 +18,7 @@ import { useRouter } from 'expo-router';
 import Feather from '@expo/vector-icons/Feather';
 import { Colors } from '@/constants/tokens';
 import { communityApi } from '@/api/client';
+import { apiError } from '@/api/errors';
 
 export interface Reactor {
   userId: string;
@@ -31,6 +32,8 @@ interface ReactorsModalProps {
   visible: boolean;
   postId: string | null;
   onClose: () => void;
+  /** true = Spanish (app default), false = English. */
+  t?: boolean;
 }
 
 const AVATAR_COLORS = ['#C9A961', '#7FA0BC', '#9F8DBE', '#6FA88A', '#C46868', '#C48A8A'];
@@ -43,17 +46,18 @@ function initialsFor(name: string) {
   return ((parts[0]?.[0] ?? '') + (parts[1]?.[0] ?? '')).toUpperCase() || 'U';
 }
 
-export function ReactorsModal({ visible, postId, onClose }: ReactorsModalProps) {
+export function ReactorsModal({ visible, postId, onClose, t = true }: ReactorsModalProps) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState<Reactor[]>([]);
   const [tab, setTab] = useState<string>('ALL');
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!visible || !postId) return;
+  const load = useCallback(() => {
+    if (!postId) return () => {};
     let cancelled = false;
     setLoading(true);
-    setTab('ALL');
+    setError(null);
     communityApi
       .getReactors(postId)
       .then((res) => {
@@ -61,8 +65,8 @@ export function ReactorsModal({ visible, postId, onClose }: ReactorsModalProps) 
         const data = (res.data?.data ?? res.data ?? []) as Reactor[];
         setRows(Array.isArray(data) ? data : []);
       })
-      .catch(() => {
-        if (!cancelled) setRows([]);
+      .catch((err) => {
+        if (!cancelled) setError(apiError(err));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -70,7 +74,13 @@ export function ReactorsModal({ visible, postId, onClose }: ReactorsModalProps) 
     return () => {
       cancelled = true;
     };
-  }, [visible, postId]);
+  }, [postId]);
+
+  useEffect(() => {
+    if (!visible || !postId) return;
+    setTab('ALL');
+    return load();
+  }, [visible, postId, load]);
 
   // Build emoji tabs sorted by count desc
   const tabs = useMemo(() => {
@@ -92,7 +102,7 @@ export function ReactorsModal({ visible, postId, onClose }: ReactorsModalProps) 
         <Pressable style={styles.sheet} onPress={() => {}}>
           <View style={styles.handle} />
           <View style={styles.headerRow}>
-            <Text style={styles.title}>Reacciones</Text>
+            <Text style={styles.title}>{t ? 'Reacciones' : 'Reactions'}</Text>
             <Pressable onPress={onClose} hitSlop={10} style={styles.closeBtn}>
               <Feather name="x" size={20} color={Colors.textPrimary} />
             </Pressable>
@@ -114,7 +124,9 @@ export function ReactorsModal({ visible, postId, onClose }: ReactorsModalProps) 
                     style={[styles.tab, active && styles.tabActive]}
                   >
                     <Text style={[styles.tabText, active && styles.tabTextActive]}>
-                      {item.emoji === 'ALL' ? `Todos · ${item.count}` : `${item.emoji} ${item.count}`}
+                      {item.emoji === 'ALL'
+                        ? `${t ? 'Todos' : 'All'} · ${item.count}`
+                        : `${item.emoji} ${item.count}`}
                     </Text>
                   </Pressable>
                 );
@@ -127,9 +139,20 @@ export function ReactorsModal({ visible, postId, onClose }: ReactorsModalProps) 
             <View style={styles.loadingWrap}>
               <ActivityIndicator color={Colors.accentPrimary} />
             </View>
+          ) : error ? (
+            <View style={styles.loadingWrap}>
+              <Text style={styles.emptyText}>{error}</Text>
+              <Pressable onPress={load} hitSlop={10} style={{ marginTop: 10 }}>
+                <Text style={[styles.emptyText, { color: Colors.accentPrimary, fontWeight: '700' }]}>
+                  {t ? 'Reintentar' : 'Retry'}
+                </Text>
+              </Pressable>
+            </View>
           ) : filtered.length === 0 ? (
             <View style={styles.loadingWrap}>
-              <Text style={styles.emptyText}>Aún nadie reaccionó.</Text>
+              <Text style={styles.emptyText}>
+                {t ? 'Aún nadie reaccionó.' : 'No reactions yet.'}
+              </Text>
             </View>
           ) : (
             <FlatList

@@ -2,10 +2,13 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestj
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { ReservationsService } from './reservations.service';
-import { CreateReservationDto, ReservationFilterDto, UpdateReservationStatusDto } from './dto/reservation.dto';
+import {
+  AvailabilityQueryDto,
+  CreateReservationDto,
+  ReservationFilterDto,
+  UpdateReservationDto,
+} from './dto/reservation.dto';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { Roles } from '../../common/decorators/roles.decorator';
-import { Public } from '../../common/decorators/public.decorator';
 
 @ApiTags('Reservations')
 @ApiBearerAuth()
@@ -19,8 +22,15 @@ export class ReservationsController {
     return this.service.create(dto, userId);
   }
 
+  // Declared before `:id` so the literal route wins.
+  @Get('availability')
+  @ApiOperation({ summary: 'Slot availability for a venue on a given date (venue-local)' })
+  availability(@Query() query: AvailabilityQueryDto) {
+    return this.service.availability(query);
+  }
+
   @Get('my')
-  @ApiOperation({ summary: 'Get my reservations' })
+  @ApiOperation({ summary: 'Get my reservations (scope=upcoming|past, status, page, limit)' })
   findMine(@CurrentUser('id') userId: string, @Query() filter: ReservationFilterDto) {
     return this.service.findMine(userId, filter);
   }
@@ -32,10 +42,10 @@ export class ReservationsController {
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Modify my reservation (date / party size / notes)' })
+  @ApiOperation({ summary: 'Modify my reservation (date / time slot / party size / notes)' })
   modify(
     @Param('id') id: string,
-    @Body() dto: { date?: string; partySize?: number; specialRequests?: string },
+    @Body() dto: UpdateReservationDto,
     @CurrentUser('id') userId: string,
     @CurrentUser('role') role: UserRole,
   ) {

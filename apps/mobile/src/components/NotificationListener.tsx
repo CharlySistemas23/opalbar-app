@@ -3,6 +3,10 @@ import { Feather } from '@expo/vector-icons';
 import { useRealtime } from '@/hooks/useRealtime';
 import { showNotificationBanner } from './NotificationBanner';
 import { Colors } from '@/constants/tokens';
+import { routeForNotifData } from '@/lib/notif-routing';
+import { notificationsApi } from '@/api/client';
+import { useAppStore } from '@/stores/app.store';
+import { useUnreadStore } from '@/stores/unread.store';
 
 type FeatherIcon = React.ComponentProps<typeof Feather>['name'];
 
@@ -23,20 +27,6 @@ function metaForType(type?: string): { icon: FeatherIcon; color: string } {
   return { icon: 'bell', color: Colors.accentPrimary };
 }
 
-function routeForNotif(n: any): string | null {
-  const type = String(n?.type ?? '').toUpperCase();
-  const data = n?.data ?? {};
-  if (type.includes('FOLLOW') && data.actorId) return `/(app)/profile/${data.actorId}`;
-  if ((type.includes('REPLY') || type.includes('REACTION') || type.includes('MENTION') || type.includes('NEW_POST')) && data.postId)
-    return `/(app)/community/${data.postId}`;
-  if (type.includes('MESSAGE') && data.threadId) return `/(app)/messages/${data.threadId}`;
-  if (type.includes('EVENT') && data.eventId) return `/(app)/events/${data.eventId}`;
-  if (type.includes('OFFER') && data.offerId) return `/(app)/offers/${data.offerId}`;
-  if (type.includes('RESERVATION') && data.reservationId) return `/(app)/reservations/${data.reservationId}`;
-  if (type.includes('STORY') && data.venueId) return `/(app)/venues/${data.venueId}`;
-  return '/(app)/profile/notifications';
-}
-
 /**
  * Global in-app banner for incoming notifications. Subscribes to the realtime
  * `notification:created` envelope and shows the rich NotificationBanner so the
@@ -45,28 +35,43 @@ function routeForNotif(n: any): string | null {
  */
 export function NotificationListener() {
   const router = useRouter();
+  const language = useAppStore((s) => s.language);
 
   useRealtime('notification', (env) => {
     if (env.action !== 'created') return;
     // env.data IS the notification record. Older code unwrapped env.data.data,
     // but that points to the Prisma JSON metadata (actorId/postId/...) which
-    // has no title — so the banner showed the "Notificación" fallback.
+    // has no title — so the banner showed the fallback.
     const n = env.data;
     if (!n || typeof n !== 'object') return;
 
+    const es = language === 'es';
     const { icon, color } = metaForType(n.type);
-    const route = routeForNotif(n);
+    const route = routeForNotifData({ type: n.type, ...(n.data ?? {}) });
     const avatarUrl = n.data?.actorAvatarUrl ?? n.imageUrl ?? undefined;
+    const title = (es ? n.title : n.titleEn ?? n.title) || (es ? 'Notificación' : 'Notification');
+    const body = es ? n.body : n.bodyEn ?? n.body;
 
     showNotificationBanner({
       notifId: n.id,
       type: n.type,
-      title: n.title ?? 'Notificación',
-      body: n.body,
+      title,
+      body,
       avatarUrl,
       accentColor: color,
       icon,
-      onPress: route ? () => router.push(route as any) : undefined,
+      onPress: () => {
+        // Tapping the banner = seen. Optimistic badge decrement, then the
+        // server truth via refresh(). Navigation never waits on the network.
+        if (n.id) {
+          const unread = useUnreadStore.getState();
+          unread.set({ notifications: Math.max(0, unread.notifications - 1) });
+          notificationsApi.markRead(n.id)
+            .then(() => unread.refresh())
+            .catch(() => unread.refresh().catch(() => {}));
+        }
+        router.push(route as any);
+      },
     });
   });
 

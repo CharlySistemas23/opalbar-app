@@ -4,8 +4,15 @@
 //  Full-bleed hero image (16:10), kicker + Display title, lead paragraph,
 //  numeric stat blocks separated by hairlines, an editorial terms card,
 //  and a single primary CTA. QR rendered inside the editorial Modal.
+//
+//  If the member already holds an unused, unexpired redemption code for
+//  this offer, we show that QR straight away instead of a "Redeem" CTA
+//  that would look like it does nothing (or, worse, look like a second
+//  charge). Availability (status/date window/day-of-week/time-of-day) is
+//  computed client-side from the same fields the backend enforces, so the
+//  CTA explains itself instead of just failing on tap.
 // ─────────────────────────────────────────────
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Dimensions,
@@ -43,8 +50,65 @@ import { apiError } from '@/api/errors';
 import { useAuthStore } from '@/stores/auth.store';
 import { useAppStore } from '@/stores/app.store';
 import { useFeedback } from '@/hooks/useFeedback';
+import { ErrorState } from '@/components/ErrorState';
+import { shareOffer } from '@/utils/share';
+import { isWithinWindow, nowTimeMx, weekdayMx } from '@/utils/date';
 
 const HERO_RATIO = 16 / 10;
+
+interface OfferAvailability {
+  available: boolean;
+  reasonEs?: string;
+  reasonEn?: string;
+}
+
+function offerAvailability(offer: any): OfferAvailability {
+  if (!offer) return { available: false };
+  if (offer.status !== 'ACTIVE') {
+    return { available: false, reasonEs: 'No disponible por ahora', reasonEn: 'Not available right now' };
+  }
+  const now = new Date();
+  if (offer.startDate && new Date(offer.startDate) > now) {
+    return { available: false, reasonEs: 'Aún no inicia', reasonEn: 'Not started yet' };
+  }
+  if (offer.endDate && new Date(offer.endDate) < now) {
+    return { available: false, reasonEs: 'Oferta vencida', reasonEn: 'Offer expired' };
+  }
+  if (offer.maxRedemptions != null && (offer.currentRedemptions ?? 0) >= offer.maxRedemptions) {
+    return { available: false, reasonEs: 'Agotada', reasonEn: 'Fully redeemed' };
+  }
+  if (Array.isArray(offer.daysOfWeek) && offer.daysOfWeek.length > 0 && !offer.daysOfWeek.includes(weekdayMx())) {
+    return { available: false, reasonEs: 'No disponible hoy', reasonEn: 'Not available today' };
+  }
+  if ((offer.startTime || offer.endTime) && !isWithinWindow(nowTimeMx(), offer.startTime, offer.endTime)) {
+    const window = [offer.startTime, offer.endTime].filter(Boolean).join('–');
+    return {
+      available: false,
+      reasonEs: window ? `Disponible ${window}` : 'Fuera de horario',
+      reasonEn: window ? `Available ${window}` : 'Outside hours',
+    };
+  }
+  return { available: true };
+}
+
+function offerSchedule(offer: any, t: boolean): string | undefined {
+  if (!offer) return undefined;
+  const DAY_ES = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+  const DAY_EN = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const labels = t ? DAY_ES : DAY_EN;
+  const days: number[] | undefined = offer.daysOfWeek;
+  let dayStr: string | undefined;
+  if (days && days.length > 0 && days.length < 7) {
+    dayStr = [...days].sort((a, b) => a - b).map((d) => labels[d]).join(', ');
+  } else if (days && days.length === 7) {
+    dayStr = t ? 'Todos los días' : 'Every day';
+  }
+  const timeStr = offer.startTime && offer.endTime
+    ? `${offer.startTime}–${offer.endTime}`
+    : offer.startTime || offer.endTime || undefined;
+  if (dayStr && timeStr) return `${dayStr} · ${timeStr}`;
+  return dayStr || timeStr;
+}
 
 export default function OfferDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -56,29 +120,55 @@ export default function OfferDetail() {
 
   const [offer, setOffer] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [redeemed, setRedeemed] = useState(false);
   const [redemption, setRedemption] = useState<any>(null);
   const [showQr, setShowQr] = useState(false);
   const [previewVisible, setPreviewVisible] = useState(false);
 
+  const load = useCallback(async () => {
+    setLoadError(null);
+    try {
+      const [offerRes, redRes] = await Promise.allSettled([
+        offersApi.get(id),
+        isAuthenticated ? offersApi.myRedemptions() : Promise.reject(null),
+      ]);
+
+      if (offerRes.status === 'fulfilled') {
+        setOffer(offerRes.value.data?.data ?? null);
+      } else {
+        setOffer(null);
+        setLoadError(apiError(offerRes.reason));
+      }
+
+      if (redRes.status === 'fulfilled') {
+        const rows: any[] = redRes.value.data?.data?.data ?? redRes.value.data?.data ?? [];
+        const now = Date.now();
+        const existing = rows.find(
+          (r) => r.offerId === id && !r.isUsed && (!r.expiresAt || new Date(r.expiresAt).getTime() > now),
+        );
+        setRedemption(existing ?? null);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [id, isAuthenticated]);
+
   useEffect(() => {
-    offersApi
-      .get(id)
-      .then((r) => setOffer(r.data?.data))
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [id]);
+    load();
+  }, [load]);
+
+  const availability = useMemo(() => offerAvailability(offer), [offer]);
 
   async function handleRedeem() {
     if (!isAuthenticated) { router.push('/(auth)/login'); return; }
-    if (redeemed && redemption) { setShowQr(true); return; }
+    if (redemption) { setShowQr(true); return; }
+    if (!availability.available) return;
     setBusy(true);
     try {
       const res = await offersApi.redeem(id);
       const data = res.data?.data;
       setRedemption(data);
-      setRedeemed(true);
       setShowQr(true);
       fb.coin();
       await refreshUser();
@@ -88,6 +178,18 @@ export default function OfferDetail() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function handleShare() {
+    if (!offer) return;
+    await shareOffer({
+      id: offer.id,
+      title: t ? offer.title : offer.titleEn || offer.title,
+      description: t ? offer.description : offer.descriptionEn || offer.description,
+      imageUrl: offer.imageUrl,
+      pointsCost: offer.pointsRequired,
+      t,
+    });
   }
 
   if (loading) {
@@ -105,20 +207,38 @@ export default function OfferDetail() {
       </SafeAreaView>
     );
   }
+
   if (!offer) {
     return (
-      <SafeAreaView style={[styles.root, styles.center]} edges={['top']}>
-        <Body tone="secondary">{t ? 'Oferta no encontrada' : 'Offer not found'}</Body>
+      <SafeAreaView style={styles.root} edges={['top']}>
+        <View style={styles.headerBar}>
+          <BackBtn onPress={() => router.back()} label={t ? 'Volver' : 'Back'} />
+        </View>
+        <ErrorState
+          title={t ? 'Oferta no disponible' : 'Offer unavailable'}
+          message={loadError || (t ? 'No pudimos encontrar esta oferta.' : "We couldn't find this offer.")}
+          retryLabel={t ? 'Reintentar' : 'Retry'}
+          onRetry={() => { setLoading(true); load(); }}
+        />
       </SafeAreaView>
     );
   }
 
   const title = t ? offer.title : offer.titleEn || offer.title;
   const description = t ? offer.description : offer.descriptionEn || offer.description;
-  const validUntil = offer.validUntil ? new Date(offer.validUntil) : null;
+  const validUntil = offer.endDate ? new Date(offer.endDate) : null;
   const usesLeft = offer.maxRedemptions
     ? Math.max(0, offer.maxRedemptions - (offer.currentRedemptions ?? 0))
-    : offer.usesLeft;
+    : null;
+  const schedule = offerSchedule(offer, t);
+  const hasRedemption = !!redemption;
+  const reason = t ? availability.reasonEs : availability.reasonEn;
+  const ctaLabel = hasRedemption
+    ? t ? 'Ver QR' : 'Show QR'
+    : !availability.available
+      ? reason || (t ? 'No disponible' : 'Not available')
+      : t ? 'Canjear oferta' : 'Redeem offer';
+  const ctaDisabled = busy || (!hasRedemption && !availability.available);
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
@@ -145,6 +265,14 @@ export default function OfferDetail() {
           )}
           <View style={styles.heroHeader}>
             <BackBtn onPress={() => router.back()} label={t ? 'Volver' : 'Back'} overlay />
+            <Pressy
+              onPress={handleShare}
+              accessibilityLabel={t ? 'Compartir' : 'Share'}
+              hitSlop={HitSlop.expand}
+              style={styles.iconOverlay}
+            >
+              <Feather name="share-2" size={18} color={Colors.textPrimary} />
+            </Pressy>
           </View>
         </View>
 
@@ -165,9 +293,16 @@ export default function OfferDetail() {
             </FadeIn>
           ) : null}
 
+          {schedule ? (
+            <FadeIn delay={200} style={styles.scheduleRow}>
+              <Feather name="clock" size={14} color={Colors.textMuted} />
+              <Caption tone="secondary">{schedule}</Caption>
+            </FadeIn>
+          ) : null}
+
           {/* Stat strip ─────────────────────── */}
           <FadeIn delay={240} style={styles.statStrip}>
-            {usesLeft !== undefined && usesLeft !== null ? (
+            {usesLeft !== null ? (
               <StatBlock
                 kicker={t ? 'DISPONIBLES' : 'AVAILABLE'}
                 value={String(usesLeft)}
@@ -179,8 +314,8 @@ export default function OfferDetail() {
                 value={validUntil.toLocaleDateString(language, { day: 'numeric', month: 'short' })}
               />
             ) : null}
-            {offer.pointsCost ? (
-              <StatBlock kicker={t ? 'PUNTOS' : 'POINTS'} value={String(offer.pointsCost)} />
+            {offer.pointsRequired ? (
+              <StatBlock kicker={t ? 'PUNTOS' : 'POINTS'} value={String(offer.pointsRequired)} />
             ) : null}
           </FadeIn>
 
@@ -214,19 +349,20 @@ export default function OfferDetail() {
       <View style={styles.ctaWrap}>
         <Hairline variant="subtle" />
         <View style={styles.ctaInner}>
+          {!hasRedemption && !availability.available ? (
+            <Caption tone="warning" style={{ marginBottom: Spacing[3] }} align="center">
+              {reason || (t ? 'Esta oferta no está disponible.' : 'This offer is not available.')}
+            </Caption>
+          ) : null}
           <Button
-            label={
-              redeemed
-                ? t ? 'Ver QR' : 'Show QR'
-                : t ? 'Canjear oferta' : 'Redeem offer'
-            }
+            label={ctaLabel}
             onPress={handleRedeem}
             loading={busy}
-            disabled={busy}
+            disabled={ctaDisabled}
             variant="primary"
             size="lg"
             fullWidth
-            haptic={redeemed ? 'tap' : 'success'}
+            haptic={hasRedemption ? 'tap' : 'success'}
           />
         </View>
       </View>
@@ -341,6 +477,9 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: Spacing[2],
     left: EditorialSpacing.pageGutter,
+    right: EditorialSpacing.pageGutter,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
   },
   backBtn: {
     width: 44,
@@ -356,10 +495,25 @@ const styles = StyleSheet.create({
     height: 40,
     marginLeft: 0,
   },
+  iconOverlay: {
+    width: 40,
+    height: 40,
+    borderRadius: Radius.full,
+    backgroundColor: 'rgba(8,7,6,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
   body: {
     paddingHorizontal: EditorialSpacing.pageGutter,
     paddingTop: Spacing[8],
+  },
+
+  scheduleRow: {
+    marginTop: Spacing[4],
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing[2],
   },
 
   statStrip: {
@@ -420,5 +574,3 @@ const styles = StyleSheet.create({
     letterSpacing: 4,
   },
 });
-
-void Heading;

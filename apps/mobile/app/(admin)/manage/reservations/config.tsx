@@ -7,18 +7,22 @@ import {
   Switch,
   Pressable,
 } from 'react-native';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
-import { venueApi } from '@/api/client';
+import { adminApi, venueApi } from '@/api/client';
 import { apiError } from '@/api/errors';
+import { useAuthStore } from '@/stores/auth.store';
 import { useSafeBack } from '@/hooks/useSafeBack';
 import { Colors, Radius, Spacing } from '@/constants/tokens';
 import { Body, Button, Caption, Input, Kicker, Subhead } from '@/components/ui';
+import { ErrorState } from '@/components/ErrorState';
 import { AdminHeader } from '@/components/admin';
 
 export default function ReservationsConfig() {
   const goBack = useSafeBack('/(admin)/manage/reservations');
+  const me = useAuthStore((s) => s.user);
+  const canSave = me?.role === 'ADMIN' || me?.role === 'SUPER_ADMIN';
   const [venue, setVenue] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -28,28 +32,38 @@ export default function ReservationsConfig() {
   const [capacity, setCapacity] = useState('80');
   const [slotMinutes, setSlotMinutes] = useState('30');
   const [enabled, setEnabled] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const r = await venueApi.list({});
-        const first = r.data?.data?.data?.[0] ?? r.data?.data?.[0];
-        if (first) {
-          setVenue(first);
-          setOpenTime(first.openTime ?? '19:00');
-          setCloseTime(first.closeTime ?? '02:00');
-          setCapacity(String(first.reservationCapacity ?? 80));
-          setSlotMinutes(String(first.slotMinutes ?? 30));
-          setEnabled(first.reservationsEnabled ?? true);
-        }
-      } catch {} finally { setLoading(false); }
-    })();
+  const loadVenue = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      // Admin endpoint — the public list filters isActive:true, which made
+      // a deactivated venue's reservation config unreachable here.
+      const r = await adminApi.venues();
+      const list = r.data?.data ?? r.data ?? [];
+      const first = Array.isArray(list) ? list[0] : undefined;
+      if (first) {
+        setVenue(first);
+        setOpenTime(first.openTime ?? '19:00');
+        setCloseTime(first.closeTime ?? '02:00');
+        setCapacity(String(first.reservationCapacity ?? 80));
+        setSlotMinutes(String(first.slotMinutes ?? 30));
+        setEnabled(first.reservationsEnabled ?? true);
+      }
+    } catch (err) {
+      setLoadError(apiError(err));
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
+  useEffect(() => { loadVenue(); }, [loadVenue]);
+
   async function save() {
-    if (!venue) return;
+    if (!venue || !canSave) return;
     if (!/^\d{2}:\d{2}$/.test(openTime) || !/^\d{2}:\d{2}$/.test(closeTime)) {
-      Alert.alert('Formato invalido', 'Usa HH:MM (ej. 19:00)');
+      Alert.alert('Formato inválido', 'Usa HH:MM (ej. 19:00)');
       return;
     }
     setSaving(true);
@@ -75,6 +89,12 @@ export default function ReservationsConfig() {
         <ActivityIndicator color={Colors.accentPrimary} />
       </View>
     );
+  if (loadError)
+    return (
+      <SafeAreaView style={styles.root} edges={['top']}>
+        <ErrorState message={loadError} onRetry={loadVenue} />
+      </SafeAreaView>
+    );
   if (!venue)
     return (
       <View style={styles.center}>
@@ -85,34 +105,44 @@ export default function ReservationsConfig() {
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
       <AdminHeader
-        title="Config Reservaciones"
+        title="Configuración de reservaciones"
         kicker="Ajustes"
         onBack={goBack}
         right={
-          <Pressable
-            onPress={save}
-            disabled={saving}
-            hitSlop={8}
-            accessibilityRole="button"
-            accessibilityLabel="Guardar configuracion"
-            style={({ pressed }) => [
-              styles.saveBtn,
-              saving && styles.disabled,
-              pressed && styles.pressed,
-            ]}
-          >
-            {saving ? (
-              <ActivityIndicator color={Colors.textInverse} size="small" />
-            ) : (
-              <Caption tone="inverse" style={{ fontWeight: '700' }}>
-                Guardar
-              </Caption>
-            )}
-          </Pressable>
+          canSave ? (
+            <Pressable
+              onPress={save}
+              disabled={saving}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Guardar configuración"
+              style={({ pressed }) => [
+                styles.saveBtn,
+                saving && styles.disabled,
+                pressed && styles.pressed,
+              ]}
+            >
+              {saving ? (
+                <ActivityIndicator color={Colors.textInverse} size="small" />
+              ) : (
+                <Caption tone="inverse" style={{ fontWeight: '700' }}>
+                  Guardar
+                </Caption>
+              )}
+            </Pressable>
+          ) : undefined
         }
       />
 
       <ScrollView contentContainerStyle={{ padding: Spacing[5], paddingBottom: 140, gap: Spacing[4] }}>
+        {!canSave ? (
+          <View style={styles.hint}>
+            <Feather name="lock" size={12} color={Colors.textMuted} />
+            <Caption tone="muted" size="sm" style={{ flex: 1 }}>
+              Solo lectura — necesitas rol de admin para guardar cambios aquí.
+            </Caption>
+          </View>
+        ) : null}
         <View style={styles.venueCard}>
           <View style={styles.vIcon}>
             <Feather name="home" size={18} color={Colors.accentPrimary} />
@@ -132,12 +162,13 @@ export default function ReservationsConfig() {
             <View style={{ flex: 1 }}>
               <Subhead>Aceptando reservaciones</Subhead>
               <Caption tone="muted" style={{ marginTop: 2 }}>
-                Si esta off, los usuarios no podran reservar mesa.
+                Si está apagado, los usuarios no podrán reservar mesa.
               </Caption>
             </View>
             <Switch
               value={enabled}
               onValueChange={setEnabled}
+              disabled={!canSave}
               trackColor={{ false: Colors.border, true: Colors.accentPrimary }}
               thumbColor="#fff"
               accessibilityLabel="Aceptando reservaciones"
@@ -153,6 +184,7 @@ export default function ReservationsConfig() {
                 label="Apertura"
                 value={openTime}
                 onChangeText={setOpenTime}
+                editable={canSave}
                 placeholder="19:00"
                 maxLength={5}
                 leftIcon={<Feather name="sunrise" size={15} color={Colors.textMuted} />}
@@ -163,6 +195,7 @@ export default function ReservationsConfig() {
                 label="Cierre"
                 value={closeTime}
                 onChangeText={setCloseTime}
+                editable={canSave}
                 placeholder="02:00"
                 maxLength={5}
                 leftIcon={<Feather name="sunset" size={15} color={Colors.textMuted} />}
@@ -172,7 +205,7 @@ export default function ReservationsConfig() {
           <View style={styles.hint}>
             <Feather name="info" size={12} color={Colors.textMuted} />
             <Caption tone="muted" size="sm" style={{ flex: 1 }}>
-              Formato 24h. Si cierras despues de medianoche usa la hora real (ej. 02:00).
+              Formato 24h. Si cierras después de medianoche usa la hora real (ej. 02:00).
             </Caption>
           </View>
         </View>
@@ -180,9 +213,10 @@ export default function ReservationsConfig() {
         <View style={styles.section}>
           <Kicker tone="muted">Capacidad</Kicker>
           <Input
-            label="Personas maximo por noche"
+            label="Personas máximo por noche"
             value={capacity}
             onChangeText={setCapacity}
+            editable={canSave}
             placeholder="80"
             keyboardType="number-pad"
             leftIcon={<Feather name="users" size={15} color={Colors.textMuted} />}
@@ -190,7 +224,7 @@ export default function ReservationsConfig() {
         </View>
 
         <View style={styles.section}>
-          <Kicker tone="muted">Duracion de slot</Kicker>
+          <Kicker tone="muted">Duración de slot</Kicker>
           <Caption tone="secondary" style={{ marginBottom: Spacing[2] }}>
             Minutos entre slots disponibles
           </Caption>
@@ -200,10 +234,11 @@ export default function ReservationsConfig() {
               return (
                 <Pressable
                   key={m}
-                  onPress={() => setSlotMinutes(String(m))}
+                  onPress={() => canSave && setSlotMinutes(String(m))}
+                  disabled={!canSave}
                   accessibilityRole="button"
                   accessibilityLabel={`${m} minutos`}
-                  accessibilityState={{ selected: active }}
+                  accessibilityState={{ selected: active, disabled: !canSave }}
                   style={({ pressed }) => [
                     styles.slotBtn,
                     active && styles.slotBtnActive,
@@ -224,17 +259,19 @@ export default function ReservationsConfig() {
           <View style={styles.hint}>
             <Feather name="info" size={12} color={Colors.textMuted} />
             <Caption tone="muted" size="sm" style={{ flex: 1 }}>
-              Un slot corto permite mas opciones al cliente; uno largo da mas tiempo por mesa.
+              Un slot corto permite más opciones al cliente; uno largo da más tiempo por mesa.
             </Caption>
           </View>
         </View>
 
-        <Button
-          label={saving ? 'Guardando...' : 'Guardar cambios'}
-          variant="primary"
-          onPress={save}
-          loading={saving}
-        />
+        {canSave ? (
+          <Button
+            label={saving ? 'Guardando...' : 'Guardar cambios'}
+            variant="primary"
+            onPress={save}
+            loading={saving}
+          />
+        ) : null}
       </ScrollView>
     </SafeAreaView>
   );

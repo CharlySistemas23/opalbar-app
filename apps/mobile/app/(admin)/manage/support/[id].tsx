@@ -10,12 +10,13 @@ import {
   ScrollView,
   Pressable,
 } from 'react-native';
-import { useCallback, useEffect, useState } from 'react';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useCallback, useState } from 'react';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
-import { apiClient, adminApi, supportApi } from '@/api/client';
+import { adminApi, supportApi } from '@/api/client';
 import { apiError } from '@/api/errors';
+import { useAuthStore } from '@/stores/auth.store';
 import { useSafeBack } from '@/hooks/useSafeBack';
 import { Colors, Radius, Spacing } from '@/constants/tokens';
 import {
@@ -26,31 +27,43 @@ import {
   Sheet,
   Subhead,
 } from '@/components/ui';
-import { AdminHeader, StatusPill } from '@/components/admin';
+import { ErrorState } from '@/components/ErrorState';
+import { AdminHeader, OptionSheet, StatusPill } from '@/components/admin';
+import type { OptionSheetItem } from '@/components/admin';
 
 const STATUS_TONE: Record<
   string,
   { tone: 'accent' | 'info' | 'success' | 'neutral'; label: string }
 > = {
   OPEN: { tone: 'accent', label: 'ABIERTO' },
-  IN_REVIEW: { tone: 'info', label: 'EN REVISION' },
+  IN_REVIEW: { tone: 'info', label: 'EN REVISIÓN' },
   WAITING_USER: { tone: 'neutral', label: 'ESPERA USER' },
   RESOLVED: { tone: 'success', label: 'RESUELTO' },
   CLOSED: { tone: 'neutral', label: 'CERRADO' },
+};
+
+const PRIORITY_LABEL: Record<string, string> = {
+  LOW: 'Baja',
+  MEDIUM: 'Media',
+  HIGH: 'Alta',
+  URGENT: 'Urgente',
 };
 
 export default function SupportChatAdmin() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const goBack = useSafeBack('/(admin)/manage/support');
+  const me = useAuthStore((s) => s.user);
   const [ticket, setTicket] = useState<any>(null);
-  const [messages, setMessages] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
   const [templates, setTemplates] = useState<any[]>([]);
   const [loadingTemplates, setLoadingTemplates] = useState(false);
+  const [showPriority, setShowPriority] = useState(false);
+  const [assigning, setAssigning] = useState(false);
 
   async function openTemplates() {
     setShowTemplates(true);
@@ -59,7 +72,9 @@ export default function SupportChatAdmin() {
     try {
       const r = await adminApi.quickReplies();
       setTemplates(r.data?.data ?? r.data ?? []);
-    } catch {} finally { setLoadingTemplates(false); }
+    } catch (err) {
+      Alert.alert('Error', apiError(err));
+    } finally { setLoadingTemplates(false); }
   }
 
   function insertTemplate(body: string) {
@@ -67,22 +82,22 @@ export default function SupportChatAdmin() {
     setShowTemplates(false);
   }
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setError(null);
     try {
-      const [tRes, mRes] = await Promise.all([
-        apiClient.get(`/admin/support/tickets`).catch(() => null),
-        supportApi.messages(id).catch(() => null),
-      ]);
-      const list = tRes?.data?.data?.data ?? tRes?.data?.data ?? [];
-      setTicket(list.find((t: any) => t.id === id) ?? null);
-      const ms = mRes?.data?.data ?? [];
-      setMessages(Array.isArray(ms) ? ms : []);
+      // Detail endpoint (not the paginated list) — a ticket past the first
+      // page used to 404 as "no encontrado" because this fetched page 1 of
+      // the list and did a client-side .find().
+      const r = await adminApi.ticket(id);
+      setTicket(r.data?.data ?? null);
+    } catch (err) {
+      setError(apiError(err));
     } finally {
       setLoading(false);
     }
   }, [id]);
 
-  useEffect(() => { load(); }, [load]);
+  useFocusEffect(useCallback(() => { load(); }, [load]));
 
   async function send() {
     const body = text.trim();
@@ -91,7 +106,7 @@ export default function SupportChatAdmin() {
     setSending(true);
     try {
       await supportApi.sendMessage(id, { content: body });
-      await load();
+      await load({ silent: true });
     } catch (err) {
       Alert.alert('Error', apiError(err));
       setText(body);
@@ -100,13 +115,23 @@ export default function SupportChatAdmin() {
     }
   }
 
-  async function updateStatus(status: string) {
+  async function updateTicket(patch: { status?: string; priority?: string; assignedToId?: string | null }) {
+    const snapshot = ticket;
+    setTicket((t: any) => (t ? { ...t, ...patch } : t));
     try {
-      await apiClient.patch(`/admin/support/tickets/${id}`, { status });
-      setTicket((t: any) => (t ? { ...t, status } : t));
+      await adminApi.updateTicket(id, patch);
     } catch (err) {
+      setTicket(snapshot);
       Alert.alert('Error', apiError(err));
     }
+  }
+
+  async function toggleAssignSelf() {
+    if (assigning || !me) return;
+    setAssigning(true);
+    const mine = ticket?.assignedToId === me.id;
+    await updateTicket({ assignedToId: mine ? null : me.id });
+    setAssigning(false);
   }
 
   if (loading)
@@ -114,6 +139,13 @@ export default function SupportChatAdmin() {
       <View style={styles.center}>
         <ActivityIndicator color={Colors.accentPrimary} />
       </View>
+    );
+  if (error && !ticket)
+    return (
+      <SafeAreaView style={styles.root} edges={['top']}>
+        <AdminHeader title="Ticket" kicker="Soporte" onBack={goBack} />
+        <ErrorState message={error} onRetry={() => { setLoading(true); load(); }} />
+      </SafeAreaView>
     );
   if (!ticket)
     return (
@@ -128,6 +160,21 @@ export default function SupportChatAdmin() {
     user?.email ||
     'Usuario';
   const st = STATUS_TONE[ticket.status] ?? STATUS_TONE.OPEN;
+  const allMessages: any[] = Array.isArray(ticket.messages) ? ticket.messages : [];
+  // The ticket has no `description` column — the opening request is simply
+  // its first message. Show it as the pinned header, and the thread below
+  // starts from the first reply so it isn't shown twice.
+  const openingMessage = allMessages[0];
+  const threadMessages = allMessages.slice(1);
+  const assignedName = ticket.assignedTo
+    ? `${ticket.assignedTo.profile?.firstName ?? ''} ${ticket.assignedTo.profile?.lastName ?? ''}`.trim() || ticket.assignedTo.email
+    : null;
+  const isAssignedToMe = !!me && ticket.assignedToId === me.id;
+
+  const priorityOptions: OptionSheetItem<string>[] = (['URGENT', 'HIGH', 'MEDIUM', 'LOW'] as const).map((p) => ({
+    value: p,
+    label: PRIORITY_LABEL[p],
+  }));
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
@@ -142,22 +189,52 @@ export default function SupportChatAdmin() {
           right={<StatusPill label={st.label} tone={st.tone} />}
         />
 
-        <View style={styles.actionsBar}>
-          <ActionChip label="En proceso" onPress={() => updateStatus('IN_REVIEW')} />
-          <ActionChip label="Espera user" onPress={() => updateStatus('WAITING_USER')} />
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} bounces={false} style={styles.actionsBar} contentContainerStyle={{ gap: Spacing[2] }}>
+          <ActionChip label="En proceso" active={ticket.status === 'IN_REVIEW'} onPress={() => updateTicket({ status: 'IN_REVIEW' })} />
+          <ActionChip label="Espera user" active={ticket.status === 'WAITING_USER'} onPress={() => updateTicket({ status: 'WAITING_USER' })} />
           <ActionChip
             label="Resolver"
-            onPress={() => updateStatus('RESOLVED')}
+            active={ticket.status === 'RESOLVED'}
+            onPress={() => updateTicket({ status: 'RESOLVED' })}
             tone="success"
           />
-        </View>
+          <ActionChip
+            label="Cerrar"
+            active={ticket.status === 'CLOSED'}
+            onPress={() =>
+              Alert.alert('Cerrar ticket', '¿Cerrar este ticket? El usuario podrá reabrirlo si vuelve a escribir.', [
+                { text: 'Cancelar', style: 'cancel' },
+                { text: 'Cerrar', style: 'destructive', onPress: () => updateTicket({ status: 'CLOSED' }) },
+              ])
+            }
+          />
+          <ActionChip
+            label={`Prioridad: ${PRIORITY_LABEL[ticket.priority] ?? '—'}`}
+            onPress={() => setShowPriority(true)}
+          />
+          <ActionChip
+            label={isAssignedToMe ? 'Desasignarme' : assignedName ? `De ${assignedName}` : 'Asignarme'}
+            active={isAssignedToMe}
+            disabled={assigning}
+            onPress={toggleAssignSelf}
+          />
+        </ScrollView>
 
         <FlatList
-          data={messages}
+          data={threadMessages}
           keyExtractor={(m) => m.id}
           contentContainerStyle={{ padding: Spacing[4], gap: Spacing[2] }}
           renderItem={({ item }) => {
-            const fromUser = item.userId === ticket.userId;
+            if (item.sender === 'SYSTEM') {
+              return (
+                <View style={styles.systemRow}>
+                  <Caption tone="muted" size="sm" align="center">{item.content}</Caption>
+                </View>
+              );
+            }
+            // SupportMessage carries `sender: 'USER' | 'AGENT' | 'SYSTEM'`,
+            // not a `userId` to compare against — that field doesn't exist.
+            const fromUser = item.sender === 'USER';
             return (
               <View style={[styles.bubbleRow, !fromUser && styles.bubbleRowStaff]}>
                 <View
@@ -184,9 +261,17 @@ export default function SupportChatAdmin() {
             );
           }}
           ListHeaderComponent={
-            <View style={styles.ticketBody}>
-              <Body size="sm">{ticket.description}</Body>
-            </View>
+            openingMessage ? (
+              <View style={styles.ticketBody}>
+                <Kicker tone="muted" style={{ marginBottom: 4 }}>Solicitud original</Kicker>
+                <Body size="sm">{openingMessage.content}</Body>
+              </View>
+            ) : null
+          }
+          ListEmptyComponent={
+            <Caption tone="muted" align="center" style={{ marginTop: Spacing[4] }}>
+              Sin respuestas todavía.
+            </Caption>
           }
         />
 
@@ -290,6 +375,15 @@ export default function SupportChatAdmin() {
             )}
           </View>
         </Sheet>
+
+        <OptionSheet<string>
+          open={showPriority}
+          onClose={() => setShowPriority(false)}
+          title="Prioridad del ticket"
+          options={priorityOptions}
+          value={ticket.priority}
+          onSelect={(priority) => updateTicket({ priority })}
+        />
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -299,25 +393,32 @@ function ActionChip({
   label,
   onPress,
   tone,
+  active,
+  disabled,
 }: {
   label: string;
   onPress: () => void;
   tone?: 'success';
+  active?: boolean;
+  disabled?: boolean;
 }) {
   const isSuccess = tone === 'success';
   return (
     <Pressable
       onPress={onPress}
+      disabled={disabled}
       style={({ pressed }) => [
         styles.actionChip,
         isSuccess && styles.actionResolve,
-        pressed && styles.pressed,
+        active && !isSuccess && styles.actionActive,
+        (pressed || disabled) && styles.pressed,
       ]}
       accessibilityRole="button"
+      accessibilityState={{ selected: !!active, disabled: !!disabled }}
       accessibilityLabel={label}
     >
       <Caption
-        tone={isSuccess ? 'success' : 'secondary'}
+        tone={isSuccess ? 'success' : active ? 'accent' : 'secondary'}
         size="sm"
         style={{ fontWeight: '700' }}
       >
@@ -334,8 +435,7 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
   actionsBar: {
-    flexDirection: 'row',
-    gap: Spacing[2],
+    flexGrow: 0,
     paddingHorizontal: Spacing[4],
     paddingVertical: Spacing[2],
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -353,6 +453,11 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(111,168,138,0.14)',
     borderColor: Colors.accentSuccess,
   },
+  actionActive: {
+    backgroundColor: 'rgba(201,169,97,0.14)',
+    borderColor: Colors.accentPrimary,
+  },
+  systemRow: { alignItems: 'center', paddingVertical: 4 },
 
   ticketBody: {
     backgroundColor: Colors.bgCard,

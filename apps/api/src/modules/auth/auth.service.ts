@@ -228,7 +228,8 @@ export class AuthService {
 
     if (user.status === UserStatus.DELETED) {
       await logAttempt(false, 'ACCOUNT_DELETED');
-      throw new UnauthorizedException('Invalid credentials');
+      // Password already validated above → safe to tell the owner why.
+      throw new UnauthorizedException(this.deletedAccountMessage(user));
     }
 
     // ── Verificación obligatoria (email O telefono) ──
@@ -319,8 +320,11 @@ export class AuthService {
     if (!user || user.role !== UserRole.SUPER_ADMIN) {
       throw new UnauthorizedException('Invalid credentials');
     }
-    if (user.status === UserStatus.BANNED || user.status === UserStatus.DELETED) {
+    if (user.status === UserStatus.BANNED) {
       throw new UnauthorizedException('Invalid credentials');
+    }
+    if (user.status === UserStatus.DELETED) {
+      throw new UnauthorizedException(this.deletedAccountMessage(user));
     }
 
     // Verify the OTP — throws BadRequest on mismatch / expiry.
@@ -360,28 +364,11 @@ export class AuthService {
     const where = isEmail ? { email: identifier.toLowerCase() } : { phone: identifier };
 
     let user = await this.prisma.user.findFirst({ where, include: { profile: true } });
-    let isNewUser = false;
+    const isNewUser = false;
 
     if (!user) {
-      // Auto-create user with empty profile — onboarding will collect more info
-      user = await this.prisma.user.create({
-        data: {
-          email: isEmail ? identifier.toLowerCase() : null,
-          phone: !isEmail ? identifier : null,
-          isVerified: true,
-          status: UserStatus.ACTIVE,
-          profile: {
-            create: {
-              firstName: '',
-              lastName: '',
-              language: 'es',
-            },
-          },
-        },
-        include: { profile: true },
-      });
-      isNewUser = true;
-      this.logger.log(`Auto-registered user via OTP: ${identifier}`);
+      // No passwordless sign-up: OTP login only completes for existing accounts.
+      throw new UnauthorizedException('Invalid credentials');
     } else {
       // Mark as verified (first OTP succeeded)
       if (!user.isVerified) {
@@ -397,7 +384,8 @@ export class AuthService {
       throw new UnauthorizedException('Your account has been suspended. Contact support.');
     }
     if (user.status === UserStatus.DELETED) {
-      throw new UnauthorizedException('Invalid credentials');
+      // OTP already verified ownership of the channel → safe to explain.
+      throw new UnauthorizedException(this.deletedAccountMessage(user));
     }
 
     const tokens = await this.createSession(user, meta);
@@ -438,7 +426,7 @@ export class AuthService {
     // Rotate refresh token (one-time use)
     const newJti = uuidv4();
     const newRefreshToken = await this.generateRefreshToken(userId, sessionId, newJti);
-    const newAccessToken = this.generateAccessToken(session.user, newJti);
+    const newAccessToken = this.generateAccessToken(session.user, newJti, sessionId);
 
     const refreshExpiresIn = this.getRefreshExpiresMs();
 
@@ -479,24 +467,60 @@ export class AuthService {
     this.logger.log(`User ${userId} logged out (session: ${sessionId})`);
   }
 
-  async logoutAllSessions(userId: string): Promise<void> {
-    // Deactivate all sessions
+  /**
+   * Revoke every active session of the user. When `exceptSessionId` is given
+   * (e.g. "log out everywhere else" / password change) the caller's own
+   * session survives. Access tokens of revoked sessions are blocklisted in
+   * Redis so they die immediately instead of at expiry.
+   */
+  async logoutAllSessions(userId: string, exceptSessionId?: string): Promise<{ revoked: number }> {
+    const sessions = await this.prisma.session.findMany({
+      where: {
+        userId,
+        isActive: true,
+        ...(exceptSessionId ? { id: { not: exceptSessionId } } : {}),
+      },
+      select: { id: true, refreshToken: true },
+    });
+
+    if (!sessions.length) return { revoked: 0 };
+
     await this.prisma.session.updateMany({
-      where: { userId, isActive: true },
+      where: { id: { in: sessions.map((s) => s.id) } },
       data: { isActive: false },
     });
 
-    // Clear user sessions set in Redis
-    await this.redis.del(RedisService.userSessionsKey(userId));
+    await Promise.all(
+      sessions.map(async (s) => {
+        const jti = this.jtiFromToken(s.refreshToken);
+        if (jti) await this.blocklistJti(jti);
+        await this.redis
+          .srem(RedisService.userSessionsKey(userId), s.id)
+          .catch((err) => this.logger.warn(`[AUTH] redis.srem failed: ${err?.message ?? err}`));
+      }),
+    );
 
-    this.logger.log(`All sessions revoked for user ${userId}`);
+    if (!exceptSessionId) {
+      await this.redis
+        .del(RedisService.userSessionsKey(userId))
+        .catch((err) => this.logger.warn(`[AUTH] redis.del failed: ${err?.message ?? err}`));
+    }
+
+    this.logger.log(
+      `${sessions.length} session(s) revoked for user ${userId}${exceptSessionId ? ` (kept ${exceptSessionId})` : ''}`,
+    );
+    return { revoked: sessions.length };
   }
 
   // ─────────────────────────────────────────
   //  CHANGE PASSWORD
   // ─────────────────────────────────────────
 
-  async changePassword(userId: string, dto: ChangePasswordDto): Promise<void> {
+  /**
+   * Changes the password and revokes every OTHER session; the session that
+   * performed the change stays alive so the app doesn't kick the user out.
+   */
+  async changePassword(userId: string, dto: ChangePasswordDto, currentSessionId?: string): Promise<void> {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
 
     if (!user || !user.passwordHash) {
@@ -518,8 +542,8 @@ export class AuthService {
       data: { passwordHash: newHash },
     });
 
-    // Revoke all sessions to force re-login
-    await this.logoutAllSessions(userId);
+    // Revoke every other session (current device stays logged in)
+    await this.logoutAllSessions(userId, currentSessionId);
 
     this.logger.log(`Password changed for user ${userId}`);
   }
@@ -529,10 +553,25 @@ export class AuthService {
   // ─────────────────────────────────────────
 
   async resetPassword(dto: ResetPasswordDto): Promise<void> {
-    // OTP verification is handled by OtpService — this only sets the new password
+    const identifier = dto.identifier.includes('@')
+      ? dto.identifier.toLowerCase()
+      : dto.identifier;
+
+    // The code must have been verified: either the app pre-verified it via
+    // /otp/verify (which leaves a reset ticket) or we verify it right now.
+    const ticketOk = await this.otpService.consumeResetTicket(identifier, dto.otpCode);
+    if (!ticketOk) {
+      await this.otpService.verifyOtp({
+        identifier,
+        code: dto.otpCode,
+        type: OtpType.PASSWORD_RESET,
+      });
+      await this.otpService.consumeResetTicket(identifier, dto.otpCode);
+    }
+
     const user = await this.prisma.user.findFirst({
       where: {
-        OR: [{ email: dto.identifier }, { phone: dto.identifier }],
+        OR: [{ email: identifier }, { phone: identifier }],
       },
     });
 
@@ -560,37 +599,90 @@ export class AuthService {
   //  ACTIVE SESSIONS
   // ─────────────────────────────────────────
 
-  async getActiveSessions(userId: string) {
-    return this.prisma.session.findMany({
+  async getActiveSessions(userId: string, currentSessionId?: string) {
+    const sessions = await this.prisma.session.findMany({
       where: { userId, isActive: true, expiresAt: { gt: new Date() } },
       select: {
         id: true,
         deviceName: true,
         deviceOs: true,
         ipAddress: true,
+        userAgent: true,
         createdAt: true,
         updatedAt: true,
+        expiresAt: true,
       },
       orderBy: { updatedAt: 'desc' },
     });
+
+    // Current device first, then most recently active.
+    return sessions
+      .map((s) => ({
+        ...s,
+        lastActiveAt: s.updatedAt,
+        isCurrent: !!currentSessionId && s.id === currentSessionId,
+      }))
+      .sort((a, b) => Number(b.isCurrent) - Number(a.isCurrent));
   }
 
   async revokeSession(userId: string, sessionId: string): Promise<void> {
     const session = await this.prisma.session.findFirst({
       where: { id: sessionId, userId },
+      select: { id: true, refreshToken: true, isActive: true },
     });
     if (!session) {
       throw new BadRequestException('Session not found');
     }
-    await this.prisma.session.update({
-      where: { id: sessionId },
-      data: { isActive: false },
-    });
+    if (session.isActive) {
+      await this.prisma.session.update({
+        where: { id: sessionId },
+        data: { isActive: false },
+      });
+    }
+    // Kill the access token that belongs to that session right away.
+    const jti = this.jtiFromToken(session.refreshToken);
+    if (jti) await this.blocklistJti(jti);
+    await this.redis
+      .srem(RedisService.userSessionsKey(userId), sessionId)
+      .catch((err) => this.logger.warn(`[AUTH] redis.srem failed: ${err?.message ?? err}`));
+
+    this.logger.log(`Session ${sessionId} revoked for user ${userId}`);
   }
 
   // ─────────────────────────────────────────
   //  HELPERS (private)
   // ─────────────────────────────────────────
+
+  /**
+   * Message shown when the owner of a soft-deleted account tries to log in.
+   * Only used AFTER the credentials/OTP were validated (no enumeration).
+   */
+  private deletedAccountMessage(user: Pick<User, 'deletedAt'>): string {
+    return user.deletedAt
+      ? 'Account scheduled for deletion'
+      : 'Invalid credentials';
+  }
+
+  /**
+   * Access + refresh tokens of a session share the same `jti`, so decoding
+   * the stored refresh token gives the jti to blocklist. Never throws.
+   */
+  private jtiFromToken(token: string | null | undefined): string | null {
+    if (!token || token === 'pending') return null;
+    try {
+      const decoded = this.jwtService.decode(token) as { jti?: string } | null;
+      return decoded?.jti ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async blocklistJti(jti: string): Promise<void> {
+    const ttl = this.getAccessExpiresSeconds();
+    await this.redis
+      .set(RedisService.sessionBlocklistKey(jti), '1', ttl)
+      .catch((err) => this.logger.warn(`[AUTH] redis blocklist failed: ${err?.message ?? err}`));
+  }
 
   private async createSession(
     user: User,
@@ -620,7 +712,7 @@ export class AuthService {
       },
     });
 
-    const accessToken = this.generateAccessToken(user, jti);
+    const accessToken = this.generateAccessToken(user, jti, session.id);
     const refreshToken = await this.generateRefreshToken(user.id, session.id, jti);
 
     // Update session with real refresh token
@@ -641,17 +733,22 @@ export class AuthService {
     };
   }
 
-  private generateAccessToken(user: User, jti: string): string {
+  private generateAccessToken(user: User, jti: string, sessionId: string): string {
+    // `sessionId` in the access payload lets /auth/logout, /auth/sessions
+    // (isCurrent) and /auth/change-password know which device is calling.
     const payload = {
       sub: user.id,
       email: user.email,
       phone: user.phone,
       role: user.role,
       jti,
+      sessionId,
     };
     return this.jwtService.sign(payload, {
       secret: this.config.get<string>('jwt.accessSecret'),
-      expiresIn: this.config.get<string>('jwt.accessExpiresIn', '15m'),
+      // jsonwebtoken v9 types `expiresIn` as a StringValue template literal;
+      // the config value is a plain string ("15m").
+      expiresIn: this.config.get<string>('jwt.accessExpiresIn', '15m') as any,
     });
   }
 
@@ -663,7 +760,7 @@ export class AuthService {
     const payload = { sub: userId, sessionId, jti };
     return this.jwtService.sign(payload, {
       secret: this.config.get<string>('jwt.refreshSecret'),
-      expiresIn: this.config.get<string>('jwt.refreshExpiresIn', '30d'),
+      expiresIn: this.config.get<string>('jwt.refreshExpiresIn', '30d') as any,
     });
   }
 
@@ -685,5 +782,20 @@ export class AuthService {
   sanitizeUser(user: User): Partial<User> {
     const { passwordHash: _, ...safe } = user as any;
     return safe;
+  }
+
+  /**
+   * Decodes (without verifying — the guard already did) the bearer token of
+   * the current request to learn which session/jti is calling.
+   */
+  decodeBearer(authorization?: string): { sessionId?: string; jti?: string } {
+    const token = authorization?.startsWith('Bearer ') ? authorization.slice(7) : authorization;
+    if (!token) return {};
+    try {
+      const decoded = this.jwtService.decode(token) as { sessionId?: string; jti?: string } | null;
+      return { sessionId: decoded?.sessionId, jti: decoded?.jti };
+    } catch {
+      return {};
+    }
   }
 }

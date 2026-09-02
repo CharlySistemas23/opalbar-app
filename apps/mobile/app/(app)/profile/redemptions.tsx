@@ -34,22 +34,29 @@ import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 
 type Tab = 'ACTIVE' | 'USED' | 'EXPIRED';
+type Status = 'ACTIVE' | 'USED' | 'EXPIRED';
 
 interface Redemption {
   id: string;
   code: string;
-  status: 'ACTIVE' | 'USED' | 'EXPIRED' | 'CANCELLED';
-  pointsSpent?: number;
-  expiresAt?: string;
-  usedAt?: string;
+  isUsed: boolean;
+  expiresAt?: string | null;
+  usedAt?: string | null;
   createdAt: string;
   offer: {
     id: string;
     title: string;
     imageUrl?: string;
-    pointsCost?: number;
+    pointsRequired?: number;
     venue?: { name?: string };
   };
+}
+
+/** OfferRedemption has no `status` column — derive it from isUsed/expiresAt. */
+function deriveStatus(r: Redemption): Status {
+  if (r.isUsed) return 'USED';
+  if (r.expiresAt && new Date(r.expiresAt).getTime() < Date.now()) return 'EXPIRED';
+  return 'ACTIVE';
 }
 
 export default function Redemptions() {
@@ -80,21 +87,16 @@ export default function Redemptions() {
     load();
   }, [load]);
 
-  const filtered = useMemo(() => {
-    if (tab === 'EXPIRED') {
-      return items.filter((x) => x.status === 'EXPIRED' || x.status === 'CANCELLED');
-    }
-    return items.filter((x) => x.status === tab);
-  }, [items, tab]);
-
-  const counts = useMemo(
-    () => ({
-      ACTIVE: items.filter((x) => x.status === 'ACTIVE').length,
-      USED: items.filter((x) => x.status === 'USED').length,
-      EXPIRED: items.filter((x) => x.status === 'EXPIRED' || x.status === 'CANCELLED').length,
-    }),
-    [items],
+  const filtered = useMemo(
+    () => items.filter((x) => deriveStatus(x) === tab),
+    [items, tab],
   );
+
+  const counts = useMemo(() => {
+    const c = { ACTIVE: 0, USED: 0, EXPIRED: 0 };
+    for (const x of items) c[deriveStatus(x)]++;
+    return c;
+  }, [items]);
 
   const tabOptions = [
     { value: 'ACTIVE' as const, label: t ? `Activos · ${counts.ACTIVE}` : `Active · ${counts.ACTIVE}` },
@@ -198,18 +200,17 @@ function RedemptionCard({
   t: boolean;
   onPress: () => void;
 }) {
+  const status = deriveStatus(item);
   const statusTone =
-    item.status === 'ACTIVE' ? 'success' : item.status === 'USED' ? 'champagne' : 'muted';
+    status === 'ACTIVE' ? 'success' : status === 'USED' ? 'champagne' : 'muted';
   const statusIcon: React.ComponentProps<typeof Feather>['name'] =
-    item.status === 'ACTIVE' ? 'clock' : item.status === 'USED' ? 'check-circle' : 'x-circle';
+    status === 'ACTIVE' ? 'clock' : status === 'USED' ? 'check-circle' : 'x-circle';
   const statusLabel =
-    item.status === 'ACTIVE'
+    status === 'ACTIVE'
       ? t ? 'Listo para canjear' : 'Ready to redeem'
-      : item.status === 'USED'
+      : status === 'USED'
         ? t ? 'Canjeado' : 'Used'
-        : item.status === 'EXPIRED'
-          ? t ? 'Expirado' : 'Expired'
-          : t ? 'Cancelado' : 'Cancelled';
+        : t ? 'Expirado' : 'Expired';
 
   return (
     <Pressy
@@ -238,18 +239,18 @@ function RedemptionCard({
             name={statusIcon}
             size={12}
             color={
-              item.status === 'ACTIVE'
+              status === 'ACTIVE'
                 ? Colors.accentSuccess
-                : item.status === 'USED'
+                : status === 'USED'
                   ? Colors.accentChampagne
                   : Colors.textMuted
             }
           />
           <Caption tone={statusTone}>{statusLabel}</Caption>
-          {item.pointsSpent ? (
+          {item.offer.pointsRequired ? (
             <>
               <Caption tone="muted">·</Caption>
-              <Caption tone="muted">{item.pointsSpent} pts</Caption>
+              <Caption tone="muted">{item.offer.pointsRequired} pts</Caption>
             </>
           ) : null}
         </View>

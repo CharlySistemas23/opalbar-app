@@ -12,7 +12,7 @@ import {
   Pressable,
   Share,
 } from 'react-native';
-import { useEffect, useState, memo } from 'react';
+import { useCallback, useEffect, useRef, useState, memo } from 'react';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
@@ -27,6 +27,10 @@ import { StoryRing } from '@/components/StoryRing';
 import { Heart } from '@/components/Heart';
 import { useFeedback } from '@/hooks/useFeedback';
 import { Colors, EditorialSpacing, Radius, Spacing, TypePresets } from '@/constants/tokens';
+import { Skeleton } from '@/components/ui/Skeleton';
+import { ErrorState } from '@/components/ErrorState';
+import { ConfirmSheet } from '@/components/ConfirmSheet';
+import { useRealtime } from '@/hooks/useRealtime';
 import { sharePost } from '@/utils/share';
 import { uploadImage, UploadError } from '@/utils/uploadImage';
 
@@ -79,21 +83,58 @@ export default function UserProfile() {
   const [coverUploading, setCoverUploading] = useState(false);
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [notFound, setNotFound] = useState(false);
+  const [reloadTick, setReloadTick] = useState(0);
+  const [unfriendOpen, setUnfriendOpen] = useState(false);
+  const [blockOpen, setBlockOpen] = useState(false);
+
+  // Serialize concurrent friend/follow taps without blocking unrelated actions.
+  const actionRef = useRef(false);
+
+  const loadProfile = useCallback(async (): Promise<boolean> => {
+    try {
+      const r = await usersApi.getPublic(id);
+      const data = r.data?.data;
+      if (!data) {
+        setNotFound(true);
+        setProfile(null);
+        return false;
+      }
+      setNotFound(false);
+      setLoadError(null);
+      setProfile(data);
+      return true;
+    } catch (err: any) {
+      if (err?.response?.status === 404) {
+        setNotFound(true);
+        setProfile(null);
+      } else {
+        setLoadError(apiError(err));
+      }
+      return false;
+    }
+  }, [id]);
+
+  // Realtime: any friendship/follow change involving me refreshes the header
+  // context (button state, counts) without a manual pull.
+  useRealtime('user', (env) => {
+    const d: any = env?.data ?? {};
+    const involvesThisProfile =
+      env?.id === id || d?.by === id || (Array.isArray(d?.userIds) && d.userIds.includes(id));
+    if (!involvesThisProfile) return;
+    if (d?.friendship || typeof d?.follow === 'boolean') void loadProfile();
+  });
 
   useEffect(() => {
     let alive = true;
 
-    usersApi
-      .getPublic(id)
-      .then((r) => {
-        if (!alive) return;
-        setProfile(r.data?.data);
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (!alive) return;
-        setLoading(false);
-      });
+    setLoading(true);
+    setLoadError(null);
+    loadProfile().finally(() => {
+      if (!alive) return;
+      setLoading(false);
+    });
 
     Promise.all([
       communityApi.posts({ userId: id, limit: 30, surface: 'wall' }),
@@ -134,176 +175,185 @@ export default function UserProfile() {
     return () => {
       alive = false;
     };
-  }, [id]);
+  }, [id, reloadTick, loadProfile]);
 
-  // Friendship state machine — drives the primary action button next to Follow.
-  // The backend returns { status, isFriend, mutualCount, friendshipId? } as part
-  // of getPublicProfile so the button can render the right label/CTA on first paint.
-  async function sendFriendRequest() {
-    if (!profile) return;
+  // ── Friendship state machine ─────────────────────────────────────────────
+  // Drives the primary action button next to Follow. Backend returns
+  // { status, isFriend, mutualCount, friendshipId, isBlocked, blockedByMe } in
+  // getPublicProfile so the button renders the right CTA on first paint.
+  //
+  // Every mutation is optimistic: patch → call → (on failure) restore snapshot.
+
+  function patchFriendship(next: Partial<any>, countDelta = 0) {
+    setProfile((p: any) =>
+      p
+        ? {
+            ...p,
+            friendship: { ...(p.friendship ?? { mutualCount: 0 }), ...next },
+            _count: {
+              ...(p._count ?? {}),
+              friends: Math.max(0, (p._count?.friends ?? 0) + countDelta),
+            },
+          }
+        : p,
+    );
+  }
+
+  /** Runs an optimistic mutation with a busy guard and snapshot revert. */
+  async function runAction(
+    optimistic: () => void,
+    call: () => Promise<any>,
+    onOk?: (r: any) => void,
+  ): Promise<boolean> {
+    if (!profile || actionRef.current) return false;
+    actionRef.current = true;
     setBusy(true);
+    const snapshot = profile;
+    optimistic();
     try {
-      const r = await friendshipsApi.request(id);
-      // Backend returns { ok, status, friendship: { id, ... } } — pluck the new
-      // friendship id so a subsequent accept/decline can address the right row
-      // without an extra round-trip.
-      const fsId = r.data?.data?.friendship?.id;
-      setProfile((p: any) => ({
-        ...p,
-        friendship: {
-          ...(p.friendship ?? { mutualCount: 0 }),
-          status: 'outgoing',
-          friendshipId: fsId ?? null,
-          isFriend: false,
-        },
-      }));
-      fb.success();
-      toast(t ? 'Solicitud enviada.' : 'Request sent.', 'success');
+      const r = await call();
+      onOk?.(r);
+      return true;
     } catch (err: any) {
+      setProfile(snapshot);
       fb.error();
-      toast(err?.response?.data?.message || 'Error', 'danger');
+      toast(apiError(err), 'danger');
+      return false;
     } finally {
+      actionRef.current = false;
       setBusy(false);
     }
+  }
+
+  async function sendFriendRequest() {
+    await runAction(
+      () => patchFriendship({ status: 'outgoing', isFriend: false }),
+      () => friendshipsApi.request(id),
+      (r) => {
+        // Honor the server: a DECLINED revive or a race can come back as
+        // 'incoming' / 'accepted' instead of 'outgoing'.
+        const d = r.data?.data ?? {};
+        const status = d.status ?? 'outgoing';
+        const friendshipId = d.friendship?.id ?? d.id ?? null;
+        patchFriendship(
+          { status, friendshipId, isFriend: status === 'accepted' },
+          status === 'accepted' ? 1 : 0,
+        );
+        fb.success();
+        toast(
+          status === 'accepted'
+            ? t ? 'Ahora son amigos.' : "You're now friends."
+            : status === 'incoming'
+              ? t ? 'Esta persona ya te envió solicitud.' : 'They already sent you a request.'
+              : t ? 'Solicitud enviada.' : 'Request sent.',
+          'success',
+        );
+      },
+    );
   }
 
   async function cancelFriendRequest() {
-    if (!profile) return;
-    setBusy(true);
-    try {
-      await friendshipsApi.cancel(id);
-      setProfile((p: any) => ({
-        ...p,
-        friendship: {
-          ...(p.friendship ?? { mutualCount: 0 }),
-          status: 'none',
-          friendshipId: null,
-          isFriend: false,
-        },
-      }));
-      fb.tap();
-      toast(t ? 'Solicitud cancelada.' : 'Request cancelled.', 'info');
-    } catch (err: any) {
-      fb.error();
-      toast(err?.response?.data?.message || 'Error', 'danger');
-    } finally {
-      setBusy(false);
-    }
+    await runAction(
+      () => patchFriendship({ status: 'none', friendshipId: null, isFriend: false }),
+      () => friendshipsApi.cancel(id),
+      () => {
+        fb.tap();
+        toast(t ? 'Solicitud cancelada.' : 'Request cancelled.', 'info');
+      },
+    );
   }
 
   async function acceptFriendRequest() {
-    if (!profile?.friendship?.friendshipId) return;
-    setBusy(true);
-    try {
-      await friendshipsApi.accept(profile.friendship.friendshipId);
-      setProfile((p: any) => ({
-        ...p,
-        friendship: { ...(p.friendship ?? {}), status: 'accepted', isFriend: true },
-        _count: { ...(p._count ?? {}), friends: (p._count?.friends ?? 0) + 1 },
-      }));
-      fb.success();
-      toast(t ? 'Ahora son amigos.' : "You're now friends.", 'success');
-    } catch (err: any) {
-      fb.error();
-      toast(err?.response?.data?.message || 'Error', 'danger');
-    } finally {
-      setBusy(false);
+    const fsId = profile?.friendship?.friendshipId;
+    if (!fsId) {
+      // Context arrived without an id (stale cache) → refetch, then the user retries.
+      void loadProfile();
+      return;
     }
+    await runAction(
+      () => patchFriendship({ status: 'accepted', isFriend: true }, 1),
+      () => friendshipsApi.accept(fsId),
+      () => {
+        fb.success();
+        toast(t ? 'Ahora son amigos.' : "You're now friends.", 'success');
+      },
+    );
   }
 
   async function declineFriendRequest() {
-    if (!profile?.friendship?.friendshipId) return;
-    setBusy(true);
-    try {
-      await friendshipsApi.decline(profile.friendship.friendshipId);
-      setProfile((p: any) => ({
-        ...p,
-        friendship: {
-          ...(p.friendship ?? { mutualCount: 0 }),
-          status: 'none',
-          friendshipId: null,
-          isFriend: false,
-        },
-      }));
-      fb.tap();
-      toast(t ? 'Solicitud rechazada.' : 'Request declined.', 'info');
-    } catch (err: any) {
-      fb.error();
-      toast(err?.response?.data?.message || 'Error', 'danger');
-    } finally {
-      setBusy(false);
+    const fsId = profile?.friendship?.friendshipId;
+    if (!fsId) {
+      void loadProfile();
+      return;
     }
+    await runAction(
+      () => patchFriendship({ status: 'none', friendshipId: null, isFriend: false }),
+      () => friendshipsApi.decline(fsId),
+      () => {
+        fb.tap();
+        toast(t ? 'Solicitud rechazada.' : 'Request declined.', 'info');
+      },
+    );
   }
 
   function confirmUnfriend() {
-    Alert.alert(
-      t ? 'Eliminar amistad' : 'Remove friend',
-      t
-        ? '¿Seguro que quieres dejar de ser amigos?'
-        : 'Are you sure you want to remove this friend?',
-      [
-        { text: t ? 'Cancelar' : 'Cancel', style: 'cancel' },
-        {
-          text: t ? 'Eliminar' : 'Remove',
-          style: 'destructive',
-          onPress: async () => {
-            setBusy(true);
-            try {
-              await friendshipsApi.remove(id);
-              setProfile((p: any) => ({
-                ...p,
-                friendship: {
-                  ...(p.friendship ?? { mutualCount: 0 }),
-                  status: 'none',
-                  friendshipId: null,
-                  isFriend: false,
-                },
-                _count: {
-                  ...(p._count ?? {}),
-                  friends: Math.max(0, (p._count?.friends ?? 1) - 1),
-                },
-              }));
-              fb.tap();
-              toast(t ? 'Amistad eliminada.' : 'Friend removed.', 'info');
-            } catch (err: any) {
-              fb.error();
-              toast(err?.response?.data?.message || 'Error', 'danger');
-            } finally {
-              setBusy(false);
-            }
-          },
-        },
-      ],
+    setUnfriendOpen(true);
+  }
+
+  async function doUnfriend() {
+    setUnfriendOpen(false);
+    await runAction(
+      () => patchFriendship({ status: 'none', friendshipId: null, isFriend: false }, -1),
+      () => friendshipsApi.remove(id),
+      () => {
+        fb.tap();
+        toast(t ? 'Amistad eliminada.' : 'Friend removed.', 'info');
+      },
     );
   }
 
   async function toggleFollow() {
     if (!profile) return;
+    const wasFollowing = !!profile.isFollowing;
+    await runAction(
+      () =>
+        setProfile((p: any) => ({
+          ...p,
+          isFollowing: !wasFollowing,
+          _count: {
+            ...(p._count ?? {}),
+            followers: Math.max(0, (p._count?.followers ?? 0) + (wasFollowing ? -1 : 1)),
+          },
+        })),
+      () => (wasFollowing ? usersApi.unfollow(id) : usersApi.follow(id)),
+      () => {
+        if (wasFollowing) {
+          fb.tap();
+          toast(t ? 'Dejaste de seguir.' : 'Unfollowed.', 'info');
+        } else {
+          fb.success();
+          toast(t ? 'Ahora sigues a este usuario.' : 'Following.', 'success');
+        }
+      },
+    );
+  }
+
+  async function unblockUser() {
+    if (!profile || actionRef.current) return;
+    actionRef.current = true;
     setBusy(true);
     try {
-      if (profile.isFollowing) {
-        await usersApi.unfollow(id);
-        setProfile((p: any) => ({
-          ...p,
-          isFollowing: false,
-          _count: { ...p._count, followers: Math.max(0, (p._count?.followers ?? 1) - 1) },
-        }));
-        fb.tap();
-        toast(t ? 'Dejaste de seguir.' : 'Unfollowed.', 'info');
-      } else {
-        await usersApi.follow(id);
-        setProfile((p: any) => ({
-          ...p,
-          isFollowing: true,
-          _count: { ...p._count, followers: (p._count?.followers ?? 0) + 1 },
-        }));
-        fb.success();
-        toast(t ? 'Ahora sigues a este usuario.' : 'Following.', 'success');
-      }
+      await friendshipsApi.unblock(id);
+      fb.success();
+      toast(t ? 'Usuario desbloqueado.' : 'User unblocked.', 'success');
+      // The masked profile has no counts/posts — pull the full one now.
+      setLoading(true);
+      setReloadTick((n) => n + 1);
     } catch (err: any) {
       fb.error();
-      toast(err?.response?.data?.message || 'Error', 'danger');
+      toast(apiError(err), 'danger');
     } finally {
+      actionRef.current = false;
       setBusy(false);
     }
   }
@@ -461,62 +511,154 @@ export default function UserProfile() {
   }
 
   function handleBlock() {
-    Alert.alert(
-      t ? 'Bloquear usuario' : 'Block user',
-      t
-        ? '¿Seguro que quieres bloquear a este usuario? Dejarán de seguirse y no verá tu contenido.'
-        : 'Are you sure you want to block this user? You will unfollow each other and they can no longer see your content.',
-      [
-        { text: t ? 'Cancelar' : 'Cancel', style: 'cancel' },
-        {
-          text: t ? 'Bloquear' : 'Block',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await friendshipsApi.block(id);
-              toast(t ? 'Usuario bloqueado.' : 'User blocked.', 'success');
-              router.back();
-            } catch (err: any) {
-              toast(apiError(err, t ? 'No se pudo bloquear.' : 'Could not block.'), 'danger');
-            }
-          },
-        },
-      ],
-    );
+    setBlockOpen(true);
+  }
+
+  async function doBlock() {
+    if (actionRef.current) return;
+    actionRef.current = true;
+    setBusy(true);
+    try {
+      await friendshipsApi.block(id);
+      setBlockOpen(false);
+      fb.tap();
+      toast(t ? 'Usuario bloqueado.' : 'User blocked.', 'success');
+      // Stay on the page: it re-renders as the masked "blocked" profile with
+      // an Unblock action, so a mis-tap is recoverable.
+      setLoading(true);
+      setReloadTick((n) => n + 1);
+    } catch (err: any) {
+      fb.error();
+      toast(apiError(err, t ? 'No se pudo bloquear.' : 'Could not block.'), 'danger');
+    } finally {
+      actionRef.current = false;
+      setBusy(false);
+    }
   }
 
   async function handleMessage() {
+    if (actionRef.current) return;
+    actionRef.current = true;
     try {
       const r = await messagesApi.createThread(id);
       const threadId = r.data?.data?.id;
       if (threadId) router.push(`/(app)/messages/${threadId}` as never);
+      else toast(apiError(null, t ? 'No se pudo abrir el chat.' : 'Could not open chat.'), 'danger');
     } catch (err: any) {
-      toast(err?.response?.data?.message || (t ? 'Error al abrir el chat.' : 'Could not open chat.'), 'danger');
+      toast(apiError(err, t ? 'No se pudo abrir el chat.' : 'Could not open chat.'), 'danger');
+    } finally {
+      actionRef.current = false;
     }
+  }
+
+  function retryLoad() {
+    setLoading(true);
+    setLoadError(null);
+    setNotFound(false);
+    setReloadTick((n) => n + 1);
   }
 
   if (loading) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator color={Colors.accentPrimary} />
+      <View style={{ flex: 1, backgroundColor: Colors.bgPrimary }}>
+        {/* Cover banner */}
+        <Skeleton width="100%" height={150} radius={0} />
+        <View style={{ paddingHorizontal: EditorialSpacing.pageGutter }}>
+          {/* Avatar overlapping the cover */}
+          <Skeleton width={88} height={88} radius={44} style={{ marginTop: -44, borderWidth: 3, borderColor: Colors.bgPrimary }} />
+          {/* Name + handle */}
+          <Skeleton width={180} height={22} style={{ marginTop: Spacing[3] }} />
+          <Skeleton width={120} height={14} style={{ marginTop: Spacing[2] }} />
+          {/* Stats row */}
+          <View style={{ flexDirection: 'row', gap: Spacing[6], marginTop: Spacing[5] }}>
+            {[0, 1, 2].map((i) => (
+              <View key={i} style={{ gap: Spacing[2], alignItems: 'center' }}>
+                <Skeleton width={36} height={18} />
+                <Skeleton width={52} height={12} />
+              </View>
+            ))}
+          </View>
+          {/* Action buttons */}
+          <View style={{ flexDirection: 'row', gap: Spacing[3], marginTop: Spacing[5] }}>
+            <Skeleton width="48%" height={40} radius={Radius.md} />
+            <Skeleton width="48%" height={40} radius={Radius.md} />
+          </View>
+        </View>
+        {/* Grid tiles */}
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: Spacing[5] }}>
+          {Array.from({ length: 9 }).map((_, i) => (
+            <Skeleton key={i} width={TILE_SIZE} height={TILE_SIZE} radius={0} style={{ margin: 1 }} />
+          ))}
+        </View>
       </View>
     );
   }
-  if (!profile) {
+  if (loadError && !profile) {
     return (
-      <View style={styles.center}>
-        <Text style={styles.notFound}>{t ? 'Usuario no encontrado' : 'User not found'}</Text>
-      </View>
+      <SafeAreaView style={styles.root} edges={['top']}>
+        <View style={styles.topBar}>
+          <Pressable
+            onPress={() => router.back()}
+            style={({ pressed }) => [styles.topBarBtn, pressed && styles.pressed]}
+            hitSlop={10}
+          >
+            <Feather name="arrow-left" size={22} color={Colors.textPrimary} />
+          </Pressable>
+          <View style={{ flex: 1 }} />
+        </View>
+        <ErrorState
+          title={t ? 'No pudimos cargar el perfil' : 'Could not load profile'}
+          message={loadError}
+          retryLabel={t ? 'Reintentar' : 'Retry'}
+          onRetry={retryLoad}
+        />
+      </SafeAreaView>
+    );
+  }
+  if (notFound || !profile) {
+    return (
+      <SafeAreaView style={styles.root} edges={['top']}>
+        <View style={styles.topBar}>
+          <Pressable
+            onPress={() => router.back()}
+            style={({ pressed }) => [styles.topBarBtn, pressed && styles.pressed]}
+            hitSlop={10}
+          >
+            <Feather name="arrow-left" size={22} color={Colors.textPrimary} />
+          </Pressable>
+          <View style={{ flex: 1 }} />
+        </View>
+        <ErrorState
+          icon="user-x"
+          title={t ? 'Usuario no encontrado' : 'User not found'}
+          message={
+            t
+              ? 'Este perfil ya no existe o fue eliminado.'
+              : 'This profile no longer exists or was removed.'
+          }
+          retryLabel={t ? 'Volver' : 'Go back'}
+          onRetry={() => router.back()}
+        />
+      </SafeAreaView>
     );
   }
 
   const first = profile?.profile?.firstName ?? '';
   const last = profile?.profile?.lastName ?? '';
-  const name = `${first} ${last}`.trim() || profile.email?.split('@')[0] || 'Usuario';
+  const name = `${first} ${last}`.trim() || profile.email?.split('@')[0] || (t ? 'Usuario' : 'User');
   const initials =
     ((first[0] || '') + (last[0] || '')).toUpperCase() || (profile.email?.[0] ?? 'U').toUpperCase();
-  const handle = (profile.email || '').split('@')[0];
+  // Only the owner receives `email`; for everyone else there is no handle to
+  // show, so we fall back to the display name instead of rendering a bare "@".
+  const handleRaw = (profile.email || '').split('@')[0];
+  const handle = handleRaw ? `@${handleRaw}` : name;
   const isMe = me?.id === profile.id;
+  const isBlocked = !!profile.isBlocked || profile.friendship?.status === 'blocked';
+  const blockedByMe = !!(profile.blockedByMe ?? profile.friendship?.blockedByMe);
+  // Private + not owner/friend/follower → the backend already stripped the
+  // sensitive fields and posts return empty; we mirror that with a lock notice.
+  const isLockedPrivate =
+    !isMe && !!profile.isPrivate && !profile.isFollowing && !profile.friendship?.isFriend;
 
   // Tile data
   const wallWithMedia = wallPosts.filter((p) => !!p.imageUrl);
@@ -536,7 +678,7 @@ export default function UserProfile() {
           <Feather name="arrow-left" size={22} color={Colors.textPrimary} />
         </Pressable>
         <Text style={styles.topBarTitle} numberOfLines={1}>
-          @{handle}
+          {handle}
         </Text>
         <Pressable
           onPress={() => setMenuOpen(true)}
@@ -622,7 +764,13 @@ export default function UserProfile() {
           <Text style={styles.name} numberOfLines={1}>
             {name}
           </Text>
-          <Text style={styles.handle}>@{handle}</Text>
+          {handleRaw ? <Text style={styles.handle}>{handle}</Text> : null}
+          {!isMe && !!profile.isPrivate && (
+            <View style={styles.privatePill}>
+              <Feather name="lock" size={11} color={Colors.textSecondary} />
+              <Text style={styles.privatePillText}>{t ? 'Cuenta privada' : 'Private account'}</Text>
+            </View>
+          )}
 
           {profile?.profile?.loyaltyLevel && (
             <View style={styles.levelPill}>
@@ -638,51 +786,99 @@ export default function UserProfile() {
           )}
         </View>
 
+        {/* ── Blocked (either direction): masked profile, no content ── */}
+        {isBlocked && (
+          <View style={styles.blockedBox}>
+            <View style={styles.blockedIcon}>
+              <Feather name="slash" size={22} color={Colors.accentDanger} />
+            </View>
+            <Text style={styles.blockedTitle}>
+              {blockedByMe
+                ? t ? 'Has bloqueado a este usuario' : 'You blocked this user'
+                : t ? 'No disponible' : 'Not available'}
+            </Text>
+            <Text style={styles.blockedSub}>
+              {blockedByMe
+                ? t
+                  ? 'No verá tus publicaciones ni podrá escribirte. Puedes desbloquearlo cuando quieras.'
+                  : "They can't see your posts or message you. You can unblock them any time."
+                : t
+                  ? 'No puedes ver el contenido de este perfil.'
+                  : "You can't view this profile's content."}
+            </Text>
+            {blockedByMe && (
+              <Pressable
+                style={({ pressed }) => [styles.unblockBtn, (busy || pressed) && { opacity: 0.85 }]}
+                onPress={unblockUser}
+                disabled={busy}
+              >
+                {busy ? (
+                  <ActivityIndicator color={Colors.textPrimary} size="small" />
+                ) : (
+                  <>
+                    <Feather name="unlock" size={14} color={Colors.textPrimary} />
+                    <Text style={styles.unblockLabel}>{t ? 'Desbloquear' : 'Unblock'}</Text>
+                  </>
+                )}
+              </Pressable>
+            )}
+          </View>
+        )}
+
         {/* ── Bio + About chips ───────────────── */}
-        <BioBlock
-          bio={profile?.profile?.bio}
-          isMe={isMe}
-          t={t}
-          onEdit={() => router.push('/(app)/profile/edit' as never)}
-        />
-        <AboutCard
-          profile={profile}
-          isMe={isMe}
-          t={t}
-          language={language}
-          onEdit={() => router.push('/(app)/profile/edit' as never)}
-        />
+        {!isBlocked && (
+          <BioBlock
+            bio={profile?.profile?.bio}
+            isMe={isMe}
+            t={t}
+            onEdit={() => router.push('/(app)/profile/edit' as never)}
+          />
+        )}
+        {!isBlocked && !isLockedPrivate && (
+          <AboutCard
+            profile={profile}
+            isMe={isMe}
+            t={t}
+            language={language}
+            onEdit={() => router.push('/(app)/profile/edit' as never)}
+          />
+        )}
 
         {/* ── Stats (IG flat row) ─────────────── */}
-        <View style={styles.statsRow}>
-          <View style={styles.stat}>
-            <Text style={styles.statValue}>{profile._count?.posts ?? 0}</Text>
-            <Text style={styles.statLabel}>{t ? 'Publicaciones' : 'Posts'}</Text>
+        {!isBlocked && (
+          <View style={styles.statsRow}>
+            <View style={styles.stat}>
+              <Text style={styles.statValue}>{profile._count?.posts ?? 0}</Text>
+              <Text style={styles.statLabel}>{t ? 'Publicaciones' : 'Posts'}</Text>
+            </View>
+            <Pressable
+              style={({ pressed }) => [styles.stat, pressed && !isLockedPrivate && styles.pressed]}
+              onPress={() => router.push(`/(app)/users/${profile.id}/friends` as never)}
+              disabled={isLockedPrivate}
+            >
+              <Text style={styles.statValue}>{profile._count?.friends ?? 0}</Text>
+              <Text style={styles.statLabel}>{t ? 'Amigos' : 'Friends'}</Text>
+            </Pressable>
+            <Pressable
+              style={({ pressed }) => [styles.stat, pressed && !isLockedPrivate && styles.pressed]}
+              onPress={() => router.push(`/(app)/users/${profile.id}/followers` as never)}
+              disabled={isLockedPrivate}
+            >
+              <Text style={styles.statValue}>{profile._count?.followers ?? 0}</Text>
+              <Text style={styles.statLabel}>{t ? 'Seguidores' : 'Followers'}</Text>
+            </Pressable>
+            <Pressable
+              style={({ pressed }) => [styles.stat, pressed && !isLockedPrivate && styles.pressed]}
+              onPress={() => router.push(`/(app)/users/${profile.id}/following` as never)}
+              disabled={isLockedPrivate}
+            >
+              <Text style={styles.statValue}>{profile._count?.following ?? 0}</Text>
+              <Text style={styles.statLabel}>{t ? 'Siguiendo' : 'Following'}</Text>
+            </Pressable>
           </View>
-          <Pressable
-            style={({ pressed }) => [styles.stat, pressed && styles.pressed]}
-            onPress={() => router.push(`/(app)/users/${profile.id}/friends` as never)}
-          >
-            <Text style={styles.statValue}>{profile._count?.friends ?? 0}</Text>
-            <Text style={styles.statLabel}>{t ? 'Amigos' : 'Friends'}</Text>
-          </Pressable>
-          <Pressable
-            style={({ pressed }) => [styles.stat, pressed && styles.pressed]}
-            onPress={() => router.push(`/(app)/users/${profile.id}/followers` as never)}
-          >
-            <Text style={styles.statValue}>{profile._count?.followers ?? 0}</Text>
-            <Text style={styles.statLabel}>{t ? 'Seguidores' : 'Followers'}</Text>
-          </Pressable>
-          <Pressable
-            style={({ pressed }) => [styles.stat, pressed && styles.pressed]}
-            onPress={() => router.push(`/(app)/users/${profile.id}/following` as never)}
-          >
-            <Text style={styles.statValue}>{profile._count?.following ?? 0}</Text>
-            <Text style={styles.statLabel}>{t ? 'Siguiendo' : 'Following'}</Text>
-          </Pressable>
-        </View>
+        )}
 
-        {!isMe && (profile.friendship?.mutualCount ?? 0) > 0 && (
+        {!isMe && !isBlocked && (profile.friendship?.mutualCount ?? 0) > 0 && (
           <Pressable
             onPress={() => router.push(`/(app)/users/${profile.id}/friends?tab=mutual` as never)}
             style={({ pressed }) => [styles.mutualsRow, pressed && styles.pressed]}
@@ -702,7 +898,7 @@ export default function UserProfile() {
         )}
 
         {/* ── Actions (IG-style) ──────────────── */}
-        {!isMe && (
+        {!isMe && !isBlocked && (
           <View style={styles.actionsRow}>
             <FriendButton
               status={profile.friendship?.status ?? 'none'}
@@ -762,7 +958,23 @@ export default function UserProfile() {
           </View>
         )}
 
+        {/* ── Private lock notice (not friend / not follower) ── */}
+        {!isBlocked && isLockedPrivate && (
+          <View style={styles.lockedBox}>
+            <View style={styles.lockedIcon}>
+              <Feather name="lock" size={22} color={Colors.textSecondary} />
+            </View>
+            <Text style={styles.lockedTitle}>{t ? 'Cuenta privada' : 'Private account'}</Text>
+            <Text style={styles.lockedSub}>
+              {t
+                ? 'Sigue a esta persona o agrégala como amigo para ver sus publicaciones.'
+                : 'Follow this person or add them as a friend to see their posts.'}
+            </Text>
+          </View>
+        )}
+
         {/* ── Tabs (IG icon tabs) ─────────────── */}
+        {!isBlocked && !isLockedPrivate && (
         <View style={styles.tabBar}>
           <Pressable
             style={({ pressed }) => [styles.tab, pressed && styles.pressed]}
@@ -809,9 +1021,10 @@ export default function UserProfile() {
             {tab === 'tagged' && <View style={styles.tabMark} />}
           </Pressable>
         </View>
+        )}
 
         {/* ── Content ─────────────────────────── */}
-        {postsLoading ? (
+        {isBlocked || isLockedPrivate ? null : postsLoading ? (
           <View style={styles.loadingBox}>
             <ActivityIndicator color={Colors.accentPrimary} />
           </View>
@@ -1013,12 +1226,20 @@ export default function UserProfile() {
                   label={t ? 'Reportar' : 'Report'}
                   onPress={() => { setMenuOpen(false); handleReport(); }}
                 />
-                <MenuItem
-                  icon="slash"
-                  label={t ? 'Bloquear' : 'Block'}
-                  destructive
-                  onPress={() => { setMenuOpen(false); handleBlock(); }}
-                />
+                {blockedByMe ? (
+                  <MenuItem
+                    icon="unlock"
+                    label={t ? 'Desbloquear' : 'Unblock'}
+                    onPress={() => { setMenuOpen(false); void unblockUser(); }}
+                  />
+                ) : !isBlocked ? (
+                  <MenuItem
+                    icon="slash"
+                    label={t ? 'Bloquear' : 'Block'}
+                    destructive
+                    onPress={() => { setMenuOpen(false); handleBlock(); }}
+                  />
+                ) : null}
               </>
             )}
             <Pressable
@@ -1065,6 +1286,38 @@ export default function UserProfile() {
             toast(apiError(err, t ? 'No se pudo enviar el reporte.' : 'Report failed.'), 'danger');
           }
         }}
+      />
+
+      <ConfirmSheet
+        visible={unfriendOpen}
+        onClose={() => setUnfriendOpen(false)}
+        icon="user-minus"
+        variant="danger"
+        title={t ? 'Eliminar amistad' : 'Remove friend'}
+        message={
+          t
+            ? `¿Seguro que quieres dejar de ser amigo de ${name}?`
+            : `Are you sure you want to remove ${name} as a friend?`
+        }
+        confirmLabel={t ? 'Eliminar' : 'Remove'}
+        onConfirm={doUnfriend}
+        loading={busy}
+      />
+
+      <ConfirmSheet
+        visible={blockOpen}
+        onClose={() => setBlockOpen(false)}
+        icon="slash"
+        variant="danger"
+        title={t ? 'Bloquear usuario' : 'Block user'}
+        message={
+          t
+            ? `${name} dejará de seguirte, no verá tu contenido ni podrá escribirte. Las solicitudes pendientes se cancelan.`
+            : `${name} will be unfollowed, won't see your content and can't message you. Pending requests are cancelled.`
+        }
+        confirmLabel={t ? 'Bloquear' : 'Block'}
+        onConfirm={doBlock}
+        loading={busy}
       />
     </SafeAreaView>
   );
@@ -1169,9 +1422,10 @@ function FriendButton({
         disabled={busy}
       >
         <Feather name="clock" size={14} color={Colors.textPrimary} />
-        <Text style={styles.friendBtnGhostLabel}>
-          {t ? 'Enviada' : 'Sent'}
+        <Text style={styles.friendBtnGhostLabel} numberOfLines={1}>
+          {t ? 'Solicitud enviada' : 'Request sent'}
         </Text>
+        <Feather name="x" size={12} color={Colors.textSecondary} />
       </Pressable>
     );
   }
@@ -1207,7 +1461,7 @@ function FriendButton({
     >
       <Feather name="user-plus" size={14} color={Colors.textInverse} />
       <Text style={styles.friendBtnPrimaryLabel}>
-        {t ? 'Agregar amigo' : 'Add friend'}
+        {t ? 'Agregar' : 'Add friend'}
       </Text>
     </Pressable>
   );
@@ -1722,6 +1976,102 @@ const styles = StyleSheet.create({
   handle: {
     ...TypePresets.caption,
     color: Colors.textMuted,
+  },
+  privatePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginTop: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.borderSubtle,
+  },
+  privatePillText: {
+    ...TypePresets.caption,
+    color: Colors.textSecondary,
+  },
+
+  // Blocked / private notices
+  blockedBox: {
+    alignItems: 'center',
+    marginHorizontal: EditorialSpacing.pageGutter,
+    marginTop: Spacing[5],
+    paddingVertical: Spacing[6],
+    paddingHorizontal: Spacing[5],
+    gap: Spacing[2],
+    borderRadius: Radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.borderSubtle,
+    backgroundColor: Colors.bgCard,
+  },
+  blockedIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(196, 104, 104, 0.12)',
+    marginBottom: Spacing[1],
+  },
+  blockedTitle: {
+    ...TypePresets.headingSm,
+    color: Colors.textPrimary,
+    textAlign: 'center',
+  },
+  blockedSub: {
+    ...TypePresets.body,
+    color: Colors.textMuted,
+    textAlign: 'center',
+    maxWidth: 300,
+  },
+  unblockBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: Spacing[3],
+    paddingHorizontal: Spacing[5],
+    height: 40,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: Colors.borderStrong,
+    minWidth: 150,
+    justifyContent: 'center',
+  },
+  unblockLabel: {
+    ...TypePresets.label,
+    color: Colors.textPrimary,
+  },
+  lockedBox: {
+    alignItems: 'center',
+    paddingVertical: Spacing[8],
+    paddingHorizontal: Spacing[6],
+    gap: Spacing[2],
+    marginTop: Spacing[3],
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Colors.borderSubtle,
+  },
+  lockedIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: Colors.borderStrong,
+    marginBottom: Spacing[1],
+  },
+  lockedTitle: {
+    ...TypePresets.headingSm,
+    color: Colors.textPrimary,
+    textAlign: 'center',
+  },
+  lockedSub: {
+    ...TypePresets.body,
+    color: Colors.textMuted,
+    textAlign: 'center',
+    maxWidth: 280,
   },
   bio: {
     color: Colors.textSecondary,

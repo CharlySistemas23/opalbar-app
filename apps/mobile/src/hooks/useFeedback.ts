@@ -19,7 +19,6 @@
 import { Platform } from 'react-native';
 import { useCallback, useRef, useEffect } from 'react';
 import { useAppStore } from '../stores/app.store';
-import { ambient } from '../audio/ambient';
 
 // Lazy imports so web builds don't choke if native-only
 type HapticsModule = typeof import('expo-haptics');
@@ -100,10 +99,6 @@ const SOUND_VOLUME: Record<string, number> = {
   coin: 0.8,
 };
 
-// Sounds prominent enough to briefly duck the ambient bed underneath them.
-// Micro-sounds (tick/toggle/whoosh/swoosh) are too quiet to bother.
-const DUCK_THRESHOLD = 0.5;
-
 // Cache loaded Sound instances so we don't re-parse the file each call
 const _soundCache = new Map<string, any>();
 
@@ -116,12 +111,6 @@ async function playSound(name: string) {
   await ensureAudioMode(audio);
 
   const vol = SOUND_VOLUME[name] ?? 1.0;
-
-  // Dip the ambient bed under prominent one-shots, then release shortly after.
-  if (vol >= DUCK_THRESHOLD) {
-    ambient.duck();
-    setTimeout(() => ambient.unduck(), 600);
-  }
 
   try {
     let sound = _soundCache.get(name);

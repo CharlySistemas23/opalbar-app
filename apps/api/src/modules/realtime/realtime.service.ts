@@ -13,6 +13,7 @@ export type RealtimeResource =
   | 'story'
   | 'comment'
   | 'message'
+  | 'thread'
   | 'mention'
   | 'notification'
   | 'report'
@@ -25,7 +26,8 @@ export type RealtimeResource =
   | 'venue'
   | 'flag'
   | 'loyalty'
-  | 'gdpr';
+  | 'gdpr'
+  | 'auth';
 
 export type RealtimeAction =
   | 'created'
@@ -42,7 +44,15 @@ export type RealtimeAction =
   | 'commented'
   | 'read'
   | 'sent'
-  | 'pending';
+  | 'pending'
+  | 'pinned'
+  | 'unpinned'
+  | 'hidden'
+  | 'received'
+  | 'bulk_deleted'
+  | 'block_created'
+  | 'session_revoked'
+  | 'sessions_revoked';
 
 export interface RealtimeEnvelope {
   resource: RealtimeResource;

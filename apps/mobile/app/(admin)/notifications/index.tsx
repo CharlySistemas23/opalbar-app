@@ -6,12 +6,14 @@ import {
   Alert,
   Pressable,
 } from 'react-native';
-import { useState } from 'react';
-import { useRouter } from 'expo-router';
+import { useCallback, useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { adminApi } from '@/api/client';
 import { apiError } from '@/api/errors';
+import { useAuthStore } from '@/stores/auth.store';
+import { useSafeBack } from '@/hooks/useSafeBack';
 import { Colors, Radius, Spacing } from '@/constants/tokens';
 import {
   Body,
@@ -22,15 +24,49 @@ import {
   Kicker,
   Subhead,
 } from '@/components/ui';
+import { ErrorState } from '@/components/ErrorState';
+import { EmptyState } from '@/components/EmptyState';
 import { AdminHeader } from '@/components/admin';
+
+function relTime(d?: string) {
+  if (!d) return '';
+  const diff = Math.max(0, Math.floor((Date.now() - new Date(d).getTime()) / 1000));
+  if (diff < 60) return `hace ${diff}s`;
+  if (diff < 3600) return `hace ${Math.floor(diff / 60)} min`;
+  if (diff < 86400) return `hace ${Math.floor(diff / 3600)} h`;
+  return `hace ${Math.floor(diff / 86400)} d`;
+}
 
 export default function PushBroadcast() {
   const router = useRouter();
+  const goBack = useSafeBack('/(admin)/manage');
+  const me = useAuthStore((s) => s.user);
+  // Backend: POST /admin/notifications/broadcast is ADMIN/SUPER_ADMIN only.
+  const canSend = me?.role === 'ADMIN' || me?.role === 'SUPER_ADMIN';
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [audience, setAudience] = useState<'ALL' | 'ADMINS'>('ALL');
   const [sending, setSending] = useState(false);
   const [confirmSend, setConfirmSend] = useState(false);
+
+  const [history, setHistory] = useState<any[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(true);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+
+  const loadHistory = useCallback(async () => {
+    setHistoryError(null);
+    try {
+      const r = await adminApi.listBroadcasts();
+      const rows = r.data?.data ?? r.data ?? [];
+      setHistory(Array.isArray(rows) ? rows : []);
+    } catch (err) {
+      setHistoryError(apiError(err));
+    } finally {
+      setLoadingHistory(false);
+    }
+  }, []);
+
+  useFocusEffect(useCallback(() => { loadHistory(); }, [loadHistory]));
 
   async function performSend() {
     setConfirmSend(false);
@@ -48,6 +84,7 @@ export default function PushBroadcast() {
       );
       setTitle('');
       setBody('');
+      loadHistory();
     } catch (err) {
       Alert.alert('Error', apiError(err));
     } finally {
@@ -57,15 +94,28 @@ export default function PushBroadcast() {
 
   function send() {
     if (!title.trim() || !body.trim()) {
-      Alert.alert('Faltan datos', 'Titulo y mensaje son obligatorios.');
+      Alert.alert('Faltan datos', 'Título y mensaje son obligatorios.');
       return;
     }
     setConfirmSend(true);
   }
 
+  if (!canSend) {
+    return (
+      <SafeAreaView style={styles.root} edges={['top']}>
+        <AdminHeader title="Push Notifications" kicker="Marketing" onBack={goBack} />
+        <EmptyState
+          icon="lock"
+          title="Sin acceso"
+          message="Necesitas rol de admin para enviar notificaciones push."
+        />
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
-      <AdminHeader title="Push Notifications" kicker="Marketing" onBack={() => router.back()} />
+      <AdminHeader title="Push Notifications" kicker="Marketing" onBack={goBack} />
 
       <ScrollView contentContainerStyle={{ padding: Spacing[5], paddingBottom: 120, gap: Spacing[3] }}>
         <View style={styles.card}>
@@ -88,7 +138,7 @@ export default function PushBroadcast() {
 
         <View style={styles.card}>
           <Input
-            label="Titulo"
+            label="Título"
             value={title}
             onChangeText={setTitle}
             placeholder="Nuevo evento este viernes"
@@ -100,7 +150,7 @@ export default function PushBroadcast() {
             label="Mensaje"
             value={body}
             onChangeText={setBody}
-            placeholder="Descripcion corta del mensaje que veran los usuarios..."
+            placeholder="Descripción corta del mensaje que verán los usuarios..."
             multiline
             maxLength={160}
             required
@@ -118,9 +168,9 @@ export default function PushBroadcast() {
             </View>
             <View style={{ flex: 1 }}>
               <Kicker tone="muted">OPALBAR</Kicker>
-              <Subhead style={{ marginTop: 2 }}>{title || 'Titulo del push'}</Subhead>
+              <Subhead style={{ marginTop: 2 }}>{title || 'Título del push'}</Subhead>
               <Caption tone="secondary" style={{ marginTop: 2 }}>
-                {body || 'Mensaje que veran los usuarios...'}
+                {body || 'Mensaje que verán los usuarios...'}
               </Caption>
             </View>
             <Caption tone="muted" size="sm">ahora</Caption>
@@ -128,7 +178,7 @@ export default function PushBroadcast() {
         </View>
 
         <Button
-          label={sending ? 'Enviando...' : 'Enviar notificacion'}
+          label={sending ? 'Enviando...' : 'Enviar notificación'}
           variant="primary"
           size="lg"
           onPress={send}
@@ -140,9 +190,50 @@ export default function PushBroadcast() {
         <View style={styles.warn}>
           <Feather name="alert-triangle" size={14} color={Colors.accentPrimary} />
           <Caption tone="secondary" size="sm" style={{ flex: 1 }}>
-            Las notificaciones se envian via Expo Push. Solo llegan a dispositivos con el app
-            instalada y la sesion iniciada.
+            Las notificaciones se envían vía Expo Push. Solo llegan a dispositivos con el app
+            instalada y la sesión iniciada.
           </Caption>
+        </View>
+
+        {/* Historial de broadcasts */}
+        <View style={styles.card}>
+          <Kicker tone="muted">Historial</Kicker>
+          {loadingHistory ? (
+            <ActivityIndicator color={Colors.accentPrimary} style={{ marginVertical: Spacing[4] }} />
+          ) : historyError ? (
+            <ErrorState message={historyError} onRetry={loadHistory} />
+          ) : history.length === 0 ? (
+            <Caption tone="muted" align="center" style={{ paddingVertical: Spacing[4] }}>
+              Sin envíos todavía.
+            </Caption>
+          ) : (
+            <View style={{ gap: Spacing[2] }}>
+              {history.map((h) => (
+                <View key={h.id} style={styles.historyRow}>
+                  <View style={{ flex: 1 }}>
+                    <Body size="sm" weight="semiBold" numberOfLines={1}>{h.title}</Body>
+                    <Caption tone="muted" size="sm" numberOfLines={1} style={{ marginTop: 2 }}>
+                      {h.body}
+                    </Caption>
+                    <Caption tone="muted" size="sm" style={{ marginTop: 4 }}>
+                      {h.audience === 'ADMINS' ? 'Solo staff' : 'Todos'} · {relTime(h.sentAt)}
+                    </Caption>
+                  </View>
+                  <View style={styles.historyCount}>
+                    <Feather name="send" size={11} color={Colors.accentSuccess} />
+                    <Caption size="sm" style={{ color: Colors.accentSuccess, fontWeight: '700' }}>
+                      {h.sentCount}
+                    </Caption>
+                    {h.failedCount > 0 ? (
+                      <Caption size="sm" style={{ color: Colors.accentDanger, fontWeight: '700' }}>
+                        {' '}· {h.failedCount} fallidos
+                      </Caption>
+                    ) : null}
+                  </View>
+                </View>
+              ))}
+            </View>
+          )}
         </View>
       </ScrollView>
 
@@ -241,6 +332,20 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.accentPrimary,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+
+  historyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing[2],
+    paddingVertical: Spacing[2],
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Colors.border,
+  },
+  historyCount: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
   },
 
   warn: {

@@ -54,9 +54,32 @@ function relTime(d?: string) {
 
 function getGreeting(): string {
   const h = new Date().getHours();
-  if (h < 12) return 'Buenos dias';
+  if (h < 12) return 'Buenos días';
   if (h < 19) return 'Buenas tardes';
   return 'Buenas noches';
+}
+
+// The backend's FLAG inbox items point at `/(admin)/flags` — that screen is
+// unrelated (on/off feature-flag toggles), not content moderation. There's no
+// per-flag detail screen on mobile, so route by the flag's target instead of
+// trusting `deepLink` for this one type. Every other type's deepLink is fine.
+function resolveInboxRoute(it: any): string {
+  if (it?.type !== 'FLAG') return it?.deepLink;
+  const targetType = it?.meta?.targetType;
+  const targetId = it?.meta?.targetId as string | undefined;
+  switch (targetType) {
+    case 'POST':
+      return targetId ? `/(admin)/manage/community/${targetId}` : '/(admin)/manage/community';
+    case 'REVIEW':
+      return '/(admin)/manage/reviews';
+    case 'USER_PROFILE':
+      return targetId ? `/(admin)/users/${targetId}` : '/(admin)/users';
+    case 'COMMENT':
+    default:
+      // Comments/flags without a safe per-item screen land on the community
+      // moderation list rather than guessing a wrong id.
+      return '/(admin)/manage/community';
+  }
 }
 
 export default function AdminDashboard() {
@@ -67,24 +90,42 @@ export default function AdminDashboard() {
   const [inbox, setInbox] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [statsError, setStatsError] = useState(false);
+  const [activityError, setActivityError] = useState(false);
+  const [inboxError, setInboxError] = useState(false);
   const { counts, refresh: refreshCounts } = useAdminCounts();
 
   const load = useCallback(async () => {
-    try {
-      const [sRes, aRes, iRes] = await Promise.all([
-        adminApi.stats().catch(() => null),
-        adminApi.activity(6).catch(() => null),
-        adminApi.inbox(5).catch(() => null),
-      ]);
-      setStats(sRes?.data?.data ?? sRes?.data ?? null);
-      setActivity(aRes?.data?.data ?? aRes?.data ?? []);
-      const inboxData = iRes?.data?.data ?? iRes?.data ?? {};
-      setInbox(inboxData.items ?? []);
-    } catch {}
-    finally {
-      setLoading(false);
-      setRefreshing(false);
+    const [sRes, aRes, iRes] = await Promise.allSettled([
+      adminApi.stats(),
+      adminApi.activity(6),
+      adminApi.inbox(5),
+    ]);
+
+    if (sRes.status === 'fulfilled') {
+      setStats(sRes.value.data?.data ?? sRes.value.data ?? null);
+      setStatsError(false);
+    } else {
+      setStatsError(true);
     }
+
+    if (aRes.status === 'fulfilled') {
+      setActivity(aRes.value.data?.data ?? aRes.value.data ?? []);
+      setActivityError(false);
+    } else {
+      setActivityError(true);
+    }
+
+    if (iRes.status === 'fulfilled') {
+      const inboxData = iRes.value.data?.data ?? iRes.value.data ?? {};
+      setInbox(inboxData.items ?? []);
+      setInboxError(false);
+    } else {
+      setInboxError(true);
+    }
+
+    setLoading(false);
+    setRefreshing(false);
   }, []);
 
   useFocusEffect(
@@ -163,44 +204,60 @@ export default function AdminDashboard() {
         </View>
 
         {/* KPI row */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.kpiRow}
-        >
-          {kpis.map((k) => (
-            <View key={k.label} style={styles.kpi}>
-              <View style={styles.kpiIconBox}>
-                <Feather
-                  name={k.icon}
-                  size={14}
-                  color={k.danger ? Colors.accentDanger : Colors.accentPrimary}
-                />
+        {!loading && statsError ? (
+          <Pressable
+            style={({ pressed }) => [styles.inlineError, pressed && styles.pressed]}
+            onPress={load}
+            accessibilityRole="button"
+            accessibilityLabel="Reintentar cargar estadísticas"
+          >
+            <Feather name="alert-circle" size={14} color={Colors.accentDanger} />
+            <Caption style={{ color: Colors.accentDanger, flex: 1 }}>
+              No se pudieron cargar las estadísticas.
+            </Caption>
+            <Caption style={{ color: Colors.accentDanger, fontWeight: '700' }}>Reintentar</Caption>
+          </Pressable>
+        ) : (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.kpiRow}
+          >
+            {kpis.map((k) => (
+              <View key={k.label} style={styles.kpi}>
+                <View style={styles.kpiIconBox}>
+                  <Feather
+                    name={k.icon}
+                    size={14}
+                    color={k.danger ? Colors.accentDanger : Colors.accentPrimary}
+                  />
+                </View>
+                {loading ? (
+                  <ActivityIndicator
+                    color={k.danger ? Colors.accentDanger : Colors.accentPrimary}
+                    size="small"
+                    style={{ marginTop: 8 }}
+                  />
+                ) : (
+                  <Numeric size="sm" tone={k.danger ? 'danger' : 'primary'}>
+                    {k.value}
+                  </Numeric>
+                )}
+                <Caption tone="muted" size="sm" style={{ marginTop: 2 }}>
+                  {k.label}
+                </Caption>
               </View>
-              {loading ? (
-                <ActivityIndicator
-                  color={k.danger ? Colors.accentDanger : Colors.accentPrimary}
-                  size="small"
-                  style={{ marginTop: 8 }}
-                />
-              ) : (
-                <Numeric size="sm" tone={k.danger ? 'danger' : 'primary'}>
-                  {k.value}
-                </Numeric>
-              )}
-              <Caption tone="muted" size="sm" style={{ marginTop: 2 }}>
-                {k.label}
-              </Caption>
-            </View>
-          ))}
-        </ScrollView>
+            ))}
+          </ScrollView>
+        )}
 
-        {/* Mis clientes CTA */}
+        {/* Mis clientes CTA — insights/audience is ADMIN/SUPER_ADMIN only on the backend */}
+        {(user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN') && (
         <Pressable
           style={({ pressed }) => [styles.insightsCta, pressed && styles.pressed]}
           onPress={() => router.push('/(admin)/analytics' as never)}
           accessibilityRole="button"
-          accessibilityLabel="Ver analiticas de clientes"
+          accessibilityLabel="Ver analíticas de clientes"
         >
           <View style={styles.insightsCtaIcon}>
             <Feather name="bar-chart-2" size={16} color={Colors.accentPrimary} />
@@ -208,11 +265,12 @@ export default function AdminDashboard() {
           <View style={{ flex: 1 }}>
             <Subhead>Mis clientes</Subhead>
             <Caption tone="muted" style={{ marginTop: 2 }}>
-              Quienes son, que les interesa, como te encontraron
+              Quiénes son, qué les interesa, cómo te encontraron
             </Caption>
           </View>
           <Feather name="chevron-right" size={18} color={Colors.textMuted} />
         </Pressable>
+        )}
 
         {/* Inbox section */}
         <View style={styles.sectionHeader}>
@@ -240,12 +298,25 @@ export default function AdminDashboard() {
             <View style={styles.centerSmall}>
               <ActivityIndicator color={Colors.accentPrimary} />
             </View>
+          ) : !loading && inboxError ? (
+            <Pressable
+              style={({ pressed }) => [styles.inboxEmpty, pressed && styles.pressed]}
+              onPress={load}
+              accessibilityRole="button"
+              accessibilityLabel="Reintentar cargar bandeja"
+            >
+              <View style={[styles.inboxEmptyIcon, { backgroundColor: 'rgba(196,104,104,0.14)' }]}>
+                <Feather name="alert-circle" size={20} color={Colors.accentDanger} />
+              </View>
+              <Subhead style={{ marginTop: 4 }}>No se pudo cargar</Subhead>
+              <Caption style={{ color: Colors.accentDanger, fontWeight: '700' }}>Toca para reintentar</Caption>
+            </Pressable>
           ) : inbox.length === 0 ? (
             <View style={styles.inboxEmpty}>
               <View style={styles.inboxEmptyIcon}>
                 <Feather name="check" size={20} color={Colors.accentSuccess} />
               </View>
-              <Subhead style={{ marginTop: 4 }}>Todo al dia</Subhead>
+              <Subhead style={{ marginTop: 4 }}>Todo al día</Subhead>
               <Caption tone="muted">Nada pendiente. Buen trabajo.</Caption>
             </View>
           ) : (
@@ -259,7 +330,7 @@ export default function AdminDashboard() {
                     idx === inbox.length - 1 && styles.inboxItemLast,
                     pressed && styles.pressed,
                   ]}
-                  onPress={() => router.push(it.deepLink as never)}
+                  onPress={() => router.push(resolveInboxRoute(it) as never)}
                   accessibilityRole="button"
                   accessibilityLabel={it.title}
                 >
@@ -304,6 +375,18 @@ export default function AdminDashboard() {
             <View style={styles.centerSmall}>
               <ActivityIndicator color={Colors.accentPrimary} />
             </View>
+          ) : !loading && activityError ? (
+            <Pressable
+              style={({ pressed }) => [styles.centerSmall, pressed && styles.pressed]}
+              onPress={load}
+              accessibilityRole="button"
+              accessibilityLabel="Reintentar cargar actividad"
+            >
+              <Feather name="alert-circle" size={16} color={Colors.accentDanger} style={{ marginBottom: 4 }} />
+              <Caption style={{ color: Colors.accentDanger, fontWeight: '700' }}>
+                No se pudo cargar · toca para reintentar
+              </Caption>
+            </Pressable>
           ) : activity.length === 0 ? (
             <Caption tone="muted" align="center" style={{ paddingVertical: 14 }}>
               Sin actividad reciente.
@@ -383,6 +466,18 @@ const styles = StyleSheet.create({
   },
   avatarText: { color: Colors.textInverse, fontWeight: '700', fontSize: 13 },
 
+  inlineError: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing[2],
+    marginHorizontal: Spacing[5],
+    marginBottom: Spacing[2],
+    padding: Spacing[3],
+    borderRadius: Radius['2xl'],
+    backgroundColor: 'rgba(196,104,104,0.08)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(196,104,104,0.30)',
+  },
   kpiRow: {
     paddingHorizontal: Spacing[5],
     gap: Spacing[2],

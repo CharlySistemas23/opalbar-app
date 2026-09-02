@@ -1,10 +1,19 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { DmPolicy, NotificationType } from '@prisma/client';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
+import { DmPolicy, NotificationType, SavedItemType, UserStatus } from '@prisma/client';
+import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../../database/prisma.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import { FriendshipsService } from '../friendships/friendships.service';
+import { FriendshipsService, FriendshipContext } from '../friendships/friendships.service';
+import { paginate } from '../../common/dto/pagination.dto';
 import { UpdateProfileDto, UpdateInterestsDto } from './dto/update-profile.dto';
+import { UpdateNotificationSettingsDto } from './dto/account-settings.dto';
 
 @Injectable()
 export class UsersService {
@@ -40,40 +49,65 @@ export class UsersService {
   }
 
   async updateProfile(userId: string, dto: UpdateProfileDto) {
+    // Semántica: `undefined` = no tocar, `null` = limpiar el campo. Strings
+    // vacíos en campos opcionales también se guardan como null para que el
+    // perfil no acumule "" y el front pueda usar `?? placeholder`.
+    const clean = (v: string | null | undefined): string | null | undefined =>
+      v === undefined ? undefined : (v === null || v.trim() === '' ? null : v.trim());
+    const birthDate =
+      dto.birthDate === undefined ? undefined : dto.birthDate === null ? null : new Date(dto.birthDate);
+    if (birthDate instanceof Date) {
+      if (Number.isNaN(birthDate.getTime())) throw new BadRequestException('birthDate must be a valid date');
+      if (birthDate.getTime() > Date.now()) throw new BadRequestException('birthDate cannot be in the future');
+    }
+
     const profile = await this.prisma.userProfile.upsert({
       where: { userId },
       update: {
-        ...(dto.firstName !== undefined && { firstName: dto.firstName }),
-        ...(dto.lastName !== undefined && { lastName: dto.lastName }),
-        ...(dto.bio !== undefined && { bio: dto.bio }),
-        ...(dto.birthDate && { birthDate: new Date(dto.birthDate) }),
-        ...(dto.city !== undefined && { city: dto.city }),
+        // `@IsOptional()` also lets `null` through, and both columns are
+        // required — treat a null/blank name as "leave it alone" instead of
+        // crashing on `.trim()` or writing an empty name.
+        ...(dto.firstName?.trim() ? { firstName: dto.firstName.trim() } : {}),
+        ...(dto.lastName?.trim() ? { lastName: dto.lastName.trim() } : {}),
+        ...(dto.bio !== undefined && { bio: clean(dto.bio) }),
+        ...(birthDate !== undefined && { birthDate }),
+        ...(dto.city !== undefined && { city: clean(dto.city) }),
         ...(dto.country !== undefined && { country: dto.country }),
-        ...(dto.avatarUrl !== undefined && { avatarUrl: dto.avatarUrl }),
-        ...(dto.coverUrl !== undefined && { coverUrl: dto.coverUrl }),
+        ...(dto.avatarUrl !== undefined && { avatarUrl: clean(dto.avatarUrl) }),
+        ...(dto.coverUrl !== undefined && { coverUrl: clean(dto.coverUrl) }),
         ...(dto.language && { language: dto.language }),
         ...(dto.gender !== undefined && { gender: dto.gender }),
-        ...(dto.occupation !== undefined && { occupation: dto.occupation }),
+        ...(dto.occupation !== undefined && { occupation: clean(dto.occupation) }),
         ...(dto.discoverySource !== undefined && { discoverySource: dto.discoverySource }),
       },
       create: {
         userId,
-        firstName: dto.firstName || '',
-        lastName: dto.lastName || '',
-        bio: dto.bio,
-        birthDate: dto.birthDate ? new Date(dto.birthDate) : undefined,
-        city: dto.city,
+        firstName: dto.firstName?.trim() || '',
+        lastName: dto.lastName?.trim() || '',
+        bio: clean(dto.bio) ?? undefined,
+        birthDate: birthDate ?? undefined,
+        city: clean(dto.city) ?? undefined,
         country: dto.country || 'MX',
-        avatarUrl: dto.avatarUrl,
-        coverUrl: dto.coverUrl,
+        avatarUrl: clean(dto.avatarUrl) ?? undefined,
+        coverUrl: clean(dto.coverUrl) ?? undefined,
         language: dto.language || 'es',
-        gender: dto.gender,
-        occupation: dto.occupation,
+        gender: dto.gender ?? undefined,
+        occupation: clean(dto.occupation) ?? undefined,
         discoverySource: dto.discoverySource,
       },
     });
     this.realtime.toUserAndStaff(userId, 'user', 'updated', { id: userId });
     return profile;
+  }
+
+  async updatePrivacy(userId: string, isPrivate: boolean) {
+    const user = await this.prisma.user.update({
+      where: { id: userId },
+      data: { isPrivate },
+      select: { id: true, isPrivate: true, dmPolicy: true, friendPolicy: true, mentionPolicy: true },
+    });
+    this.realtime.toUserAndStaff(userId, 'user', 'updated', { id: userId, data: { isPrivate } });
+    return user;
   }
 
   async updateInterests(userId: string, dto: UpdateInterestsDto) {
@@ -99,40 +133,44 @@ export class UsersService {
     });
   }
 
-  async updateNotificationSettings(userId: string, settings: Record<string, boolean>) {
-    // The mobile UI uses simple toggle names ("community", "marketing", …)
-    // while the Prisma model has more granular columns (communityReplies,
-    // communityReactions, marketingEmails, …). Translate before writing —
-    // otherwise Prisma rejects the unknown fields and the optimistic toggle
-    // silently reverts on the client.
+  // Columnas reales del modelo NotificationSettings (whitelist).
+  private static readonly NOTIFICATION_COLUMNS = new Set([
+    'pushEnabled', 'emailEnabled', 'eventReminders', 'newEvents', 'newOffers',
+    'communityReplies', 'communityReactions', 'pointsUpdates', 'marketingEmails', 'weeklyDigest',
+  ]);
+
+  // Alias del móvil → columna(s). Sin colisiones: `events` solo toca newEvents
+  // y `reservations` solo eventReminders, así un toggle nunca pisa a otro.
+  private static readonly NOTIFICATION_ALIASES: Record<string, string[]> = {
+    events: ['newEvents'],
+    offers: ['newOffers'],
+    community: ['communityReplies', 'communityReactions'],
+    reservations: ['eventReminders'],
+    marketing: ['marketingEmails'],
+  };
+
+  async updateNotificationSettings(userId: string, settings: UpdateNotificationSettingsDto) {
     const patch: Record<string, boolean> = {};
-    for (const [key, value] of Object.entries(settings)) {
-      if (typeof value !== 'boolean') continue;
-      switch (key) {
-        case 'events':
-          patch.newEvents = value;
-          patch.eventReminders = value;
-          break;
-        case 'offers':
-          patch.newOffers = value;
-          break;
-        case 'community':
-          patch.communityReplies = value;
-          patch.communityReactions = value;
-          break;
-        case 'reservations':
-          // No dedicated column yet — ride on eventReminders so the toggle
-          // still has behavior attached instead of being a silent no-op.
-          patch.eventReminders = value;
-          break;
-        case 'marketing':
-          patch.marketingEmails = value;
-          break;
-        default:
-          // Accept raw column names too (pushEnabled, weeklyDigest, …) so
-          // future screens can target them directly.
-          patch[key] = value;
+    const unknown: string[] = [];
+    for (const [key, value] of Object.entries(settings ?? {})) {
+      if (value === undefined) continue;
+      if (typeof value !== 'boolean') {
+        throw new BadRequestException(`${key} must be a boolean`);
       }
+      const alias = UsersService.NOTIFICATION_ALIASES[key];
+      if (alias) {
+        for (const col of alias) patch[col] = value;
+      } else if (UsersService.NOTIFICATION_COLUMNS.has(key)) {
+        patch[key] = value;
+      } else {
+        unknown.push(key);
+      }
+    }
+    if (unknown.length) {
+      throw new BadRequestException(`Unknown notification setting: ${unknown.join(', ')}`);
+    }
+    if (!Object.keys(patch).length) {
+      throw new BadRequestException('No notification settings provided');
     }
 
     return this.prisma.notificationSettings.upsert({
@@ -142,20 +180,117 @@ export class UsersService {
     });
   }
 
+  // ─────────────────────────────────────────────
+  //  GDPR — export / deletion / requests
+  // ─────────────────────────────────────────────
+
   async requestDataExport(userId: string) {
-    return this.prisma.dataExportRequest.create({
+    // Dedupe: si ya hay una exportación en curso devolvemos esa en vez de
+    // encolar otra (evita spam a admins y varios correos al usuario).
+    const existing = await this.prisma.dataExportRequest.findFirst({
+      where: { userId, status: { in: ['PENDING', 'PROCESSING'] } },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (existing) return { ...existing, alreadyRequested: true };
+    const created = await this.prisma.dataExportRequest.create({
       data: { userId, status: 'PENDING' },
     });
+    this.realtime.toStaff('user', 'updated', { id: userId, data: { gdpr: 'export_requested' } });
+    return { ...created, alreadyRequested: false };
   }
 
-  async requestAccountDeletion(userId: string, reason?: string) {
+  async listDataRequests(userId: string) {
+    const [exports, deletions] = await Promise.all([
+      this.prisma.dataExportRequest.findMany({
+        where: { userId },
+        orderBy: { createdAt: 'desc' },
+        take: 10,
+        select: {
+          id: true, status: true, createdAt: true, processedAt: true,
+          downloadUrl: true, expiresAt: true,
+        },
+      }),
+      this.prisma.dataDeletionRequest.findMany({
+        where: { userId },
+        orderBy: { createdAt: 'desc' },
+        take: 5,
+        select: { id: true, status: true, createdAt: true, scheduledFor: true, processedAt: true },
+      }),
+    ]);
+    // Un enlace de descarga caducado no se expone: el cliente lo mostraría
+    // como "listo" y el endpoint respondería 410.
+    const now = Date.now();
+    return {
+      exports: exports.map((e) => ({
+        ...e,
+        downloadUrl: e.downloadUrl && e.expiresAt && e.expiresAt.getTime() < now ? null : e.downloadUrl,
+        expired: !!(e.expiresAt && e.expiresAt.getTime() < now),
+      })),
+      deletions,
+    };
+  }
+
+  /**
+   * Solicitud de eliminación (GDPR). Flujo:
+   *   1. Verifica la contraseña (si la cuenta tiene una).
+   *   2. Dedupe: si ya hay una solicitud PENDING la devolvemos tal cual.
+   *   3. Soft-delete INMEDIATO: status DELETED + deletedAt. JwtStrategy y
+   *      JwtRefreshStrategy rechazan usuarios DELETED en cada request, así que
+   *      todos los tokens vivos mueren al instante sin tocar Redis.
+   *   4. Sesiones y push tokens se desactivan; la DataDeletionRequest queda
+   *      programada a 30 días para que un admin apruebe la anonimización
+   *      definitiva (AdminService.softDeleteUser) — mientras tanto soporte
+   *      puede revertir. El email/teléfono se conservan en esa ventana para
+   *      que el login pueda responder "Account scheduled for deletion".
+   */
+  async requestAccountDeletion(userId: string, opts: { reason?: string; password?: string } = {}) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, passwordHash: true, status: true, deletedAt: true },
+    });
+    if (!user) throw new NotFoundException('User not found');
+
+    if (user.passwordHash) {
+      if (!opts.password) throw new BadRequestException('Password is required to delete your account');
+      const ok = await bcrypt.compare(opts.password, user.passwordHash);
+      if (!ok) throw new UnauthorizedException('Current password is incorrect');
+    }
+
+    const existing = await this.prisma.dataDeletionRequest.findFirst({
+      where: { userId, status: { in: ['PENDING', 'PROCESSING'] } },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (existing && user.status === UserStatus.DELETED) {
+      return { ...existing, alreadyRequested: true };
+    }
+
     const deletionDays = 30;
     const scheduledFor = new Date();
     scheduledFor.setDate(scheduledFor.getDate() + deletionDays);
+    const reason = opts.reason?.trim() || undefined;
 
-    return this.prisma.dataDeletionRequest.create({
-      data: { userId, reason, scheduledFor, status: 'PENDING' },
-    });
+    const [request] = await this.prisma.$transaction([
+      existing
+        ? this.prisma.dataDeletionRequest.update({
+            where: { id: existing.id },
+            data: { reason: reason ?? existing.reason, scheduledFor },
+          })
+        : this.prisma.dataDeletionRequest.create({
+            data: { userId, reason, scheduledFor, status: 'PENDING' },
+          }),
+      this.prisma.user.update({
+        where: { id: userId },
+        data: { status: UserStatus.DELETED, deletedAt: new Date() },
+      }),
+      this.prisma.session.updateMany({
+        where: { userId, isActive: true },
+        data: { isActive: false },
+      }),
+      this.prisma.pushToken.deleteMany({ where: { userId } }),
+    ]);
+
+    this.realtime.toStaff('user', 'updated', { id: userId, data: { gdpr: 'deletion_requested', scheduledFor } });
+    return { ...request, alreadyRequested: false };
   }
 
   async updateConsent(userId: string, consent: Record<string, boolean>) {
@@ -190,32 +325,52 @@ export class UsersService {
   //  SEARCH
   // ─────────────────────────────────────────────
 
-  async search(query: string, limit: number) {
-    const q = query.trim();
-    if (!q) return [];
+  async search(query: string, limit: number, viewerId?: string) {
+    const q = (query ?? '').trim();
+    // Min 2 chars: a single letter matches half the user base and is useless.
+    if (q.length < 2) return [];
     // Audit fix: el endpoint era @Public y devolvia emails reales + cuentas
     // baneadas/soft-deleted. Excluimos BANNED y DELETED — pero PENDING_VERIFICATION
     // (default al registrarse) sigue siendo searchable porque la verificacion
     // toma minutos y la gente quiere encontrar amigos apenas se registra.
     // Tampoco devolvemos email (PII), y la busqueda por email exige el email
     // completo (no fragmento) para evitar enumeracion.
+    // Se excluye al propio viewer y a cualquier usuario bloqueado en
+    // cualquier direccion (un bloqueado no debe poder encontrarte).
     const looksLikeEmail = /^[^@\s]+@[^@\s]+/.test(q);
+    const excluded = new Set<string>();
+    if (viewerId) {
+      excluded.add(viewerId);
+      for (const id of await this.friendships.getBlockedIds(viewerId)) excluded.add(id);
+    }
+    const [first, ...rest] = q.split(/\s+/);
+    const last = rest.join(' ');
     return this.prisma.user.findMany({
       where: {
         deletedAt: null,
         status: { notIn: ['BANNED', 'DELETED'] },
+        ...(excluded.size ? { id: { notIn: [...excluded] } } : {}),
         OR: [
           ...(looksLikeEmail ? [{ email: q.toLowerCase() }] : []),
           { profile: { firstName: { contains: q, mode: 'insensitive' as const } } },
           { profile: { lastName: { contains: q, mode: 'insensitive' as const } } },
+          // "Ana Lopez" → firstName contains "Ana" AND lastName contains "Lopez"
+          ...(last
+            ? [{
+                profile: {
+                  firstName: { contains: first, mode: 'insensitive' as const },
+                  lastName: { contains: last, mode: 'insensitive' as const },
+                },
+              }]
+            : []),
         ],
       },
       select: {
-        id: true, points: true, isPrivate: true,
-        profile: { select: { firstName: true, lastName: true, avatarUrl: true, bio: true } },
-        _count: { select: { followers: true, following: true, posts: true, events: true } },
+        id: true, isPrivate: true,
+        profile: { select: { firstName: true, lastName: true, avatarUrl: true } },
       },
-      take: Math.min(limit, 50),
+      orderBy: [{ profile: { firstName: 'asc' } }, { profile: { lastName: 'asc' } }],
+      take: Math.min(Math.max(1, limit || 20), 20),
     });
   }
 
@@ -248,10 +403,13 @@ export class UsersService {
     if (!user) return null;
 
     let isFollowing = false;
-    let friendship: Awaited<ReturnType<FriendshipsService['getProfileContext']>> = {
-      status: 'none',
+    let friendship: FriendshipContext = {
+      status: viewerId === id ? 'self' : 'none',
       isFriend: false,
       mutualCount: 0,
+      friendshipId: null,
+      blockedByMe: false,
+      isBlocked: false,
     };
     if (viewerId && viewerId !== id) {
       const [existing, fctx] = await Promise.all([
@@ -263,6 +421,40 @@ export class UsersService {
       isFollowing = !!existing;
       friendship = fctx;
     }
+
+    // Bloqueo (en cualquier direccion): perfil enmascarado. Solo nombre y
+    // avatar — sin posts, sin contadores, sin bio. `blockedByMe` permite al
+    // front mostrar "Desbloquear"; si me bloquearon a mi, no hay accion.
+    if (friendship.isBlocked) {
+      return {
+        id: user.id,
+        email: null,
+        createdAt: user.createdAt,
+        points: 0,
+        friendPolicy: user.friendPolicy,
+        isPrivate: user.isPrivate,
+        isBlocked: true,
+        blockedByMe: friendship.blockedByMe,
+        profile: {
+          firstName: user.profile?.firstName ?? '',
+          lastName: user.profile?.lastName ?? '',
+          avatarUrl: user.profile?.avatarUrl ?? null,
+          coverUrl: null,
+          bio: null,
+          city: null,
+          country: null,
+          birthDate: null,
+          gender: null,
+          occupation: null,
+          language: user.profile?.language ?? 'es',
+          loyaltyLevel: null,
+        },
+        isFollowing: false,
+        friendship,
+        _count: { followers: 0, following: 0, posts: 0, events: 0, offerRedemptions: 0, friends: 0 },
+      };
+    }
+
     // friendsCount derived once so the UI can show "X amigos" alongside followers/following.
     const friendIds = await this.friendships.getFriendIds(id);
 
@@ -280,6 +472,8 @@ export class UsersService {
         points: 0,
         friendPolicy: user.friendPolicy,
         isPrivate: true,
+        isBlocked: false,
+        blockedByMe: false,
         profile: {
           firstName: user.profile?.firstName ?? '',
           lastName: user.profile?.lastName ?? '',
@@ -312,6 +506,8 @@ export class UsersService {
       // Audit fix: nunca devuelvas el email del usuario en perfil publico,
       // independientemente de privacidad. Solo el dueno via /me lo ve.
       email: isOwner ? user.email : null,
+      isBlocked: false,
+      blockedByMe: false,
       isFollowing,
       friendship,
       _count: { ...user._count, friends: friendIds.length },
@@ -324,18 +520,36 @@ export class UsersService {
 
   async follow(followerId: string, followingId: string) {
     if (followerId === followingId) {
-      throw new Error("Can't follow yourself");
+      throw new BadRequestException("Can't follow yourself");
     }
-    const result = await this.prisma.follow.upsert({
-      where: { followerId_followingId: { followerId, followingId } },
-      create: { followerId, followingId },
-      update: {},
+    const target = await this.prisma.user.findFirst({
+      where: { id: followingId, deletedAt: null, status: { notIn: ['BANNED', 'DELETED'] } },
+      select: { id: true },
     });
+    if (!target) throw new NotFoundException('User not found');
+    if (await this.friendships.isBlockedEitherWay(followerId, followingId)) {
+      throw new ForbiddenException('Cannot follow this user');
+    }
+
+    // Idempotent: already following → return current state, no notification.
+    const existing = await this.prisma.follow.findUnique({
+      where: { followerId_followingId: { followerId, followingId } },
+      select: { id: true },
+    });
+    if (existing) return { ok: true, isFollowing: true };
+
+    let isNew = true;
+    try {
+      await this.prisma.follow.create({ data: { followerId, followingId } });
+    } catch (err: any) {
+      // Race between two taps → unique constraint. Treat as already following.
+      if (err?.code === 'P2002') isNew = false;
+      else throw err;
+    }
     this.realtime.toUsers([followerId, followingId], 'user', 'updated', { id: followingId, data: { follow: true, by: followerId } });
 
-    // Only notify when the follow row was actually created (upsert returned a
-    // brand-new id). Otherwise re-clicking "follow" would re-spam the user.
-    const isNew = result.createdAt.getTime() > Date.now() - 5_000;
+    // Only notify when the follow row was actually created. Otherwise
+    // re-clicking "follow" would re-spam the user.
     if (isNew) {
       const actor = await this.prisma.userProfile.findUnique({
         where: { userId: followerId },
@@ -360,49 +574,76 @@ export class UsersService {
   }
 
   async unfollow(followerId: string, followingId: string) {
-    await this.prisma.follow.deleteMany({
+    // Idempotent: deleteMany is a no-op when there is nothing to remove.
+    const { count } = await this.prisma.follow.deleteMany({
       where: { followerId, followingId },
     });
-    this.realtime.toUsers([followerId, followingId], 'user', 'updated', { id: followingId, data: { follow: false, by: followerId } });
+    if (count > 0) {
+      this.realtime.toUsers([followerId, followingId], 'user', 'updated', { id: followingId, data: { follow: false, by: followerId } });
+    }
     return { ok: true, isFollowing: false };
   }
 
-  async listFollowers(userId: string, limit: number, viewerId?: string) {
+  private static readonly FOLLOW_USER_SELECT = {
+    id: true,
+    isPrivate: true,
+    profile: { select: { firstName: true, lastName: true, avatarUrl: true } },
+  } as const;
+
+  private clampPage(page?: number, limit?: number) {
+    return {
+      page: Math.max(1, page || 1),
+      limit: Math.min(Math.max(1, limit || 30), 100),
+    };
+  }
+
+  /** Paginated followers of `userId` → `{ data, meta }`. */
+  async listFollowers(userId: string, page: number, limit: number, viewerId?: string) {
     // Audit fix: si la cuenta es privada, solo el dueno + sus followers /
     // amigos pueden ver el listado de seguidores. Antes era @Public abierto.
     await this.assertCanViewFollowList(userId, viewerId);
-    const rows = await this.prisma.follow.findMany({
-      where: { followingId: userId },
-      include: {
-        follower: {
-          select: {
-            id: true,
-            profile: { select: { firstName: true, lastName: true, avatarUrl: true } },
-          },
-        },
-      },
-      orderBy: { createdAt: 'desc' },
-      take: Math.min(limit, 100),
-    });
-    return rows.map((r) => r.follower);
+    const p = this.clampPage(page, limit);
+    const where = { followingId: userId };
+    const [total, rows] = await Promise.all([
+      this.prisma.follow.count({ where }),
+      this.prisma.follow.findMany({
+        where,
+        include: { follower: { select: UsersService.FOLLOW_USER_SELECT } },
+        orderBy: { createdAt: 'desc' },
+        skip: (p.page - 1) * p.limit,
+        take: p.limit,
+      }),
+    ]);
+    return paginate(rows.map((r) => ({ ...r.follower, since: r.createdAt })), total, p.page, p.limit);
   }
 
-  async listFollowing(userId: string, limit: number, viewerId?: string) {
+  /** Paginated accounts `userId` follows → `{ data, meta }`. */
+  async listFollowing(userId: string, page: number, limit: number, viewerId?: string) {
     await this.assertCanViewFollowList(userId, viewerId);
-    const rows = await this.prisma.follow.findMany({
-      where: { followerId: userId },
-      include: {
-        following: {
-          select: {
-            id: true,
-            profile: { select: { firstName: true, lastName: true, avatarUrl: true } },
-          },
-        },
-      },
-      orderBy: { createdAt: 'desc' },
-      take: Math.min(limit, 100),
-    });
-    return rows.map((r) => r.following);
+    const p = this.clampPage(page, limit);
+    const where = { followerId: userId };
+    const [total, rows] = await Promise.all([
+      this.prisma.follow.count({ where }),
+      this.prisma.follow.findMany({
+        where,
+        include: { following: { select: UsersService.FOLLOW_USER_SELECT } },
+        orderBy: { createdAt: 'desc' },
+        skip: (p.page - 1) * p.limit,
+        take: p.limit,
+      }),
+    ]);
+    return paginate(rows.map((r) => ({ ...r.following, since: r.createdAt })), total, p.page, p.limit);
+  }
+
+  /**
+   * Paginated friends of `userId` → `{ data, meta }`.
+   * `mutual` → only friends the viewer shares with them. Same privacy rule as
+   * followers/following (owner / follower / friend can see a private list).
+   */
+  async listFriends(userId: string, viewerId: string | undefined, page: number, limit: number, mutual = false) {
+    await this.assertCanViewFollowList(userId, viewerId);
+    const p = this.clampPage(page, limit);
+    return this.friendships.listFriendsOf(userId, viewerId, p.page, p.limit, mutual);
   }
 
   // Helper: la lista de followers/following solo es visible para el dueno,
@@ -414,6 +655,12 @@ export class UsersService {
       select: { isPrivate: true },
     });
     if (!target) throw new NotFoundException('User not found');
+    if (viewerId && viewerId !== targetId) {
+      // Un usuario bloqueado (en cualquier direccion) no ve listas ajenas.
+      if (await this.friendships.isBlockedEitherWay(viewerId, targetId)) {
+        throw new ForbiddenException('You are blocked from viewing this user');
+      }
+    }
     if (!target.isPrivate) return; // cuenta publica → cualquiera puede ver
     if (!viewerId) throw new ForbiddenException('Private account');
     if (viewerId === targetId) return;
@@ -432,16 +679,124 @@ export class UsersService {
   //  SAVED ITEMS
   // ─────────────────────────────────────────────
 
+  /**
+   * Saved items with the target hydrated per type. Rows whose target no
+   * longer exists (deleted post/event/offer/venue) are dropped so the client
+   * never renders a dead card.
+   */
   async listSaved(userId: string, type?: string) {
-    return this.prisma.savedItem.findMany({
-      where: { userId, ...(type ? { type: type.toUpperCase() as any } : {}) },
+    const rows = await this.prisma.savedItem.findMany({
+      where: { userId, ...(type ? { type: type.toUpperCase() as SavedItemType } : {}) },
       orderBy: { createdAt: 'desc' },
       take: 100,
     });
+    if (rows.length === 0) return [];
+
+    const idsOf = (t: SavedItemType) => rows.filter((r) => r.type === t).map((r) => r.targetId);
+    const postIds = idsOf(SavedItemType.POST);
+    const eventIds = idsOf(SavedItemType.EVENT);
+    const offerIds = idsOf(SavedItemType.OFFER);
+    const venueIds = idsOf(SavedItemType.VENUE);
+
+    const [posts, events, offers, venues] = await Promise.all([
+      postIds.length
+        ? this.prisma.post.findMany({
+            where: { id: { in: postIds }, deletedAt: null, status: { notIn: ['DELETED', 'HIDDEN', 'REJECTED'] } },
+            select: {
+              id: true, content: true, imageUrl: true, mediaUrls: true, createdAt: true,
+              user: { select: { id: true, profile: { select: { firstName: true, lastName: true, avatarUrl: true } } } },
+            },
+          })
+        : Promise.resolve([]),
+      eventIds.length
+        ? this.prisma.event.findMany({
+            where: { id: { in: eventIds } },
+            select: {
+              id: true, title: true, imageUrl: true, coverUrl: true, startDate: true, status: true,
+              venue: { select: { name: true } },
+            },
+          })
+        : Promise.resolve([]),
+      offerIds.length
+        ? this.prisma.offer.findMany({
+            where: { id: { in: offerIds } },
+            select: { id: true, title: true, imageUrl: true, status: true, venue: { select: { name: true } } },
+          })
+        : Promise.resolve([]),
+      venueIds.length
+        ? this.prisma.venue.findMany({
+            where: { id: { in: venueIds } },
+            select: { id: true, name: true, coverUrl: true, imageUrl: true, city: true },
+          })
+        : Promise.resolve([]),
+    ]);
+
+    const postMap = new Map(posts.map((p) => [p.id, p]));
+    const eventMap = new Map(events.map((e) => [e.id, e]));
+    const offerMap = new Map(offers.map((o) => [o.id, o]));
+    const venueMap = new Map(venues.map((v) => [v.id, v]));
+
+    const out: any[] = [];
+    for (const r of rows) {
+      let target: any = null;
+      switch (r.type) {
+        case SavedItemType.POST: {
+          const p = postMap.get(r.targetId);
+          if (!p) continue;
+          const media = (p.mediaUrls ?? []).filter((u) => !u.startsWith('__'));
+          target = {
+            id: p.id,
+            content: p.content,
+            imageUrl: p.imageUrl ?? media[0] ?? null,
+            mediaUrls: media,
+            createdAt: p.createdAt,
+            author: {
+              id: p.user.id,
+              firstName: p.user.profile?.firstName ?? null,
+              lastName: p.user.profile?.lastName ?? null,
+              avatarUrl: p.user.profile?.avatarUrl ?? null,
+            },
+          };
+          break;
+        }
+        case SavedItemType.EVENT: {
+          const e = eventMap.get(r.targetId);
+          if (!e) continue;
+          target = {
+            id: e.id,
+            title: e.title,
+            imageUrl: e.imageUrl ?? e.coverUrl ?? null,
+            startDate: e.startDate,
+            status: e.status,
+            venue: { name: e.venue?.name ?? null },
+          };
+          break;
+        }
+        case SavedItemType.OFFER: {
+          const o = offerMap.get(r.targetId);
+          if (!o) continue;
+          target = { id: o.id, title: o.title, imageUrl: o.imageUrl ?? null, status: o.status, venue: { name: o.venue?.name ?? null } };
+          break;
+        }
+        case SavedItemType.VENUE: {
+          const v = venueMap.get(r.targetId);
+          if (!v) continue;
+          target = { id: v.id, name: v.name, coverUrl: v.coverUrl ?? v.imageUrl ?? null, city: v.city };
+          break;
+        }
+        default:
+          continue;
+      }
+      out.push({ ...r, target });
+    }
+    return out;
   }
 
   async toggleSave(userId: string, type: string, targetId: string) {
-    const typeEnum = type.toUpperCase() as any;
+    const typeEnum = type.toUpperCase() as SavedItemType;
+    if (!Object.values(SavedItemType).includes(typeEnum)) {
+      throw new BadRequestException('Invalid saved item type');
+    }
     const existing = await this.prisma.savedItem.findUnique({
       where: { userId_type_targetId: { userId, type: typeEnum, targetId } },
     });

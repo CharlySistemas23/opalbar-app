@@ -1,36 +1,33 @@
 // ─────────────────────────────────────────────
-//  PostCard — Editorial Premium community post
+//  PostCard — Facebook-style post on Noir Absolute
 //
-//  IG/FB hybrid keeps its information density (double-tap to like, FB-style
-//  reactions, share, bookmark) but the chrome is now editorial:
-//   · Avatar + serif-flavoured author + kicker timestamp
-//   · Full-bleed image with sharp Radius.md corners (no shadow)
-//   · Action row uses outlined glyphs, no filled pills
-//   · Stats line and caption sit in pageGutter with editorial type
-//   · Hairline (subtle) separates posts instead of a heavy gray divider
+//  Layout (top → bottom):
+//   · Header: avatar · name · time + privacy chip · "…" menu
+//   · Status chip for own posts (En revisión / Rechazado)
+//   · Content with @mentions (MentionText), "Ver más" past 6 lines
+//   · Media carousel (mediaUrls, fallback imageUrl) with page dots.
+//     Double-tap on media → ❤️ + burst.
+//   · Reaction summary row: stacked emojis + count · N comentarios
+//   · Action bar: Me gusta / Comentar / Compartir  (+ bookmark)
+//     Long-press "Me gusta" → ReactionPicker (anchored)
+//
+//  Presentational only: all mutations bubble up through props so the feed
+//  owns optimistic state + revert.
 // ─────────────────────────────────────────────
-import { useRef, useState } from 'react';
+import { memo, useRef, useState } from 'react';
 import {
   Image,
-  Modal,
   Pressable,
   StyleSheet,
   Text,
-  TouchableOpacity,
   View,
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
-import Ionicons from '@expo/vector-icons/Ionicons';
 
-import { usersApi } from '@/api/client';
-import {
-  Body,
-  Caption,
-  Kicker,
-  Pressy,
-} from '@/components/ui';
+import { Badge, Body, Caption, Pressy } from '@/components/ui';
 import { Heart } from '@/components/Heart';
-import { sharePost } from '@/utils/share';
+import { MentionText, type ResolvedMention } from '@/components/MentionText';
+import { MediaCarousel } from '@/components/community/MediaCarousel';
 import {
   Colors,
   EditorialSpacing,
@@ -46,21 +43,29 @@ export interface Author {
   avatarUrl?: string | null;
   initials?: string;
   color?: string;
+  isPrivate?: boolean;
 }
+
+export type PostStatus = 'PENDING_REVIEW' | 'PUBLISHED' | 'REJECTED' | 'HIDDEN' | 'DELETED';
 
 export interface CommunityPost {
   id: string;
   userId?: string;
   author: Author;
   timeAgo: string;
-  reference?: string;
   text?: string;
   imageUrl?: string;
-  likes?: number;
-  comments?: number;
-  hasReacted?: boolean;
-  emojiReactions?: Array<{ emoji: string; count: number; mine: boolean }>;
-  myEmoji?: string | null;
+  mediaUrls: string[];
+  likes: number;
+  comments: number;
+  hasLiked: boolean;
+  emojiReactions: Array<{ emoji: string; count: number; mine: boolean }>;
+  myEmoji: string | null;
+  isSaved: boolean;
+  status: PostStatus;
+  rejectionReason?: string | null;
+  mentions?: ResolvedMention[];
+  isMine: boolean;
 }
 
 interface Props {
@@ -72,9 +77,14 @@ interface Props {
   onOpenPicker: (x: number, y: number) => void;
   onOpenReactors: () => void;
   onOptions: () => void;
+  onShare: () => void;
+  onToggleSave: () => void;
+  onMediaPress?: (index: number) => void;
 }
 
-export function PostCard({
+const LIKE = '❤️';
+
+function PostCardInner({
   post,
   t,
   onPress,
@@ -83,75 +93,71 @@ export function PostCard({
   onOpenPicker,
   onOpenReactors,
   onOptions,
+  onShare,
+  onToggleSave,
+  onMediaPress,
 }: Props) {
-  const [previewVisible, setPreviewVisible] = useState(false);
   const lastTap = useRef<number>(0);
   const pendingOpen = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [showLikeBurst, setShowLikeBurst] = useState(false);
-  const [isSaved, setIsSaved] = useState<boolean>(false);
-  const reactBtnRef = useRef<View>(null);
+  const [burst, setBurst] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const likeBtnRef = useRef<View>(null);
 
-  // Single tap → open preview (delayed 280ms to see if second tap comes).
-  // Double tap → like + burst (cancels the pending open).
-  const handleImagePress = () => {
+  const media = post.mediaUrls.length > 0 ? post.mediaUrls : post.imageUrl ? [post.imageUrl] : [];
+  const hasText = !!post.text && post.text.trim().length > 0;
+
+  // Single tap → open (delayed 260ms to detect double tap); double → ❤️.
+  const handleMediaPress = (index: number) => {
     const now = Date.now();
-    if (now - lastTap.current < 280) {
+    if (now - lastTap.current < 260) {
       if (pendingOpen.current) {
         clearTimeout(pendingOpen.current);
         pendingOpen.current = null;
       }
+      lastTap.current = 0;
       if (!post.myEmoji) {
         onQuickReact();
-        setShowLikeBurst(true);
-        setTimeout(() => setShowLikeBurst(false), 700);
+        setBurst(true);
+        setTimeout(() => setBurst(false), 700);
       }
-      lastTap.current = 0;
     } else {
       lastTap.current = now;
       pendingOpen.current = setTimeout(() => {
         pendingOpen.current = null;
-        setPreviewVisible(true);
-      }, 280);
+        if (onMediaPress) onMediaPress(index);
+        else onPress();
+      }, 260);
     }
   };
 
-  const handleLongPressReact = () => {
-    if (reactBtnRef.current) {
-      reactBtnRef.current.measureInWindow((x, y, width) => {
-        onOpenPicker(x + width / 2, y);
-      });
+  const handleLongPressLike = () => {
+    if (likeBtnRef.current) {
+      likeBtnRef.current.measureInWindow((x, y, width) => onOpenPicker(x + width / 2, y));
     } else {
       onOpenPicker(0, 0);
     }
   };
 
-  async function handleShare() {
-    await sharePost({
-      id: post.id,
-      content: post.text,
-      authorName: post.author.name,
-      imageUrl: post.imageUrl,
-      likes: post.likes,
-      comments: post.comments,
-      t,
-    });
-  }
+  const reactionTotal = post.emojiReactions.reduce((s, r) => s + r.count, 0);
+  const topEmojis = [...post.emojiReactions].sort((a, b) => b.count - a.count).slice(0, 3);
+  const showSummary = reactionTotal > 0 || post.comments > 0;
 
-  async function handleBookmark() {
-    setIsSaved((v) => !v);
-    try {
-      await usersApi.toggleSave('POST', post.id);
-    } catch {
-      setIsSaved((v) => !v);
-    }
-  }
+  const likeLabel = post.myEmoji
+    ? post.myEmoji === LIKE
+      ? t ? 'Me gusta' : 'Like'
+      : emojiName(post.myEmoji, t)
+    : t ? 'Me gusta' : 'Like';
 
-  const reactionTotal =
-    post.emojiReactions?.reduce((sum, r) => sum + r.count, 0) ?? 0;
+  const statusChip =
+    post.isMine && post.status === 'PENDING_REVIEW' ? (
+      <Badge label={t ? 'En revisión' : 'In review'} variant="warning" size="sm" outline />
+    ) : post.isMine && post.status === 'REJECTED' ? (
+      <Badge label={t ? 'Rechazado' : 'Rejected'} variant="danger" size="sm" outline />
+    ) : null;
 
   return (
-    <View style={styles.post}>
-      {/* Header: avatar + name + time + ••• */}
+    <View style={styles.card}>
+      {/* ── Header ─────────────────────────── */}
       <View style={styles.hdr}>
         <Pressable
           accessibilityRole={Roles.button}
@@ -162,19 +168,28 @@ export function PostCard({
           {post.author.avatarUrl ? (
             <Image source={{ uri: post.author.avatarUrl }} style={styles.avatar} />
           ) : (
-            <View style={[styles.avatar, { backgroundColor: post.author.color }]}>
+            <View style={[styles.avatar, { backgroundColor: post.author.color ?? Colors.bgElevated }]}>
               <Text style={styles.avatarText} allowFontScaling={false}>
-                {post.author.initials}
+                {post.author.initials ?? 'U'}
               </Text>
             </View>
           )}
           <View style={styles.authorInfo}>
-            <Body size="sm" weight="semiBold" numberOfLines={1}>
-              {post.author.name}
-            </Body>
-            <Kicker tone="muted" style={styles.timeKicker}>
-              {post.timeAgo} · {t ? 'PÚBLICO' : 'PUBLIC'}
-            </Kicker>
+            <View style={styles.nameRow}>
+              <Body size="sm" weight="semiBold" numberOfLines={1} style={{ flexShrink: 1 }}>
+                {post.author.name}
+              </Body>
+              {statusChip}
+            </View>
+            <View style={styles.metaRow}>
+              <Caption tone="muted">{post.timeAgo}</Caption>
+              <Caption tone="muted"> · </Caption>
+              <Feather
+                name={post.author.isPrivate ? 'lock' : 'globe'}
+                size={11}
+                color={Colors.textMuted}
+              />
+            </View>
           </View>
         </Pressable>
         <Pressy
@@ -185,248 +200,216 @@ export function PostCard({
           haptic="select"
           style={styles.moreBtn}
         >
-          <Feather name="more-horizontal" size={18} color={Colors.textSecondary} />
+          <Feather name="more-horizontal" size={20} color={Colors.textSecondary} />
         </Pressy>
       </View>
 
-      {/* Text-only post: caption sits in pageGutter, body size */}
-      {post.text && !post.imageUrl ? (
+      {/* ── Rejection reason (own, rejected) ── */}
+      {post.isMine && post.status === 'REJECTED' && post.rejectionReason ? (
+        <View style={styles.rejectBox}>
+          <Caption tone="danger">{post.rejectionReason}</Caption>
+        </View>
+      ) : null}
+
+      {/* ── Content ────────────────────────── */}
+      {hasText ? (
         <Pressable
           accessibilityRole={Roles.button}
           accessibilityLabel={t ? 'Ver publicación' : 'View post'}
           onPress={onPress}
-          style={({ pressed }) => [styles.textOnlyBox, pressed && styles.pressed]}
+          style={({ pressed }) => [styles.contentBox, pressed && styles.pressed]}
         >
-          <Body size="md" tone="primary">
-            {post.text}
-          </Body>
-        </Pressable>
-      ) : null}
-
-      {/* Image with editorial framing */}
-      {post.imageUrl ? (
-        <Pressable
-          accessibilityRole={Roles.imagebutton}
-          accessibilityLabel={t ? 'Foto de la publicación' : 'Post photo'}
-          onPress={handleImagePress}
-          style={styles.imgWrapper}
-        >
-          <Image
-            source={{ uri: post.imageUrl }}
-            style={styles.img}
-            resizeMode="cover"
+          <MentionText
+            content={post.text!}
+            mentions={post.mentions}
+            style={[
+              media.length === 0 && post.text!.length <= 90 ? styles.bigText : styles.text,
+              !expanded && { maxHeight: undefined },
+            ]}
+            numberOfLines={expanded ? undefined : 6}
           />
-          {showLikeBurst && (
-            <View pointerEvents="none" style={styles.likeBurst}>
-              <Heart filled size={96} color={Colors.textPrimary} />
-            </View>
-          )}
+          {!expanded && post.text!.length > 280 ? (
+            <Pressable onPress={() => setExpanded(true)} hitSlop={8}>
+              <Caption tone="secondary" style={{ marginTop: 4 }}>
+                {t ? 'Ver más' : 'See more'}
+              </Caption>
+            </Pressable>
+          ) : null}
         </Pressable>
       ) : null}
 
-      {/* Actions row */}
-      <View style={styles.actionsBar}>
-        <View style={styles.actionsLeft}>
-          <View ref={reactBtnRef} collapsable={false}>
-            <Pressy
-              onPress={onQuickReact}
-              onLongPress={handleLongPressReact}
-              delayLongPress={220}
+      {/* ── Media ──────────────────────────── */}
+      {media.length > 0 ? (
+        <MediaCarousel
+          urls={media}
+          onPress={handleMediaPress}
+          accessibilityLabel={t ? 'Fotos de la publicación' : 'Post photos'}
+          overlay={
+            burst ? (
+              <View style={styles.burst}>
+                <Heart filled size={96} color={Colors.textPrimary} />
+              </View>
+            ) : null
+          }
+          style={styles.media}
+        />
+      ) : null}
+
+      {/* ── Summary row ────────────────────── */}
+      {showSummary ? (
+        <View style={styles.summaryRow}>
+          {reactionTotal > 0 ? (
+            <Pressable
               accessibilityRole={Roles.button}
               accessibilityLabel={
-                post.myEmoji
-                  ? t
-                    ? 'Quitar reacción'
-                    : 'Remove reaction'
-                  : t
-                    ? 'Reaccionar'
-                    : 'React'
+                t ? `Ver ${reactionTotal} reacciones` : `View ${reactionTotal} reactions`
               }
-              accessibilityHint={
-                t ? 'Mantén pulsado para elegir emoji' : 'Long-press to pick emoji'
-              }
-              hitSlop={HitSlop.expand}
-              style={styles.actionBtn}
+              onPress={onOpenReactors}
+              style={({ pressed }) => [styles.summaryLeft, pressed && styles.pressed]}
             >
-              {post.myEmoji ? (
-                <Text style={styles.reactEmoji} allowFontScaling={false}>
-                  {post.myEmoji}
-                </Text>
-              ) : (
-                <Ionicons
-                  name="heart-outline"
-                  size={24}
-                  color={Colors.textPrimary}
-                />
-              )}
-            </Pressy>
-          </View>
+              <View style={[styles.stack, { width: 16 + (topEmojis.length - 1) * 12 }]}>
+                {topEmojis.map((r, i) => (
+                  <View key={r.emoji} style={[styles.bubble, { left: i * 12, zIndex: 3 - i }]}>
+                    <Text style={styles.bubbleText} allowFontScaling={false}>
+                      {r.emoji}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+              <Caption tone="secondary" style={{ marginLeft: 6 }}>
+                {post.myEmoji && reactionTotal === 1
+                  ? t ? 'Tú' : 'You'
+                  : post.myEmoji && reactionTotal > 1
+                    ? t
+                      ? `Tú y ${reactionTotal - 1} más`
+                      : `You and ${reactionTotal - 1} more`
+                    : String(reactionTotal)}
+              </Caption>
+            </Pressable>
+          ) : (
+            <View />
+          )}
+          {post.comments > 0 ? (
+            <Pressable
+              accessibilityRole={Roles.button}
+              accessibilityLabel={t ? 'Ver comentarios' : 'View comments'}
+              onPress={onPress}
+              hitSlop={6}
+            >
+              <Caption tone="secondary">
+                {post.comments}{' '}
+                {post.comments === 1
+                  ? t ? 'comentario' : 'comment'
+                  : t ? 'comentarios' : 'comments'}
+              </Caption>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
+
+      {/* ── Action bar ─────────────────────── */}
+      <View style={styles.actions}>
+        <View ref={likeBtnRef} collapsable={false} style={styles.actionSlot}>
+          <Pressy
+            onPress={onQuickReact}
+            onLongPress={handleLongPressLike}
+            delayLongPress={220}
+            accessibilityRole={Roles.button}
+            accessibilityLabel={
+              post.myEmoji ? (t ? 'Quitar reacción' : 'Remove reaction') : t ? 'Me gusta' : 'Like'
+            }
+            accessibilityHint={t ? 'Mantén pulsado para elegir emoji' : 'Long-press to pick emoji'}
+            hitSlop={HitSlop.expand}
+            style={styles.actionBtn}
+          >
+            {post.myEmoji && post.myEmoji !== LIKE ? (
+              <Text style={styles.actionEmoji} allowFontScaling={false}>
+                {post.myEmoji}
+              </Text>
+            ) : (
+              <Heart filled={!!post.myEmoji} size={20} color={post.myEmoji ? Colors.accentDanger : Colors.textSecondary} />
+            )}
+            <Text
+              style={[styles.actionLbl, post.myEmoji && styles.actionLblActive]}
+              numberOfLines={1}
+            >
+              {likeLabel}
+            </Text>
+          </Pressy>
+        </View>
+        <View style={styles.actionSlot}>
           <Pressy
             onPress={onPress}
             accessibilityRole={Roles.button}
-            accessibilityLabel={t ? 'Ver comentarios' : 'View comments'}
+            accessibilityLabel={t ? 'Comentar' : 'Comment'}
             hitSlop={HitSlop.expand}
             haptic="select"
             style={styles.actionBtn}
           >
-            <Feather
-              name="message-circle"
-              size={22}
-              color={Colors.textPrimary}
-            />
+            <Feather name="message-circle" size={20} color={Colors.textSecondary} />
+            <Text style={styles.actionLbl}>{t ? 'Comentar' : 'Comment'}</Text>
           </Pressy>
+        </View>
+        <View style={styles.actionSlot}>
           <Pressy
-            onPress={handleShare}
+            onPress={onShare}
             accessibilityRole={Roles.button}
             accessibilityLabel={t ? 'Compartir' : 'Share'}
             hitSlop={HitSlop.expand}
             haptic="select"
             style={styles.actionBtn}
           >
-            <Feather name="share-2" size={20} color={Colors.textPrimary} />
+            <Feather name="share-2" size={19} color={Colors.textSecondary} />
+            <Text style={styles.actionLbl}>{t ? 'Compartir' : 'Share'}</Text>
           </Pressy>
         </View>
         <Pressy
-          onPress={handleBookmark}
+          onPress={onToggleSave}
           accessibilityRole={Roles.button}
           accessibilityLabel={
-            isSaved ? (t ? 'Quitar guardado' : 'Unsave') : t ? 'Guardar' : 'Save'
+            post.isSaved ? (t ? 'Quitar de guardados' : 'Unsave') : t ? 'Guardar' : 'Save'
           }
           hitSlop={HitSlop.expand}
           haptic="select"
-          style={styles.actionBtn}
+          style={styles.saveBtn}
         >
           <Feather
             name="bookmark"
-            size={20}
-            color={isSaved ? Colors.accentPrimary : Colors.textPrimary}
+            size={19}
+            color={post.isSaved ? Colors.accentPrimary : Colors.textSecondary}
           />
         </Pressy>
       </View>
-
-      {/* Reactions summary (FB-style stacked emoji) */}
-      {(post.emojiReactions?.length ?? 0) > 0 ? (
-        <Pressable
-          accessibilityRole={Roles.button}
-          accessibilityLabel={
-            t ? `Ver ${reactionTotal} reacciones` : `View ${reactionTotal} reactions`
-          }
-          onPress={onOpenReactors}
-          style={({ pressed }) => [styles.reactionsRow, pressed && styles.pressed]}
-        >
-          <View style={styles.reactionStack}>
-            {post.emojiReactions!.slice(0, 3).map((r, i) => (
-              <View
-                key={r.emoji}
-                style={[
-                  styles.reactionBubble,
-                  { left: i * 14, zIndex: 3 - i },
-                ]}
-              >
-                <Text style={styles.reactionBubbleText} allowFontScaling={false}>
-                  {r.emoji}
-                </Text>
-              </View>
-            ))}
-          </View>
-          <Caption tone="secondary" style={styles.reactionCount}>
-            {reactionTotal}
-          </Caption>
-        </Pressable>
-      ) : (post.likes ?? 0) > 0 ? (
-        <View style={styles.reactionsRow}>
-          <Body size="sm" tone="primary">
-            <Body size="sm" weight="semiBold" tone="primary">
-              {post.likes}
-            </Body>{' '}
-            {post.likes === 1
-              ? t
-                ? 'me gusta'
-                : 'like'
-              : t
-                ? 'me gustan'
-                : 'likes'}
-          </Body>
-        </View>
-      ) : null}
-
-      {/* Caption (image + text) — name bold inline */}
-      {post.text && post.imageUrl ? (
-        <Pressable
-          accessibilityRole={Roles.button}
-          accessibilityLabel={t ? 'Ver publicación' : 'View post'}
-          onPress={onPress}
-          style={({ pressed }) => [styles.captionBox, pressed && styles.pressed]}
-        >
-          <Text
-            style={[TypePresets.body, { color: Colors.textPrimary }]}
-            numberOfLines={2}
-          >
-            <Text style={styles.authorNameInline}>{post.author.name}</Text>{' '}
-            {post.text}
-          </Text>
-        </Pressable>
-      ) : null}
-
-      {/* View all comments */}
-      {(post.comments ?? 0) > 0 ? (
-        <Pressable
-          accessibilityRole={Roles.button}
-          accessibilityLabel={
-            t
-              ? `Ver los ${post.comments} comentarios`
-              : `View all ${post.comments} comments`
-          }
-          onPress={onPress}
-          style={styles.viewCommentsBox}
-        >
-          <Caption tone="muted">
-            {t
-              ? `Ver los ${post.comments} comentarios`
-              : `View all ${post.comments} comments`}
-          </Caption>
-        </Pressable>
-      ) : null}
-
-      {/* Image preview modal */}
-      {post.imageUrl && (
-        <Modal
-          visible={previewVisible}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setPreviewVisible(false)}
-        >
-          <View style={styles.previewBackdrop}>
-            <TouchableOpacity
-              accessibilityRole="button"
-              accessibilityLabel={t ? 'Cerrar' : 'Close'}
-              onPress={() => setPreviewVisible(false)}
-              hitSlop={HitSlop.expand}
-              activeOpacity={0.7}
-              style={styles.previewClose}
-            >
-              <Feather name="x" size={22} color={Colors.textPrimary} />
-            </TouchableOpacity>
-            <Image
-              source={{ uri: post.imageUrl }}
-              style={styles.previewImage}
-              resizeMode="contain"
-            />
-          </View>
-        </Modal>
-      )}
     </View>
   );
 }
 
+export const PostCard = memo(PostCardInner);
+
+// Short ES/EN names for the picker emojis when shown as the active label.
+function emojiName(emoji: string, t: boolean): string {
+  const map: Record<string, [string, string]> = {
+    '❤️': ['Me encanta', 'Love'],
+    '😂': ['Jaja', 'Haha'],
+    '😮': ['Wow', 'Wow'],
+    '😢': ['Triste', 'Sad'],
+    '😡': ['Enojado', 'Angry'],
+    '👍': ['Me gusta', 'Like'],
+    '🔥': ['Fuego', 'Fire'],
+    '🥂': ['Salud', 'Cheers'],
+  };
+  const hit = map[emoji];
+  return hit ? (t ? hit[0] : hit[1]) : emoji;
+}
+
 const styles = StyleSheet.create({
-  post: {
+  card: {
+    backgroundColor: Colors.bgCard,
     paddingTop: Spacing[4],
-    paddingBottom: Spacing[5],
+    paddingBottom: Spacing[2],
   },
   pressed: { opacity: 0.7 },
 
-  // Header
   hdr: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -434,142 +417,87 @@ const styles = StyleSheet.create({
     paddingHorizontal: EditorialSpacing.pageGutter,
     marginBottom: Spacing[3],
   },
-  user: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing[3],
-    flex: 1,
-  },
+  user: { flexDirection: 'row', alignItems: 'center', gap: Spacing[3], flex: 1 },
   avatar: {
-    width: 40,
-    height: 40,
+    width: 42,
+    height: 42,
     borderRadius: Radius.full,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarText: {
-    color: Colors.textInverse,
-    fontSize: 13,
-    fontWeight: '700',
-  },
+  avatarText: { color: Colors.textInverse, fontSize: 14, fontWeight: '700' },
   authorInfo: { flex: 1 },
-  timeKicker: {
-    marginTop: 2,
-    letterSpacing: 1.2,
-  },
-  moreBtn: {
-    width: 32,
-    height: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing[2] },
+  metaRow: { flexDirection: 'row', alignItems: 'center', marginTop: 1 },
+  moreBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
+
+  rejectBox: {
+    marginHorizontal: EditorialSpacing.pageGutter,
+    marginBottom: Spacing[3],
+    padding: Spacing[3],
+    borderRadius: Radius.sm,
+    backgroundColor: 'rgba(196,104,104,0.10)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.accentDanger,
   },
 
-  // Text-only
-  textOnlyBox: {
+  contentBox: {
     paddingHorizontal: EditorialSpacing.pageGutter,
-    paddingVertical: Spacing[2],
+    paddingBottom: Spacing[3],
   },
+  text: { ...TypePresets.body, color: Colors.textPrimary },
+  bigText: { ...TypePresets.bodyLg, color: Colors.textPrimary, lineHeight: 26 },
 
-  // Image
-  imgWrapper: {
-    width: '100%',
-    backgroundColor: Colors.bgElevated,
-    position: 'relative',
-  },
-  img: {
-    width: '100%',
-    aspectRatio: 1,
-  },
-  likeBurst: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  media: { alignSelf: 'stretch' },
+  burst: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
 
-  // Actions bar
-  actionsBar: {
+  summaryRow: {
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: EditorialSpacing.pageGutter - Spacing[2],
-    paddingTop: Spacing[3],
-    paddingBottom: Spacing[1],
-  },
-  actionsLeft: { flexDirection: 'row', gap: Spacing[1] },
-  actionBtn: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  reactEmoji: {
-    fontSize: 22,
-    lineHeight: 26,
-  },
-
-  // Reactions row
-  reactionsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
     paddingHorizontal: EditorialSpacing.pageGutter,
-    paddingTop: Spacing[2],
+    paddingTop: Spacing[3],
+    paddingBottom: Spacing[2],
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.border,
+    marginHorizontal: 0,
   },
-  reactionStack: {
-    flexDirection: 'row',
-    height: 22,
-    minWidth: 22,
-  },
-  reactionBubble: {
+  summaryLeft: { flexDirection: 'row', alignItems: 'center' },
+  stack: { height: 18, position: 'relative' },
+  bubble: {
     position: 'absolute',
-    width: 22,
-    height: 22,
+    width: 18,
+    height: 18,
     borderRadius: Radius.full,
     backgroundColor: Colors.bgElevated,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1.5,
-    borderColor: Colors.bgPrimary,
+    borderColor: Colors.bgCard,
   },
-  reactionBubbleText: {
-    fontSize: 13,
-    lineHeight: 14,
-  },
-  reactionCount: {
-    marginLeft: 28,
-  },
+  bubbleText: { fontSize: 11, lineHeight: 13 },
 
-  // Caption
-  captionBox: {
-    paddingHorizontal: EditorialSpacing.pageGutter,
-    paddingTop: Spacing[2],
+  actions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: Spacing[2],
+    paddingTop: Spacing[1],
   },
-  authorNameInline: {
-    fontFamily: 'Inter_700Bold',
-    color: Colors.textPrimary,
-  },
-  viewCommentsBox: {
-    paddingHorizontal: EditorialSpacing.pageGutter,
-    paddingTop: Spacing[2],
-  },
-
-  // Preview modal
-  previewBackdrop: {
-    flex: 1,
-    backgroundColor: Colors.bgOverlay,
+  actionSlot: { flex: 1 },
+  actionBtn: {
+    height: 42,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 6,
+    borderRadius: Radius.sm,
   },
-  previewClose: {
-    position: 'absolute',
-    top: 52,
-    right: 20,
-    width: 40,
-    height: 40,
-    borderRadius: Radius.full,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 2,
+  actionLbl: {
+    ...TypePresets.bodySm,
+    fontFamily: 'Inter_600SemiBold',
+    color: Colors.textSecondary,
   },
-  previewImage: { width: '100%', height: '80%' },
+  actionLblActive: { color: Colors.accentDanger },
+  actionEmoji: { fontSize: 18, lineHeight: 22 },
+  saveBtn: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center' },
 });

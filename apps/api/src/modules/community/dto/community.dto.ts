@@ -2,16 +2,18 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ReactionType, ReportReason } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   IsArray,
   IsEnum,
   IsNumber,
   IsOptional,
   IsString,
-  IsUrl,
+  Length,
   Max,
   MaxLength,
   Min,
   MinLength,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { PaginationDto } from '../../../common/dto/pagination.dto';
@@ -37,9 +39,28 @@ export enum PostSurface {
   ALL = 'all',
 }
 
+export const MAX_POST_MEDIA = 4;
+
 export class CreatePostDto {
-  @ApiProperty({ maxLength: 2000 }) @IsString() @MinLength(1) @MaxLength(2000) content: string;
+  // Text is required only when the post carries no media (image-only posts
+  // are allowed). When media is present the text, if any, is still capped.
+  @ApiPropertyOptional({ maxLength: 2000 })
+  @ValidateIf((o) => !!o.content || (!o.imageUrl && !(o.mediaUrls?.length)))
+  @IsString()
+  @MinLength(1)
+  @MaxLength(2000)
+  content?: string;
+
   @ApiPropertyOptional() @IsOptional() @IsString() imageUrl?: string;
+
+  @ApiPropertyOptional({ type: [String], description: 'Up to 4 image URLs (first one mirrors imageUrl)' })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_POST_MEDIA)
+  @IsString({ each: true })
+  @MaxLength(2048, { each: true })
+  mediaUrls?: string[];
+
   @ApiPropertyOptional({ enum: [PostSurface.COMMUNITY, PostSurface.WALL], description: 'Publish destination' })
   @IsOptional()
   @IsEnum(PostSurface)
@@ -56,6 +77,27 @@ export class CreatePostDto {
 export class UpdatePostDto {
   @ApiPropertyOptional({ maxLength: 2000 }) @IsOptional() @IsString() @MaxLength(2000) content?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() imageUrl?: string;
+
+  @ApiPropertyOptional({ type: [String], description: 'Replace the media set (max 4)' })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_POST_MEDIA)
+  @IsString({ each: true })
+  @MaxLength(2048, { each: true })
+  mediaUrls?: string[];
+
+  @ApiPropertyOptional({ type: [MentionInputDto], description: 'Replace the mention set' })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => MentionInputDto)
+  mentions?: MentionInputDto[];
+}
+
+// Emoji reactions (posts, comments, stories). One grapheme cluster can span a
+// few UTF-16 code units (e.g. "❤️" = 2), so allow up to 16.
+export class EmojiDto {
+  @ApiProperty({ example: '❤️' }) @IsString() @Length(1, 16) emoji: string;
 }
 
 export class CreateCommentDto {

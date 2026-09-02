@@ -15,7 +15,7 @@ import {
   StyleSheet,
   View,
 } from 'react-native';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 
@@ -45,8 +45,8 @@ interface EventItem {
   startDate?: string;
   imageUrl?: string;
   category?: { name?: string; color?: string } | null;
-  spotsLeft?: number;
-  attendees?: number;
+  maxCapacity?: number | null;
+  currentCapacity?: number;
   badge?: string;
   badgeColor?: string;
   tagLabel?: string;
@@ -62,6 +62,12 @@ export default function Events() {
   const router = useRouter();
   const { language } = useAppStore();
   const t = language === 'es';
+  const params = useLocalSearchParams<{ categoryId?: string; range?: string; startDate?: string; endDate?: string }>();
+  const categoryId = params.categoryId || undefined;
+  const range = params.range || undefined;
+  const filterStartDate = params.startDate || undefined;
+  const filterEndDate = params.endDate || undefined;
+  const hasFilter = !!categoryId || !!filterStartDate || !!filterEndDate;
 
   const [items, setItems] = useState<EventItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -80,7 +86,15 @@ export default function Events() {
       else setError(null);
       const id = ++reqIdRef.current;
       try {
-        const r = await eventsApi.list({ page: nextPage, limit: PAGE_SIZE });
+        const r = await eventsApi.list({
+          page: nextPage,
+          limit: PAGE_SIZE,
+          // Default to "from now" so a past event never leads the list;
+          // an explicit filter range (from the filter screen) overrides it.
+          startDate: filterStartDate || new Date().toISOString(),
+          ...(filterEndDate ? { endDate: filterEndDate } : {}),
+          ...(categoryId ? { categoryId } : {}),
+        });
         if (reqIdRef.current !== id) return;
         const payload = r.data?.data;
         const rows: EventItem[] = payload?.data ?? [];
@@ -100,13 +114,15 @@ export default function Events() {
         }
       }
     },
-    [page, loadingMore, hasMore],
+    [page, loadingMore, hasMore, categoryId, filterStartDate, filterEndDate],
   );
 
   useFocusEffect(
     useCallback(() => {
+      setLoading(true);
       load('fresh');
-    }, []),
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [categoryId, filterStartDate, filterEndDate]),
   );
 
   return (
@@ -117,6 +133,21 @@ export default function Events() {
           <Kicker tone="champagne">{t ? 'AGENDA' : 'AGENDA'}</Kicker>
           <Heading style={styles.title}>{t ? 'Eventos' : 'Events'}</Heading>
         </View>
+        <Pressy
+          onPress={() =>
+            router.push({
+              pathname: '/(app)/events/filter',
+              params: { categoryId: categoryId ?? '', range: range ?? '' },
+            } as never)
+          }
+          hitSlop={HitSlop.expand}
+          accessibilityRole={Roles.button}
+          accessibilityLabel={t ? 'Filtrar eventos' : 'Filter events'}
+          accessibilityState={{ selected: hasFilter }}
+          style={styles.searchBtn}
+        >
+          <Feather name="sliders" size={18} color={hasFilter ? Colors.accentPrimary : Colors.textPrimary} />
+        </Pressy>
         <Pressy
           onPress={() => router.push('/(app)/search' as never)}
           hitSlop={HitSlop.expand}
@@ -241,6 +272,7 @@ function EventCard({
 
   const category = ev.category?.name ?? ev.tagLabel ?? null;
   const venue = ev.venue?.name ?? ev.venueName ?? null;
+  const spotsLeft = ev.maxCapacity != null ? Math.max(0, ev.maxCapacity - (ev.currentCapacity ?? 0)) : null;
 
   const a11yLabel = [
     ev.title || ev.name,
@@ -295,24 +327,24 @@ function EventCard({
           ) : null}
         </View>
 
-        {ev.spotsLeft != null || ev.attendees != null || ev.isFree ? (
+        {spotsLeft != null || ev.currentCapacity != null || ev.isFree ? (
           <View style={styles.footerRow}>
             {ev.isFree ? (
               <Body size="sm" tone="success" weight="semiBold">
                 {t ? 'Entrada libre' : 'Free entry'}
               </Body>
-            ) : ev.spotsLeft != null ? (
+            ) : spotsLeft != null ? (
               <Body size="sm" tone="accent" weight="semiBold">
                 {t
-                  ? `${ev.spotsLeft} plazas libres`
-                  : `${ev.spotsLeft} spots left`}
+                  ? `${spotsLeft} plazas libres`
+                  : `${spotsLeft} spots left`}
               </Body>
             ) : null}
-            {ev.attendees != null ? (
+            {ev.currentCapacity != null ? (
               <Caption tone="muted">
                 {t
-                  ? `${ev.attendees} confirmados`
-                  : `${ev.attendees} confirmed`}
+                  ? `${ev.currentCapacity} confirmados`
+                  : `${ev.currentCapacity} confirmed`}
               </Caption>
             ) : null}
           </View>

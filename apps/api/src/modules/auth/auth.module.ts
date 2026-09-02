@@ -16,7 +16,8 @@ import { OtpModule } from '../otp/otp.module';
       useFactory: (config: ConfigService) => ({
         secret: config.get<string>('jwt.accessSecret'),
         signOptions: {
-          expiresIn: config.get<string>('jwt.accessExpiresIn', '1h'),
+          // jsonwebtoken v9 types `expiresIn` as a StringValue template literal
+          expiresIn: config.get<string>('jwt.accessExpiresIn', '1h') as any,
         },
       }),
       inject: [ConfigService],

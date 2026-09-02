@@ -16,7 +16,6 @@
 // ─────────────────────────────────────────────
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Image,
   KeyboardAvoidingView,
@@ -31,16 +30,19 @@ import {
 import * as Clipboard from 'expo-clipboard';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { Audio } from 'expo-av';
 
-import { messagesApi } from '@/api/client';
+import { friendshipsApi, messagesApi } from '@/api/client';
+import { apiError } from '@/api/errors';
 import { useAuthStore } from '@/stores/auth.store';
 import { useAppStore } from '@/stores/app.store';
+import { useUnreadStore } from '@/stores/unread.store';
 import { Colors, EditorialSpacing, Radius, Spacing, Typography } from '@/constants/tokens';
 import { useThreadSocket } from '@/hooks/useThreadSocket';
+import { useRealtime } from '@/hooks/useRealtime';
 import { useFeedback } from '@/hooks/useFeedback';
 import { uploadImage } from '@/utils/uploadImage';
 import { uploadAudio } from '@/utils/uploadAudio';
@@ -48,6 +50,7 @@ import {
   Body,
   Button,
   Caption,
+  ConfirmDialog,
   FadeIn,
   Kicker,
   Pressy,
@@ -55,6 +58,9 @@ import {
   Skeleton,
   Subhead,
 } from '@/components/ui';
+import { ErrorState } from '@/components/ErrorState';
+import { ReportSheet, type ReportReason } from '@/components/ReportSheet';
+import { toast } from '@/components/Toast';
 import { HitSlop, Roles } from '@/constants/a11y';
 import {
   ChatInputBar,
@@ -63,8 +69,12 @@ import {
   MessageReactionRow,
   StickerPicker,
   TypingBubble,
+  messagePreview,
   type ReactionAggregate,
 } from '@/components/messages';
+
+/** Own messages can be unsent for this long after sending (mirrors API). */
+const DELETE_WINDOW_MS = 15 * 60 * 1000;
 
 const AVATAR_COLORS = ['#C9A961', '#7FA0BC', '#9F8DBE', '#6FA88A', '#C46868', '#C48A8A'];
 function colorFor(id: string) {
@@ -129,13 +139,22 @@ const GIPHY_ENABLED = GIPHY_KEY.length > 0;
 export default function MessageThread() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const { user: me } = useAuthStore();
-  const { language } = useAppStore();
+  const insets = useSafeAreaInsets();
+  const me = useAuthStore((s) => s.user);
+  const language = useAppStore((s) => s.language);
   const t = language === 'es';
 
   const [thread, setThread] = useState<any>(null);
   const [messages, setMessages] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
+  // Message the report refers to (long-press → Reportar); null = whole thread.
+  const [reportMsgId, setReportMsgId] = useState<string | null>(null);
+  const [blockConfirmOpen, setBlockConfirmOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<any>(null);
+  const [requestBusy, setRequestBusy] = useState<'accept' | 'decline' | null>(null);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [composerFocused, setComposerFocused] = useState(false);
@@ -177,6 +196,7 @@ export default function MessageThread() {
 
   // ── Load thread + initial page ───────────────
   const load = useCallback(async () => {
+    setLoadError(null);
     try {
       const [tRes, mRes] = await Promise.all([
         messagesApi.thread(id),
@@ -191,11 +211,37 @@ export default function MessageThread() {
       } else {
         setHasMore(false);
       }
-    } catch {}
-    finally { setLoading(false); }
-  }, [id]);
+    } catch (err: any) {
+      // Thread gone (declined request / not a member) → there's nothing to
+      // retry; tell the user and leave. Anything else → inline ErrorState.
+      if (err?.response?.status === 404) {
+        toast(t ? 'Esta conversación ya no existe' : 'This conversation no longer exists', 'danger');
+        if (router.canGoBack()) router.back();
+        else router.replace('/(app)/messages' as never);
+        return;
+      }
+      setLoadError(apiError(err));
+    } finally { setLoading(false); }
+  }, [id, router, t]);
 
   useEffect(() => { load(); }, [load]);
+
+  // ── Thread lifecycle via /rt ─────────────────
+  // accept / block (updated) and decline (deleted) are emitted to both
+  // participants by the API. Keep the banners honest without a refetch.
+  useRealtime('thread', (env) => {
+    if (env.id !== id) return;
+    if (env.action === 'deleted') {
+      toast(t ? 'La solicitud fue rechazada' : 'The request was declined', 'info');
+      if (router.canGoBack()) router.back();
+      else router.replace('/(app)/messages' as never);
+      return;
+    }
+    if (env.action === 'updated' && env.data && typeof env.data === 'object') {
+      const d = env.data as any;
+      setThread((prev: any) => (prev ? { ...prev, ...(d.status ? { status: d.status } : {}), ...(d.requestedById !== undefined ? { requestedById: d.requestedById } : {}) } : prev));
+    }
+  });
 
   const loadMore = useCallback(async () => {
     if (!cursor || loadingMore || !hasMore) return;
@@ -378,19 +424,19 @@ export default function MessageThread() {
       if (source === 'camera') {
         const perm = await ImagePicker.requestCameraPermissionsAsync();
         if (!perm.granted) {
-          Alert.alert(t ? 'Cámara' : 'Camera', t ? 'Necesitamos permiso para usar la cámara.' : 'We need camera permission.');
+          toast(t ? 'Necesitamos permiso para usar la cámara.' : 'We need camera permission.', 'danger');
           return;
         }
       } else {
         const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (!perm.granted) {
-          Alert.alert(t ? 'Galería' : 'Library', t ? 'Necesitamos permiso para acceder a tus fotos.' : 'We need photo library permission.');
+          toast(t ? 'Necesitamos permiso para acceder a tus fotos.' : 'We need photo library permission.', 'danger');
           return;
         }
       }
       const result = source === 'camera'
-        ? await ImagePicker.launchCameraAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.9 })
-        : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.9 });
+        ? await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.9 })
+        : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.9 });
       if (result.canceled || !result.assets?.[0]?.uri) return;
       setUploadingImage(true);
       const url = await uploadImage(result.assets[0].uri, { kind: 'post' });
@@ -399,7 +445,7 @@ export default function MessageThread() {
       await sendPayload({ imageUrl: url, replyToId: replyId });
     } catch (err: any) {
       fb.error();
-      Alert.alert('Error', err?.message ?? 'Upload failed');
+      toast(apiError(err, t ? 'No pudimos subir la imagen.' : 'Upload failed'), 'danger');
     } finally {
       setUploadingImage(false);
     }
@@ -417,7 +463,7 @@ export default function MessageThread() {
     try {
       const perm = await Audio.requestPermissionsAsync();
       if (!perm.granted) {
-        Alert.alert(t ? 'Micrófono' : 'Microphone', t ? 'Necesitamos permiso para grabar audio.' : 'We need mic permission.');
+        toast(t ? 'Necesitamos permiso para grabar audio.' : 'We need mic permission.', 'danger');
         return;
       }
       await Audio.setAudioModeAsync({
@@ -433,7 +479,7 @@ export default function MessageThread() {
       emitRecording(true);
       recTimerRef.current = setInterval(() => setRecordingDur((d) => d + 1), 1000);
     } catch (err: any) {
-      Alert.alert('Error', err?.message ?? 'Recording failed');
+      toast(apiError(err, t ? 'No pudimos iniciar la grabación.' : 'Recording failed'), 'danger');
     }
   }, [fb, t, emitRecording]);
 
@@ -467,11 +513,11 @@ export default function MessageThread() {
       await sendPayload({ audioUrl: url, audioDurationSec: duration, replyToId: replyId });
     } catch (err: any) {
       fb.error();
-      Alert.alert('Error', err?.message ?? 'Upload failed');
+      toast(apiError(err, t ? 'No pudimos enviar la nota de voz.' : 'Upload failed'), 'danger');
     } finally {
       setUploadingAudio(false);
     }
-  }, [recording, recordingDur, replyTo?.id, sendPayload, fb, emitRecording]);
+  }, [recording, recordingDur, replyTo?.id, sendPayload, fb, emitRecording, t]);
 
   // ── Reactions ────────────────────────────────
   const reactToMessage = useCallback(async (msg: any, emoji: string) => {

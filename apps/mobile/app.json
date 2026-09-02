@@ -16,11 +16,13 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.opalbar.app",
       "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
         "NSCameraUsageDescription": "OPAL BAR necesita acceso a la cámara para escanear códigos QR de reservas/ofertas y para que puedas publicar fotos en la comunidad.",
         "NSPhotoLibraryUsageDescription": "OPAL BAR usa tu galería para subir foto de perfil, historias y publicaciones.",
         "NSPhotoLibraryAddUsageDescription": "OPAL BAR guarda en tu galería las fotos que capturas dentro de la app.",
         "NSLocationWhenInUseUsageDescription": "OPAL BAR usa tu ubicación para mostrarte eventos y ofertas cerca de ti, y para validar tu check-in en reservas.",
-        "NSMicrophoneUsageDescription": "OPAL BAR usa el micrófono al grabar videos para historias."
+        "NSMicrophoneUsageDescription": "OPAL BAR usa el micrófono para que puedas enviar notas de voz en tus mensajes.",
+        "NSFaceIDUsageDescription": "OPAL BAR usa Face ID para desbloquear la app cuando activas el bloqueo biométrico."
       },
       "runtimeVersion": {
         "policy": "appVersion"
@@ -83,6 +85,12 @@
         "expo-notifications",
         {
           "color": "#F4A340"
+        }
+      ],
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "OPAL BAR usa Face ID para desbloquear la app cuando activas el bloqueo biométrico."
         }
       ],
       "@react-native-community/datetimepicker"

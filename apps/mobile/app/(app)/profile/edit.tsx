@@ -10,9 +10,12 @@
 //     Gender (chips), email/phone meta
 //   · Sticky footer with primary Save Button (loading state).
 //   · Replaces Alert.alert for save with toast.
+//   · Clearing a field (bio, birthday, city, occupation, gender, photo)
+//     sends explicit `null` so the backend actually deletes the value.
 // ─────────────────────────────────────────────
 import { useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Image,
   KeyboardAvoidingView,
   Platform,
@@ -80,9 +83,13 @@ export default function EditProfile() {
 
   const [avatarUrl, setAvatarUrl] = useState(user?.profile?.avatarUrl ?? '');
   const [localAvatar, setLocalAvatar] = useState<string | null>(null);
+  // true when the user tapped "Quitar foto" and there was a saved avatar
+  const [avatarRemoved, setAvatarRemoved] = useState(false);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [errors, setErrors] = useState<{ firstName?: string }>({});
+  const [errors, setErrors] = useState<{ firstName?: string; bio?: string; country?: string }>({});
+
+  const BIO_MAX = 500;
 
   const initials =
     ((firstName[0] || '') + (lastName[0] || '')).toUpperCase() ||
@@ -116,64 +123,87 @@ export default function EditProfile() {
       );
       return;
     }
-    setUploading(true);
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'],
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.9,
       });
       if (!result.canceled && result.assets[0]) {
         setLocalAvatar(result.assets[0].uri);
+        setAvatarRemoved(false);
       }
-    } catch {
-      toast(t ? 'No se pudo abrir la galería.' : 'Could not open gallery.', 'danger');
-    } finally {
-      setUploading(false);
+    } catch (err) {
+      toast(
+        apiError(err, t ? 'No se pudo abrir la galería.' : 'Could not open gallery.'),
+        'danger',
+      );
     }
   }
 
+  function removePhoto() {
+    setLocalAvatar(null);
+    if (avatarUrl) setAvatarRemoved(true);
+  }
+
   async function handleSave() {
-    if (!firstName.trim()) {
-      setErrors({ firstName: t ? 'Requerido.' : 'Required.' });
-      return;
+    const nextErrors: typeof errors = {};
+    if (!firstName.trim()) nextErrors.firstName = t ? 'Requerido.' : 'Required.';
+    if (bio.trim().length > BIO_MAX) {
+      nextErrors.bio = t ? `Máximo ${BIO_MAX} caracteres.` : `Max ${BIO_MAX} characters.`;
     }
-    setErrors({});
+    const countryCode = country.trim().toUpperCase();
+    if (countryCode && !/^[A-Z]{2,3}$/.test(countryCode)) {
+      nextErrors.country = t ? 'Usa el código ISO (MX, US…).' : 'Use the ISO code (MX, US…).';
+    }
+    setErrors(nextErrors);
+    if (Object.keys(nextErrors).length) return;
+
     setLoading(true);
     try {
-      let finalAvatarUrl = avatarUrl;
+      let finalAvatarUrl: string | null = avatarRemoved ? null : avatarUrl || null;
       if (localAvatar) {
+        setUploading(true);
         try {
           finalAvatarUrl = await uploadImage(localAvatar, { kind: 'avatar' });
           setAvatarUrl(finalAvatarUrl);
           setLocalAvatar(null);
         } catch (err) {
-          const msg = err instanceof UploadError ? err.message : 'upload failed';
+          const msg =
+            err instanceof UploadError
+              ? err.message
+              : apiError(err, t ? 'error desconocido' : 'unknown error');
           toast(
             t ? `No se pudo subir la foto: ${msg}` : `Could not upload photo: ${msg}`,
             'danger',
           );
-          setLoading(false);
           return;
+        } finally {
+          setUploading(false);
         }
       }
-      const payload: any = {
+
+      // `null` = clear the value on the server; only send what changed vs. the store.
+      const prev = (user?.profile ?? {}) as Record<string, unknown>;
+      const payload: Record<string, unknown> = {
         firstName: firstName.trim(),
         lastName: lastName.trim(),
-        bio: bio.trim(),
+        bio: bio.trim() || null,
+        city: city.trim() || null,
+        occupation: occupation.trim() || null,
+        gender: gender || null,
+        birthDate: birthDate ? birthDate.toISOString() : null,
       };
-      if (finalAvatarUrl) payload.avatarUrl = finalAvatarUrl;
-      if (city.trim()) payload.city = city.trim();
-      if (country.trim()) payload.country = country.trim().toUpperCase();
-      if (occupation.trim()) payload.occupation = occupation.trim();
-      if (gender) payload.gender = gender;
-      if (birthDate) payload.birthDate = birthDate.toISOString();
+      if (countryCode) payload.country = countryCode;
+      const prevAvatar = (prev.avatarUrl as string | null | undefined) ?? null;
+      if (finalAvatarUrl !== prevAvatar) payload.avatarUrl = finalAvatarUrl;
+
       await usersApi.updateProfile(payload);
       await refreshUser();
       toast(t ? 'Perfil actualizado.' : 'Profile updated.', 'success');
       router.back();
-    } catch (err: any) {
+    } catch (err) {
       toast(apiError(err, t ? 'No se pudo guardar.' : 'Could not save.'), 'danger');
     } finally {
       setLoading(false);
@@ -181,7 +211,8 @@ export default function EditProfile() {
   }
 
   const displayAvatar =
-    localAvatar || (avatarUrl && !avatarUrl.startsWith('data:') ? avatarUrl : null);
+    localAvatar ||
+    (!avatarRemoved && avatarUrl && !avatarUrl.startsWith('data:') ? avatarUrl : null);
   const hasAvatar = !!displayAvatar;
 
   return (
@@ -238,12 +269,31 @@ export default function EditProfile() {
                 </View>
               )}
               <View style={styles.cameraBadge}>
-                <Feather name={uploading ? 'loader' : 'camera'} size={14} color={Colors.textInverse} />
+                {uploading ? (
+                  <ActivityIndicator size="small" color={Colors.textInverse} />
+                ) : (
+                  <Feather name="camera" size={14} color={Colors.textInverse} />
+                )}
               </View>
             </Pressy>
             <Caption tone="muted" align="center" style={{ marginTop: Spacing[3] }}>
-              {t ? 'Toca para cambiar' : 'Tap to change'}
+              {uploading
+                ? t ? 'Subiendo foto…' : 'Uploading photo…'
+                : t ? 'Toca para cambiar' : 'Tap to change'}
             </Caption>
+            {hasAvatar && !uploading ? (
+              <Pressy
+                onPress={removePhoto}
+                haptic="select"
+                accessibilityRole={Roles.button}
+                accessibilityLabel={t ? 'Quitar foto' : 'Remove photo'}
+                hitSlop={HitSlop.expand}
+                style={styles.removePhoto}
+              >
+                <Feather name="trash-2" size={13} color={Colors.accentDanger} />
+                <Caption tone="danger">{t ? 'Quitar foto' : 'Remove photo'}</Caption>
+              </Pressy>
+            ) : null}
           </FadeIn>
 
           {/* ── Form ── */}
@@ -277,11 +327,16 @@ export default function EditProfile() {
             <Input
               label={t ? 'BIOGRAFÍA' : 'BIO'}
               value={bio}
-              onChangeText={setBio}
+              onChangeText={(v) => {
+                setBio(v);
+                if (errors.bio) setErrors((e) => ({ ...e, bio: undefined }));
+              }}
               placeholder={t ? 'Cuéntanos sobre ti…' : 'Tell us about yourself…'}
               multiline
               numberOfLines={4}
-              helper={t ? 'Hasta 240 caracteres.' : 'Up to 240 characters.'}
+              maxLength={BIO_MAX}
+              error={errors.bio}
+              helper={`${bio.length}/${BIO_MAX}`}
             />
 
             <View style={styles.twoCol}>
@@ -298,10 +353,15 @@ export default function EditProfile() {
                 <Input
                   label={t ? 'PAÍS' : 'COUNTRY'}
                   value={country}
-                  onChangeText={setCountry}
+                  onChangeText={(v) => {
+                    setCountry(v);
+                    if (errors.country) setErrors((e) => ({ ...e, country: undefined }));
+                  }}
                   placeholder="MX"
                   autoCapitalize="characters"
-                  maxLength={2}
+                  autoCorrect={false}
+                  maxLength={3}
+                  error={errors.country}
                 />
               </View>
             </View>
@@ -397,6 +457,7 @@ export default function EditProfile() {
             variant="primary"
             size="lg"
             loading={loading}
+            disabled={loading || uploading}
             fullWidth
             leftIcon={<Feather name="check" size={16} color={Colors.textInverse} />}
           />
@@ -513,6 +574,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 2,
     borderColor: Colors.bgPrimary,
+  },
+  removePhoto: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing[1],
+    marginTop: Spacing[2],
+    paddingVertical: Spacing[1],
+    paddingHorizontal: Spacing[2],
   },
   form: {
     gap: Spacing[5],

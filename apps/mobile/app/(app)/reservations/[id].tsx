@@ -4,11 +4,11 @@
 //  Kicker (status) + Display (venue), an editorial QR card (kicker +
 //  short code + caption), then a hairline-divided details block.
 //  Secondary actions live below as ghost buttons; danger gets a danger
-//  button.
+//  button. Reloads on focus so a modify/cancel elsewhere is reflected.
 // ─────────────────────────────────────────────
-import { useEffect, useState } from 'react';
-import { Alert, Platform, ScrollView, StyleSheet, View } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useCallback, useState } from 'react';
+import { ScrollView, StyleSheet, View } from 'react-native';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import QRCode from 'react-native-qrcode-svg';
@@ -31,44 +31,68 @@ import { HitSlop, Roles } from '@/constants/a11y';
 import { reservationsApi } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { ConfirmSheet } from '@/components/ConfirmSheet';
+import { ErrorState } from '@/components/ErrorState';
+import { toast } from '@/components/Toast';
+import { useFeedback } from '@/hooks/useFeedback';
 import { useAppStore } from '@/stores/app.store';
+import { formatDateOnly, formatTimeSlot, isPastDateOnly, isPastSlot } from '@/utils/date';
 
 const STATUS_BADGE: Record<string, { variant: 'success' | 'warning' | 'danger' | 'info' | 'default'; es: string; en: string }> = {
   PENDING:   { variant: 'warning', es: 'Pendiente',  en: 'Pending'   },
   CONFIRMED: { variant: 'success', es: 'Confirmada', en: 'Confirmed' },
-  COMPLETED: { variant: 'info',    es: 'Completada', en: 'Completed' },
+  SEATED:    { variant: 'info',    es: 'En mesa',    en: 'Seated'    },
+  COMPLETED: { variant: 'default', es: 'Completada', en: 'Completed' },
   CANCELLED: { variant: 'danger',  es: 'Cancelada',  en: 'Cancelled' },
+  NO_SHOW:   { variant: 'danger',  es: 'No asistió', en: 'No-show'   },
 };
 
 export default function ReservationDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const fb = useFeedback();
   const { language } = useAppStore();
   const t = language === 'es';
 
   const [reservation, setReservation] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [showCancel, setShowCancel] = useState(false);
 
-  useEffect(() => {
-    reservationsApi
-      .get(id)
-      .then((r) => setReservation(r.data?.data))
-      .catch(() => {})
-      .finally(() => setLoading(false));
+  const load = useCallback(async () => {
+    if (!id) return;
+    setError(null);
+    try {
+      const r = await reservationsApi.get(id);
+      setReservation(r.data?.data ?? null);
+    } catch (err) {
+      setError(apiError(err));
+    } finally {
+      setLoading(false);
+    }
   }, [id]);
 
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load]),
+  );
+
   async function confirmCancel() {
+    if (!reservation) return;
+    const previous = reservation;
     setCancelling(true);
+    // Optimistic — flip the badge now, revert if the server refuses.
+    setReservation({ ...previous, status: 'CANCELLED', cancelledAt: new Date().toISOString() });
     try {
       await reservationsApi.cancel(id);
-      setReservation((r: any) =>
-        r ? { ...r, status: 'CANCELLED', cancelledAt: new Date().toISOString() } : r,
-      );
       setShowCancel(false);
-    } catch (err: any) {
-      Alert.alert(t ? 'Error' : 'Error', apiError(err));
+      fb.success();
+      toast(t ? 'Reserva cancelada' : 'Reservation cancelled', 'success');
+    } catch (err) {
+      setReservation(previous);
+      fb.error();
+      toast(apiError(err), 'danger');
     } finally {
       setCancelling(false);
     }
@@ -91,27 +115,39 @@ export default function ReservationDetail() {
     );
   }
 
-  if (!reservation) {
+  if (error || !reservation) {
     return (
-      <SafeAreaView style={[styles.root, styles.center]} edges={['top']}>
-        <Feather name="calendar" size={36} color={Colors.textMuted} />
-        <Body tone="secondary" style={{ marginTop: Spacing[3] }}>
-          {t ? 'Reservación no encontrada' : 'Reservation not found'}
-        </Body>
+      <SafeAreaView style={styles.root} edges={['top']}>
+        <View style={styles.headerRow}>
+          <BackBtn onPress={() => router.back()} label={t ? 'Volver' : 'Back'} />
+        </View>
+        <ErrorState
+          icon={error ? 'alert-circle' : 'calendar'}
+          title={error ? (t ? 'No pudimos cargar tu reserva' : "Couldn't load your reservation") : (t ? 'Reserva no encontrada' : 'Reservation not found')}
+          message={error ?? (t ? 'Puede que haya sido eliminada.' : 'It may have been removed.')}
+          retryLabel={t ? 'Reintentar' : 'Retry'}
+          onRetry={() => { setLoading(true); load(); }}
+        />
       </SafeAreaView>
     );
   }
 
   const status = STATUS_BADGE[reservation.status] ?? STATUS_BADGE.PENDING;
-  const showQr = reservation.status === 'CONFIRMED' || reservation.status === 'PENDING';
-  const dateStr = reservation.date
-    ? new Date(reservation.date).toLocaleDateString(language, {
-        weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
-      })
-    : '—';
-  const canCancel = reservation.status === 'PENDING' || reservation.status === 'CONFIRMED';
+  const pastDate = isPastDateOnly(reservation.date);
+  const isOpen = reservation.status === 'PENDING' || reservation.status === 'CONFIRMED';
+  // QR only matters while staff can still seat the guest.
+  const showQr = isOpen && !pastDate;
+  const dateStr = formatDateOnly(reservation.date, language, { weekday: 'long', month: 'long', year: true }) || '—';
+  const timeStr = formatTimeSlot(reservation.timeSlot, language) || '—';
+  // Backend refuses cancel for SEATED/COMPLETED/NO_SHOW/CANCELLED and past dates.
+  const canCancel = isOpen && !pastDate;
+  // Modify re-validates the slot; pointless once the slot has started.
+  const canModify = isOpen && !isPastSlot(reservation.date, reservation.timeSlot);
   const shortCode = (reservation.confirmCode || '').slice(-8).toUpperCase();
   const venueName = reservation.venue?.name ?? '—';
+  const eventTitle = reservation.event
+    ? (t ? reservation.event.title : reservation.event.titleEn || reservation.event.title)
+    : null;
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
@@ -136,6 +172,15 @@ export default function ReservationDetail() {
             <Feather name="check-circle" size={14} color={Colors.accentSuccess} />
             <Caption tone="success">
               {t ? 'Registrado en el lugar' : 'Checked-in at venue'}
+            </Caption>
+          </FadeIn>
+        ) : null}
+
+        {isOpen && pastDate ? (
+          <FadeIn delay={120} style={styles.seatedRow}>
+            <Feather name="clock" size={14} color={Colors.textMuted} />
+            <Caption tone="muted">
+              {t ? 'La fecha de esta reserva ya pasó.' : 'This reservation date has passed.'}
             </Caption>
           </FadeIn>
         ) : null}
@@ -181,11 +226,17 @@ export default function ReservationDetail() {
         {/* Details ───────────────────────── */}
         <FadeIn delay={260} style={{ marginTop: Spacing[8] }}>
           <Hairline variant="normal" />
-          <DetailRow kicker={t ? 'VENUE' : 'VENUE'} value={venueName} />
+          <DetailRow kicker={t ? 'LUGAR' : 'VENUE'} value={venueName} />
+          {eventTitle ? (
+            <>
+              <Hairline variant="subtle" />
+              <DetailRow kicker={t ? 'EVENTO' : 'EVENT'} value={eventTitle} />
+            </>
+          ) : null}
           <Hairline variant="subtle" />
           <DetailRow kicker={t ? 'FECHA' : 'DATE'} value={dateStr} />
           <Hairline variant="subtle" />
-          <DetailRow kicker={t ? 'HORA' : 'TIME'} value={reservation.timeSlot ?? '—'} />
+          <DetailRow kicker={t ? 'HORA' : 'TIME'} value={timeStr} />
           <Hairline variant="subtle" />
           <DetailRow
             kicker={t ? 'PERSONAS' : 'GUESTS'}
@@ -204,25 +255,29 @@ export default function ReservationDetail() {
         </FadeIn>
 
         {/* Actions ───────────────────────── */}
-        {canCancel ? (
+        {canModify || canCancel ? (
           <FadeIn delay={340} style={{ marginTop: Spacing[6], gap: Spacing[3] }}>
-            <Button
-              label={t ? 'Modificar reserva' : 'Modify reservation'}
-              onPress={() =>
-                router.push(`/(app)/reservations/${reservation.id}/modify` as never)
-              }
-              variant="secondary"
-              size="lg"
-              leftIcon={<Feather name="edit-3" size={16} color={Colors.textPrimary} />}
-            />
-            <Button
-              label={t ? 'Cancelar reservación' : 'Cancel reservation'}
-              onPress={() => setShowCancel(true)}
-              loading={cancelling}
-              variant="danger"
-              size="lg"
-              leftIcon={<Feather name="x-circle" size={16} color={Colors.accentDanger} />}
-            />
+            {canModify ? (
+              <Button
+                label={t ? 'Modificar reserva' : 'Modify reservation'}
+                onPress={() =>
+                  router.push(`/(app)/reservations/${reservation.id}/modify` as never)
+                }
+                variant="secondary"
+                size="lg"
+                leftIcon={<Feather name="edit-3" size={16} color={Colors.textPrimary} />}
+              />
+            ) : null}
+            {canCancel ? (
+              <Button
+                label={t ? 'Cancelar reservación' : 'Cancel reservation'}
+                onPress={() => setShowCancel(true)}
+                loading={cancelling}
+                variant="danger"
+                size="lg"
+                leftIcon={<Feather name="x-circle" size={16} color={Colors.accentDanger} />}
+              />
+            ) : null}
           </FadeIn>
         ) : null}
       </ScrollView>
@@ -273,11 +328,8 @@ function BackBtn({ onPress, label }: { onPress: () => void; label: string }) {
   );
 }
 
-void Platform;
-
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
-  center: { alignItems: 'center', justifyContent: 'center' },
 
   headerRow: {
     paddingHorizontal: EditorialSpacing.pageGutter,

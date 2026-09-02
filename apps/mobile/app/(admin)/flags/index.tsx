@@ -6,6 +6,7 @@ import { Feather } from '@expo/vector-icons';
 import { adminApi } from '@/api/client';
 import { useAuthStore } from '@/stores/auth.store';
 import { apiError } from '@/api/errors';
+import { ConfirmSheet } from '@/components/ConfirmSheet';
 import { Colors, Radius } from '@/constants/tokens';
 
 interface Flag {
@@ -37,6 +38,8 @@ export default function AdminFlags() {
   const [pending, setPending] = useState<Record<string, boolean>>({});
   const [showAdd, setShowAdd] = useState(false);
   const [newKey, setNewKey] = useState('');
+  const [confirmDel, setConfirmDel] = useState<Flag | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -59,6 +62,21 @@ export default function AdminFlags() {
       Alert.alert('Error', apiError(err));
       setFlags((p) => p.map((f) => f.key === flag.key ? { ...f, enabled: !enabled } : f));
     } finally { setPending((p) => ({ ...p, [flag.key]: false })); }
+  }
+
+  async function performDelete() {
+    if (!confirmDel) return;
+    const flag = confirmDel;
+    setConfirmDel(null);
+    setDeleting(true);
+    try {
+      await adminApi.deleteFeatureFlag(flag.key);
+      setFlags((p) => p.filter((f) => f.key !== flag.key));
+    } catch (err) {
+      Alert.alert('Error', apiError(err));
+    } finally {
+      setDeleting(false);
+    }
   }
 
   async function addFlag(key: string) {
@@ -138,13 +156,20 @@ export default function AdminFlags() {
               {pending[item.key] ? (
                 <ActivityIndicator color={Colors.accentPrimary} />
               ) : (
-                <Switch
-                  value={item.enabled}
-                  onValueChange={(v) => toggle(item, v)}
-                  disabled={!canEdit}
-                  trackColor={{ true: Colors.accentPrimary, false: Colors.bgElevated }}
-                  thumbColor={Colors.textInverse}
-                />
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                  {canEdit ? (
+                    <TouchableOpacity onPress={() => setConfirmDel(item)} hitSlop={8}>
+                      <Feather name="trash-2" size={16} color={Colors.accentDanger} />
+                    </TouchableOpacity>
+                  ) : null}
+                  <Switch
+                    value={item.enabled}
+                    onValueChange={(v) => toggle(item, v)}
+                    disabled={!canEdit}
+                    trackColor={{ true: Colors.accentPrimary, false: Colors.bgElevated }}
+                    thumbColor={Colors.textInverse}
+                  />
+                </View>
               )}
             </View>
           )}
@@ -197,6 +222,18 @@ export default function AdminFlags() {
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
+
+      <ConfirmSheet
+        visible={!!confirmDel}
+        onClose={() => setConfirmDel(null)}
+        title="Eliminar flag"
+        message={confirmDel ? `¿Eliminar "${confirmDel.key}" permanentemente? Cualquier lógica en el app que dependa de esta flag volverá a su comportamiento por defecto.` : ''}
+        icon="trash-2"
+        variant="danger"
+        confirmLabel="Eliminar"
+        onConfirm={performDelete}
+        loading={deleting}
+      />
     </SafeAreaView>
   );
 }

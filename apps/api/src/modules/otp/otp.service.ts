@@ -9,6 +9,7 @@ import {
   HttpStatus,
   Injectable,
   Logger,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { OtpType } from '@prisma/client';
@@ -220,6 +221,13 @@ export class OtpService {
     await this.redis.del(RedisService.otpAttemptsKey(dto.identifier, dto.type));
     await this.redis.del(RedisService.otpVerifyFailsKey(dto.identifier, dto.type));
 
+    // PASSWORD_RESET: the code is consumed here, so leave a short-lived
+    // "reset ticket" that /auth/reset-password must present (same code).
+    // Without this, reset-password would accept any otpCode.
+    if (dto.type === OtpType.PASSWORD_RESET) {
+      await this.redis.set(OtpService.resetTicketKey(dto.identifier), dto.code, 10 * 60);
+    }
+
     // If email verification — mark user as verified
     if (dto.type === OtpType.EMAIL_VERIFICATION) {
       await this.prisma.user.updateMany({
@@ -234,6 +242,22 @@ export class OtpService {
     }
 
     this.logger.log(`OTP verified for ${dto.identifier} (type: ${dto.type})`);
+    return true;
+  }
+
+  static resetTicketKey(identifier: string): string {
+    return `otp:reset-ticket:${identifier.toLowerCase()}`;
+  }
+
+  /**
+   * Consume the PASSWORD_RESET ticket left by verifyOtp(). Returns true only
+   * when `code` matches the code that was actually verified.
+   */
+  async consumeResetTicket(identifier: string, code: string): Promise<boolean> {
+    const key = OtpService.resetTicketKey(identifier);
+    const stored = await this.redis.get(key);
+    if (!stored || stored !== code) return false;
+    await this.redis.del(key);
     return true;
   }
 
@@ -267,7 +291,12 @@ export class OtpService {
       this.logger.error(`[OTP] Failed to send to ${this.maskEmail(email)}: ${error?.message ?? error}`);
       if (process.env.NODE_ENV !== 'production') {
         this.logger.warn(`[DEV] Fallback — OTP for ${email}: ${code}`);
+        return;
       }
+      // Never report "code sent" when nothing went out.
+      throw new ServiceUnavailableException(
+        'No pudimos enviar el código. Intenta de nuevo en unos minutos.',
+      );
     }
   }
 

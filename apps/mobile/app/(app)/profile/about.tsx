@@ -12,7 +12,9 @@ import { ActivityIndicator, Linking, ScrollView, StyleSheet, View } from 'react-
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+import Constants from 'expo-constants';
 
+import { LEGAL_URLS, openLegal } from '@/lib/legal';
 import { useAppStore } from '@/stores/app.store';
 import { Colors, EditorialSpacing, Spacing } from '@/constants/tokens';
 import { HitSlop, Roles } from '@/constants/a11y';
@@ -29,12 +31,12 @@ import {
 } from '@/components/ui';
 import { checkForUpdateManual } from '@/components/UpdateOverlay';
 import { toast } from '@/components/Toast';
-import { OPALBAR_WEBSITE, OpalbarRoutes, openOpalbarWebsite } from '@/lib/website';
+import { OpalbarRoutes } from '@/lib/website';
 
-const LEGAL_URLS = {
-  terms: `${OPALBAR_WEBSITE}/terminos`,
-  privacy: `${OPALBAR_WEBSITE}/privacidad`,
-};
+const APP_VERSION = Constants.expoConfig?.version ?? '1.0.0';
+const BUILD_NUMBER =
+  Constants.expoConfig?.ios?.buildNumber ??
+  String(Constants.expoConfig?.android?.versionCode ?? '');
 
 export default function About() {
   const router = useRouter();
@@ -53,16 +55,6 @@ export default function About() {
       toast(t ? 'No se pudo comprobar. Intenta de nuevo.' : 'Check failed. Try again.', 'danger');
     }
     // 'downloading' → UpdateOverlay takes over and auto-reloads.
-  }
-
-  async function openLegal(url: string) {
-    try {
-      const can = await Linking.canOpenURL(url);
-      if (!can) throw new Error('cannot open');
-      await Linking.openURL(url);
-    } catch {
-      toast(t ? 'No se pudo abrir. Intenta más tarde.' : 'Could not open. Try again later.', 'danger');
-    }
   }
 
   return (
@@ -90,7 +82,8 @@ export default function About() {
             OPALBAR
           </Display>
           <Caption tone="muted" align="center" style={{ marginTop: Spacing[3] }}>
-            {t ? 'VERSIÓN' : 'VERSION'} 1.0.0 · BUILD 2026-04
+            {t ? 'VERSIÓN' : 'VERSION'} {APP_VERSION}
+            {BUILD_NUMBER ? ` · BUILD ${BUILD_NUMBER}` : ''}
           </Caption>
         </FadeIn>
 
@@ -163,6 +156,14 @@ export default function About() {
               onPress={() => openLegal(LEGAL_URLS.privacy)}
               showChevron
             />
+            <ListItem.Separator />
+            <ListItem
+              title={t ? 'Eliminar mi cuenta' : 'Delete my account'}
+              subtitle={t ? 'Cómo borrar tu cuenta y tus datos.' : 'How to delete your account and data.'}
+              leftIcon={<Feather name="user-x" size={18} color={Colors.textSecondary} />}
+              onPress={() => openLegal(LEGAL_URLS.accountDeletion)}
+              showChevron
+            />
           </View>
         </FadeIn>
 
@@ -172,7 +173,8 @@ export default function About() {
             {t ? 'Hecho con cuidado.' : 'Made with care.'}
           </Heading>
           <Caption tone="muted" align="center" style={{ marginTop: Spacing[3] }}>
-            © 2025 OpalBar. {t ? 'Todos los derechos reservados.' : 'All rights reserved.'}
+            © {new Date().getFullYear()} OpalBar.{' '}
+            {t ? 'Todos los derechos reservados.' : 'All rights reserved.'}
           </Caption>
         </FadeIn>
       </ScrollView>

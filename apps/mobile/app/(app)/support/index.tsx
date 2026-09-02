@@ -4,13 +4,14 @@
 //  Magazine layout for support hub:
 //   · Header: back + Kicker "AYUDA" + Heading "Soporte"
 //   · Hero block: Display headline + Lead subtitle
-//   · CTA row: primary "Chat" + secondary "Abrir ticket"
-//   · FAQ section: Kicker overline + ListItem rows (chevron)
-//   · Tickets section: Kicker + Card list with status Badge
+//   · CTA row: "Continuar conversación" (first non-terminal ticket) or
+//     "Abrir ticket" (new)
+//   · FAQ section: Kicker overline + expandable accordion rows
+//   · Tickets section: Kicker + Card list with real status Badge
 // ─────────────────────────────────────────────
-import { ScrollView, StyleSheet, View } from 'react-native';
-import { useEffect, useState } from 'react';
-import { useRouter } from 'expo-router';
+import { LayoutAnimation, Platform, ScrollView, StyleSheet, UIManager, View } from 'react-native';
+import { useCallback, useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 
@@ -30,13 +31,20 @@ import {
   Heading,
   Kicker,
   Lead,
-  ListItem,
   Pressy,
   SkeletonList,
 } from '@/components/ui';
 import { ErrorState } from '@/components/ErrorState';
 
-type StatusKey = 'OPEN' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED';
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
+// Terminal statuses no longer accept user messages (mirrors TERMINAL_STATUSES
+// in apps/api support.service.ts).
+const TERMINAL_STATUSES = new Set(['RESOLVED', 'CLOSED']);
+
+type StatusKey = 'OPEN' | 'IN_REVIEW' | 'WAITING_USER' | 'RESOLVED' | 'CLOSED';
 type BadgeVariant = 'default' | 'warning' | 'success' | 'danger' | 'info' | 'champagne' | 'accent';
 
 const STATUS: Record<
@@ -44,25 +52,54 @@ const STATUS: Record<
   { variant: BadgeVariant; label: { es: string; en: string } }
 > = {
   OPEN: { variant: 'warning', label: { es: 'Abierto', en: 'Open' } },
-  IN_PROGRESS: { variant: 'info', label: { es: 'En curso', en: 'In progress' } },
+  IN_REVIEW: { variant: 'info', label: { es: 'En revisión', en: 'In review' } },
+  WAITING_USER: { variant: 'champagne', label: { es: 'Esperando tu respuesta', en: 'Waiting on you' } },
   RESOLVED: { variant: 'success', label: { es: 'Resuelto', en: 'Resolved' } },
   CLOSED: { variant: 'default', label: { es: 'Cerrado', en: 'Closed' } },
 };
 
-const FAQ = {
-  es: [
-    '¿Cómo hago una reservación?',
-    '¿Cómo canjeo mis puntos?',
-    '¿Cómo cambio mi contraseña?',
-    'Reportar un problema técnico',
-  ],
-  en: [
-    'How do I make a reservation?',
-    'How do I redeem my points?',
-    'How do I change my password?',
-    'Report a technical issue',
-  ],
-};
+const FAQ: { id: string; q: { es: string; en: string }; a: { es: string; en: string } }[] = [
+  {
+    id: 'reservations',
+    q: { es: '¿Cómo hago o cambio una reservación?', en: 'How do I make or change a reservation?' },
+    a: {
+      es: 'Ve a la pestaña Reservar, elige sucursal, fecha y hora disponibles. Para modificar o cancelar una reservación existente, ábrela desde "Mis reservaciones" en tu perfil.',
+      en: 'Go to the Reserve tab, pick a venue, date and an available time. To change or cancel an existing reservation, open it from "My reservations" in your profile.',
+    },
+  },
+  {
+    id: 'loyalty',
+    q: { es: '¿Cómo gano y canjeo mis puntos?', en: 'How do I earn and redeem points?' },
+    a: {
+      es: 'Ganas puntos con cada visita registrada en el bar. Consulta tu saldo, nivel y movimientos en Perfil → Cartera.',
+      en: 'You earn points on every visit registered at the bar. Check your balance, level and history in Profile → Wallet.',
+    },
+  },
+  {
+    id: 'offers',
+    q: { es: '¿Cómo canjeo una oferta?', en: 'How do I redeem an offer?' },
+    a: {
+      es: 'Abre la oferta desde la pestaña Ofertas y toca Canjear. Se genera un código que el staff valida en tu visita.',
+      en: 'Open the offer from the Offers tab and tap Redeem. A code is generated for staff to validate on your visit.',
+    },
+  },
+  {
+    id: 'account',
+    q: { es: '¿Cómo administro mi cuenta y privacidad?', en: 'How do I manage my account and privacy?' },
+    a: {
+      es: 'Ve a Perfil → Editar perfil para tus datos, o Perfil → Privacidad para controlar quién puede ver tu actividad y solicitar tus datos.',
+      en: 'Go to Profile → Edit profile for your details, or Profile → Privacy to control who can see your activity and request your data.',
+    },
+  },
+  {
+    id: 'contact',
+    q: { es: '¿Cómo contacto a OPALBAR directamente?', en: 'How do I reach OPALBAR directly?' },
+    a: {
+      es: 'Abre un ticket aquí mismo con los detalles de tu caso. Te respondemos en menos de 24 horas y podrás seguir la conversación en esta sección.',
+      en: 'Open a ticket right here with your case details. We reply within 24 hours and you can follow the conversation in this section.',
+    },
+  },
+];
 
 interface TicketRecord {
   id: string;
@@ -80,27 +117,33 @@ export default function Support() {
   const [tickets, setTickets] = useState<TicketRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [openFaq, setOpenFaq] = useState<string | null>(null);
 
-  const load = () => {
+  const load = useCallback(() => {
     setError(null);
     supportApi
       .myTickets()
       .then((r) => setTickets(r.data?.data?.data ?? r.data?.data ?? []))
       .catch((err) => setError(apiError(err)))
       .finally(() => setLoading(false));
-  };
-
-  useEffect(() => {
-    load();
   }, []);
 
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load]),
+  );
+
   const openTicket = () => router.push('/(app)/support/new-ticket' as never);
-  const openLiveChat = () => {
-    if (tickets.length > 0) {
-      router.push(`/(app)/support/chat/${tickets[0].id}` as never);
-      return;
-    }
-    openTicket();
+  // The first ticket the user can still act on — anything not RESOLVED/CLOSED.
+  const activeTicket = tickets.find((tk) => !TERMINAL_STATUSES.has(tk.status || ''));
+  const continueOrOpen = () => {
+    if (activeTicket) router.push(`/(app)/support/chat/${activeTicket.id}` as never);
+    else openTicket();
+  };
+  const toggleFaq = (id: string) => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setOpenFaq((prev) => (prev === id ? null : id));
   };
 
   return (
@@ -153,8 +196,8 @@ export default function Support() {
             </Heading>
             <Lead style={{ marginTop: Spacing[3] }}>
               {t
-                ? 'Respondemos en menos de 24 horas. Si es urgente, abre un chat.'
-                : 'We reply within 24 hours. If it is urgent, open a chat.'}
+                ? 'Respondemos en menos de 24 horas.'
+                : 'We reply within 24 hours.'}
             </Lead>
           </FadeIn>
 
@@ -162,22 +205,24 @@ export default function Support() {
           <FadeIn delay={120} style={styles.ctaRow}>
             <View style={{ flex: 1 }}>
               <Button
-                label={t ? 'Chat en vivo' : 'Live chat'}
-                onPress={openLiveChat}
+                label={activeTicket ? (t ? 'Continuar conversación' : 'Continue conversation') : (t ? 'Abrir ticket' : 'Open ticket')}
+                onPress={continueOrOpen}
                 variant="primary"
                 size="md"
                 leftIcon={<Feather name="message-circle" size={16} color={Colors.textInverse} />}
               />
             </View>
-            <View style={{ flex: 1 }}>
-              <Button
-                label={t ? 'Abrir ticket' : 'Open ticket'}
-                onPress={openTicket}
-                variant="secondary"
-                size="md"
-                leftIcon={<Feather name="edit-3" size={16} color={Colors.textPrimary} />}
-              />
-            </View>
+            {activeTicket ? (
+              <View style={{ flex: 1 }}>
+                <Button
+                  label={t ? 'Nuevo ticket' : 'New ticket'}
+                  onPress={openTicket}
+                  variant="secondary"
+                  size="md"
+                  leftIcon={<Feather name="edit-3" size={16} color={Colors.textPrimary} />}
+                />
+              </View>
+            ) : null}
           </FadeIn>
 
           {/* ── FAQ ──────────────────────────── */}
@@ -187,14 +232,40 @@ export default function Support() {
               {t ? 'Antes de escribirnos' : 'Before reaching out'}
             </Heading>
             <View style={styles.listShell}>
-              {(t ? FAQ.es : FAQ.en).map((q, idx, arr) => (
-                <View key={q}>
-                  <ListItem title={q} onPress={openTicket} showChevron />
-                  {idx < arr.length - 1 ? (
-                    <Hairline variant="subtle" marginHorizontal={Spacing[5]} />
-                  ) : null}
-                </View>
-              ))}
+              {FAQ.map((item, idx, arr) => {
+                const expanded = openFaq === item.id;
+                return (
+                  <View key={item.id}>
+                    <Pressy
+                      onPress={() => toggleFaq(item.id)}
+                      accessibilityRole={Roles.button}
+                      accessibilityLabel={t ? item.q.es : item.q.en}
+                      accessibilityState={{ expanded }}
+                      haptic="select"
+                      style={styles.faqRow}
+                    >
+                      <Body weight="semiBold" style={{ flex: 1 }}>
+                        {t ? item.q.es : item.q.en}
+                      </Body>
+                      <Feather
+                        name={expanded ? 'chevron-up' : 'chevron-down'}
+                        size={18}
+                        color={Colors.textMuted}
+                      />
+                    </Pressy>
+                    {expanded ? (
+                      <View style={styles.faqAnswer}>
+                        <Body size="sm" tone="secondary">
+                          {t ? item.a.es : item.a.en}
+                        </Body>
+                      </View>
+                    ) : null}
+                    {idx < arr.length - 1 ? (
+                      <Hairline variant="subtle" marginHorizontal={Spacing[5]} />
+                    ) : null}
+                  </View>
+                );
+              })}
             </View>
           </FadeIn>
 
@@ -314,5 +385,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing[3],
+  },
+
+  faqRow: {
+    minHeight: 56,
+    paddingHorizontal: Spacing[5],
+    paddingVertical: Spacing[4],
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing[3],
+  },
+  faqAnswer: {
+    paddingHorizontal: Spacing[5],
+    paddingBottom: Spacing[4],
   },
 });

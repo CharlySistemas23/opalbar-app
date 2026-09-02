@@ -1,22 +1,28 @@
 // ─────────────────────────────────────────────
-//  New Reservation — 4-step Wizard (OpenTable Premium feel)
+//  New Reservation — 3-step Wizard (OpenTable Premium feel)
 //
-//  Brief usuario: NO formulario plano. Wizard secuencial.
-//    Step 1 — Fecha (horizontal scroll de días)
-//    Step 2 — Hora  (grid de slots)
-//    Step 3 — Mesa  (visual: zona + asientos alrededor de la mesa)
-//    Step 4 — Confirmación (resumen + CTA)
+//  Step 1 — Fecha (horizontal scroll of venue-local days)
+//  Step 2 — Hora  (grid of REAL slots from the availability endpoint —
+//                  full/past/blocked slots render disabled with a reason)
+//  Step 3 — Invitados + notas + resumen + confirm CTA
 //
-//  Reduce abandono: una decisión por pantalla, progreso visible.
-//  Logic preservada: eventsApi/venueApi/reservationsApi calls intactas.
+//  There used to be a "Zona" step (Barra/Lounge/Terraza/Privado) that
+//  doesn't exist anywhere in the backend — it was being smuggled into
+//  `specialRequests` as free text ("Zona: Lounge · <notes>"), which read
+//  back to the guest as if it were a real seating choice. Removed.
+//
+//  Dates are handled as `'YYYY-MM-DD'` strings (Mexico-local calendar
+//  days) end to end — never a bare `Date` object — so nothing shifts a
+//  day when the device's timezone isn't Mexico City.
 // ─────────────────────────────────────────────
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
   StyleSheet,
+  Text,
   TextInput,
   View,
 } from 'react-native';
@@ -34,73 +40,59 @@ import {
   Heading,
   Kicker,
   Pressy,
-  Subhead,
+  Skeleton,
 } from '@/components/ui';
 import { Colors, EditorialSpacing, Radius, Spacing, TypePresets } from '@/constants/tokens';
 import { HitSlop, Roles } from '@/constants/a11y';
-import { eventsApi, reservationsApi, venueApi } from '@/api/client';
+import { eventsApi, reservationsApi, venueApi, type AvailabilitySlot } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { useAppStore } from '@/stores/app.store';
 import { useFeedback } from '@/hooks/useFeedback';
 import { useAuthStore } from '@/stores/auth.store';
 import { resolveTier } from '@/constants/tiers';
-import { Text } from 'react-native';
+import { EmptyState } from '@/components/EmptyState';
+import { ErrorState } from '@/components/ErrorState';
+import {
+  formatDateOnly,
+  formatTimeSlot,
+  nextDaysMx,
+  nowTimeMx,
+  parseDateOnly,
+  todayMx,
+  toMinutes,
+} from '@/utils/date';
 
-const DEFAULT_TIME_SLOTS = [
-  '18:00', '18:30', '19:00', '19:30', '20:00', '20:30',
-  '21:00', '21:30', '22:00', '22:30', '23:00',
-];
+const MIN_PARTY = 1;
+const MAX_PARTY_CAP = 12;
+const NOTES_MAX_LENGTH = 480;
 
-const ZONES: Array<{ key: string; labelEs: string; labelEn: string; capacity: number[] }> = [
-  { key: 'bar', labelEs: 'Barra', labelEn: 'Bar', capacity: [1, 2] },
-  { key: 'lounge', labelEs: 'Lounge', labelEn: 'Lounge', capacity: [2, 4, 6] },
-  { key: 'terrace', labelEs: 'Terraza', labelEn: 'Terrace', capacity: [2, 4, 6, 8] },
-  { key: 'private', labelEs: 'Privado', labelEn: 'Private', capacity: [6, 8, 10] },
-];
-
-function buildSlotsFromVenue(venue: {
-  openTime?: string | null;
-  closeTime?: string | null;
-  slotMinutes?: number | null;
-}): string[] {
-  const open = venue.openTime;
-  const close = venue.closeTime;
-  const step = venue.slotMinutes ?? 30;
-  if (!open || !close || !step) return DEFAULT_TIME_SLOTS;
-  const toMin = (s: string) => {
-    const [h, m] = s.split(':').map(Number);
-    return h * 60 + (m || 0);
-  };
-  const fromMin = (m: number) => {
-    const h = Math.floor(m / 60) % 24;
-    const mm = m % 60;
-    return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
-  };
-  let start = toMin(open);
-  let end = toMin(close);
-  if (end <= start) end += 24 * 60;
-  const out: string[] = [];
-  for (let t = start; t <= end - step; t += step) out.push(fromMin(t));
-  return out.length > 0 ? out : DEFAULT_TIME_SLOTS;
-}
-
-function formatDateISO(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
-
-function nextDays(count = 14): Date[] {
-  const result: Date[] = [];
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  for (let i = 0; i < count; i++) {
-    const d = new Date(today);
-    d.setDate(today.getDate() + i);
-    result.push(d);
+function pickNearestAvailableSlot(slots: AvailabilitySlot[], hhmm: string): AvailabilitySlot | undefined {
+  const target = toMinutes(hhmm);
+  if (target == null) return undefined;
+  let best: AvailabilitySlot | undefined;
+  let bestDiff = Infinity;
+  for (const s of slots) {
+    if (!s.available) continue;
+    const m = toMinutes(s.time);
+    if (m == null) continue;
+    const diff = Math.abs(m - target);
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      best = s;
+    }
   }
-  return result;
+  return best;
+}
+
+interface AvailabilityPayload {
+  date: string;
+  today: string;
+  reservationsEnabled: boolean;
+  openTime: string | null;
+  closeTime: string | null;
+  slotMinutes: number;
+  capacity: number;
+  slots: AvailabilitySlot[];
 }
 
 export default function NewReservation() {
@@ -114,65 +106,117 @@ export default function NewReservation() {
   const insets = useSafeAreaInsets();
   const tier = resolveTier(user?.profile?.loyaltyLevel?.name);
 
-  const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
+  const [step, setStep] = useState<1 | 2 | 3>(1);
   const [venueId, setVenueId] = useState<string | null>(venueIdParam || null);
   const [venueName, setVenueName] = useState<string>('OPALBAR');
-  const [dateObj, setDateObj] = useState<Date>(() => {
-    const d = new Date();
-    d.setHours(0, 0, 0, 0);
-    return d;
-  });
+  const [dateStr, setDateStr] = useState<string>(() => todayMx());
   const [timeSlot, setTimeSlot] = useState<string>('');
-  const [zone, setZone] = useState<typeof ZONES[number]>(ZONES[1]);
   const [partySize, setPartySize] = useState<number>(2);
   const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(false);
-  const [timeSlots, setTimeSlots] = useState<string[]>(DEFAULT_TIME_SLOTS);
   const [party, setParty] = useState(false);
 
+  const [availability, setAvailability] = useState<AvailabilityPayload | null>(null);
+  const [availabilityLoading, setAvailabilityLoading] = useState(true);
+  const [availabilityError, setAvailabilityError] = useState<string | null>(null);
+
+  // Set once from the event's start time (Mexico-local), consumed the first
+  // time availability for that day loads so we can snap to a real slot.
+  const pendingEventTimeRef = useRef<string | null>(null);
+
+  // ── Resolve the venue (from an event, an explicit venueId, or the first
+  //    active venue) — runs once per route params, not on every render. ──
   useEffect(() => {
     if (eventIdParam) {
-      eventsApi.get(eventIdParam).then((r) => {
-        const ev = r.data?.data;
-        if (!ev) return;
-        if (ev.venue?.id) {
-          setVenueId(ev.venue.id);
-          setVenueName(ev.venue.name || 'OPALBAR');
-        }
-        if (ev.startDate) {
-          const d = new Date(ev.startDate);
-          d.setHours(0, 0, 0, 0);
-          setDateObj(d);
-          const hh = String(new Date(ev.startDate).getHours()).padStart(2, '0');
-          const mm = String(new Date(ev.startDate).getMinutes()).padStart(2, '0');
-          setTimeSlot(`${hh}:${mm}`);
-        }
-      }).catch(() => {});
+      eventsApi
+        .get(eventIdParam)
+        .then((r) => {
+          const ev = r.data?.data;
+          if (!ev) return;
+          if (ev.venue?.id) {
+            setVenueId(ev.venue.id);
+            setVenueName(ev.venue.name || 'OPALBAR');
+          }
+          if (ev.startDate) {
+            const evDate = new Date(ev.startDate);
+            // Mexico-local calendar day + wall-clock time of the event —
+            // never the device's own timezone reading of the UTC instant.
+            pendingEventTimeRef.current = nowTimeMx(evDate);
+            setDateStr(todayMx(evDate));
+          }
+        })
+        .catch(() => {});
       return;
     }
-    if (!venueId) {
-      venueApi.list({}).then((r) => {
+    if (venueIdParam) {
+      venueApi
+        .get(venueIdParam)
+        .then((r) => {
+          const v = r.data?.data;
+          if (v?.name) setVenueName(v.name);
+        })
+        .catch(() => {});
+      return;
+    }
+    venueApi
+      .list({ limit: 1 })
+      .then((r) => {
         const first = r.data?.data?.data?.[0] ?? r.data?.data?.[0];
         if (first) {
           setVenueId(first.id);
           setVenueName(first.name || 'OPALBAR');
-          setTimeSlots(buildSlotsFromVenue(first));
         }
-      }).catch(() => {});
-    } else {
-      venueApi.get(venueId).then((r) => {
-        const v = r.data?.data;
-        if (v?.name) setVenueName(v.name);
-        if (v) setTimeSlots(buildSlotsFromVenue(v));
-      }).catch(() => {});
-    }
-  }, [venueId, eventIdParam]);
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eventIdParam, venueIdParam]);
+
+  const loadAvailability = () => {
+    if (!venueId) return;
+    setAvailabilityLoading(true);
+    setAvailabilityError(null);
+    reservationsApi
+      .availability(venueId, dateStr)
+      .then((r) => {
+        const data: AvailabilityPayload | undefined = r.data?.data;
+        setAvailability(data ?? null);
+        const slots = data?.slots ?? [];
+        if (pendingEventTimeRef.current) {
+          const hint = pendingEventTimeRef.current;
+          pendingEventTimeRef.current = null;
+          const exact = slots.find((s) => s.time === hint && s.available);
+          const nearest = exact ?? pickNearestAvailableSlot(slots, hint);
+          if (nearest) setTimeSlot(nearest.time);
+        } else {
+          // Keep the current pick only if it's still on offer for this date.
+          setTimeSlot((prev) => {
+            if (!prev) return prev;
+            const stillOk = slots.find((s) => s.time === prev && s.available);
+            return stillOk ? prev : '';
+          });
+        }
+      })
+      .catch((err) => setAvailabilityError(apiError(err)))
+      .finally(() => setAvailabilityLoading(false));
+  };
+
+  useEffect(() => {
+    loadAvailability();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [venueId, dateStr]);
+
+  // Clamp party size to the chosen slot's remaining capacity (never below 1).
+  const selectedSlot = availability?.slots.find((s) => s.time === timeSlot);
+  const maxParty = selectedSlot ? Math.max(MIN_PARTY, Math.min(MAX_PARTY_CAP, selectedSlot.remaining)) : MAX_PARTY_CAP;
+  useEffect(() => {
+    setPartySize((prev) => Math.min(prev, maxParty));
+  }, [maxParty]);
 
   async function handleSubmit() {
     let vid = venueId;
     if (!vid) {
       try {
-        const r = await venueApi.list({});
+        const r = await venueApi.list({ limit: 1 });
         const first = r.data?.data?.data?.[0] ?? r.data?.data?.[0];
         if (first?.id) { vid = first.id; setVenueId(first.id); }
       } catch {}
@@ -190,13 +234,10 @@ export default function NewReservation() {
       await reservationsApi.create({
         venueId: vid,
         eventId: eventIdParam || undefined,
-        date: formatDateISO(dateObj),
+        date: dateStr,
         timeSlot,
         partySize,
-        specialRequests:
-          [zone.key !== 'lounge' ? `Zona: ${t ? zone.labelEs : zone.labelEn}` : null, notes.trim() || null]
-            .filter(Boolean)
-            .join(' · ') || undefined,
+        specialRequests: notes.trim() || undefined,
       });
       fb.success();
       setParty(true);
@@ -216,17 +257,15 @@ export default function NewReservation() {
   }
 
   const canContinue = useMemo(() => {
-    if (step === 1) return !!dateObj;
-    if (step === 2) return !!timeSlot;
-    if (step === 3) return !!zone && partySize > 0;
-    return true;
-  }, [step, dateObj, timeSlot, zone, partySize]);
+    if (step === 1) return !!dateStr;
+    if (step === 2) return !!timeSlot && !!availability?.reservationsEnabled;
+    return partySize >= MIN_PARTY;
+  }, [step, dateStr, timeSlot, availability, partySize]);
 
-  const stepLabels: Record<1 | 2 | 3 | 4, { es: string; en: string }> = {
+  const stepLabels: Record<1 | 2 | 3, { es: string; en: string }> = {
     1: { es: 'FECHA', en: 'DATE' },
     2: { es: 'HORA', en: 'TIME' },
-    3: { es: 'MESA', en: 'TABLE' },
-    4: { es: 'CONFIRMAR', en: 'CONFIRM' },
+    3: { es: 'CONFIRMAR', en: 'CONFIRM' },
   };
 
   return (
@@ -238,7 +277,7 @@ export default function NewReservation() {
         {/* Header with back + progress */}
         <View style={styles.header}>
           <Pressy
-            onPress={() => (step > 1 ? setStep((s) => (s - 1) as 1 | 2 | 3) : router.back())}
+            onPress={() => (step > 1 ? setStep((s) => (s - 1) as 1 | 2) : router.back())}
             haptic="select"
             accessibilityRole={Roles.button}
             accessibilityLabel={t ? 'Atrás' : 'Back'}
@@ -248,7 +287,7 @@ export default function NewReservation() {
             <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
           </Pressy>
           <View style={styles.progressRow}>
-            {[1, 2, 3, 4].map((n) => (
+            {[1, 2, 3].map((n) => (
               <View
                 key={n}
                 style={[
@@ -270,48 +309,41 @@ export default function NewReservation() {
         >
           <FadeIn key={`step-${step}`}>
             <Kicker tone="muted">
-              {t ? `PASO ${step} DE 4` : `STEP ${step} OF 4`} ·{' '}
+              {t ? `PASO ${step} DE 3` : `STEP ${step} OF 3`} ·{' '}
               {(t ? stepLabels[step].es : stepLabels[step].en)}
             </Kicker>
             <Heading size="lg" style={{ marginTop: Spacing[2] }}>
               {step === 1 && (t ? '¿Cuándo nos visitas?' : 'When are you joining us?')}
               {step === 2 && (t ? 'Elige una hora.' : 'Pick a time.')}
-              {step === 3 && (t ? 'Elige tu mesa.' : 'Pick your table.')}
-              {step === 4 && (t ? 'Confirma tu reserva.' : 'Confirm your reservation.')}
+              {step === 3 && (t ? 'Confirma tu reserva.' : 'Confirm your reservation.')}
             </Heading>
           </FadeIn>
 
           {step === 1 && (
-            <StepDate dateObj={dateObj} setDateObj={setDateObj} language={language} tierColor={tier.base} />
+            <StepDate dateStr={dateStr} setDateStr={setDateStr} language={language} tierColor={tier.base} />
           )}
 
           {step === 2 && (
             <StepTime
-              slots={timeSlots}
+              availability={availability}
+              loading={availabilityLoading}
+              error={availabilityError}
               timeSlot={timeSlot}
               setTimeSlot={setTimeSlot}
               tierColor={tier.base}
+              t={t}
+              onRetry={loadAvailability}
             />
           )}
 
           {step === 3 && (
-            <StepTable
-              zone={zone}
-              setZone={setZone}
-              partySize={partySize}
-              setPartySize={setPartySize}
-              t={t}
-              tierColor={tier.base}
-            />
-          )}
-
-          {step === 4 && (
             <StepConfirm
               venueName={venueName}
-              dateObj={dateObj}
+              dateStr={dateStr}
               timeSlot={timeSlot}
-              zone={zone}
               partySize={partySize}
+              setPartySize={setPartySize}
+              maxParty={maxParty}
               notes={notes}
               setNotes={setNotes}
               language={language}
@@ -326,7 +358,7 @@ export default function NewReservation() {
           <View style={{ paddingHorizontal: EditorialSpacing.pageGutter, paddingTop: Spacing[3] }}>
             <Button
               label={
-                step < 4
+                step < 3
                   ? t
                     ? 'Continuar'
                     : 'Continue'
@@ -335,8 +367,8 @@ export default function NewReservation() {
                     : 'Confirm reservation'
               }
               onPress={() => {
-                if (step < 4) {
-                  setStep((s) => (s + 1) as 2 | 3 | 4);
+                if (step < 3) {
+                  setStep((s) => (s + 1) as 2 | 3);
                 } else {
                   handleSubmit();
                 }
@@ -357,18 +389,17 @@ export default function NewReservation() {
 
 // ── Step 1 — Date ────────────────────────────
 function StepDate({
-  dateObj,
-  setDateObj,
+  dateStr,
+  setDateStr,
   language,
   tierColor,
 }: {
-  dateObj: Date;
-  setDateObj: (d: Date) => void;
+  dateStr: string;
+  setDateStr: (d: string) => void;
   language: string;
   tierColor: string;
 }) {
-  const days = nextDays(21);
-  const selectedISO = formatDateISO(dateObj);
+  const days = nextDaysMx(21);
   return (
     <View style={{ marginTop: Spacing[8] }}>
       <ScrollView
@@ -377,16 +408,17 @@ function StepDate({
         contentContainerStyle={{ gap: Spacing[2], paddingHorizontal: EditorialSpacing.pageGutter }}
         style={{ marginHorizontal: -EditorialSpacing.pageGutter }}
       >
-        {days.map((d) => {
-          const iso = formatDateISO(d);
-          const selected = iso === selectedISO;
+        {days.map((iso) => {
+          const selected = iso === dateStr;
+          const d = parseDateOnly(iso);
+          if (!d) return null;
           const weekday = d.toLocaleDateString(language, { weekday: 'short' });
           const day = d.getDate();
           const month = d.toLocaleDateString(language, { month: 'short' });
           return (
             <Pressy
               key={iso}
-              onPress={() => setDateObj(d)}
+              onPress={() => setDateStr(iso)}
               haptic="select"
               accessibilityRole={Roles.button}
               accessibilityLabel={`${weekday} ${day} ${month}`}
@@ -418,43 +450,109 @@ function StepDate({
   );
 }
 
-// ── Step 2 — Time ────────────────────────────
+// ── Step 2 — Time (real slots from the availability endpoint) ───────────
 function StepTime({
-  slots,
+  availability,
+  loading,
+  error,
   timeSlot,
   setTimeSlot,
   tierColor,
+  t,
+  onRetry,
 }: {
-  slots: string[];
+  availability: AvailabilityPayload | null;
+  loading: boolean;
+  error: string | null;
   timeSlot: string;
   setTimeSlot: (s: string) => void;
   tierColor: string;
+  t: boolean;
+  onRetry: () => void;
 }) {
+  if (loading) {
+    return (
+      <View style={[styles.grid, { marginTop: Spacing[8] }]}>
+        {Array.from({ length: 8 }).map((_, i) => (
+          <Skeleton key={i} width={72} height={52} radius={Radius.sm} />
+        ))}
+      </View>
+    );
+  }
+  if (error) {
+    return (
+      <View style={{ marginTop: Spacing[8], minHeight: 220 }}>
+        <ErrorState
+          message={error}
+          retryLabel={t ? 'Reintentar' : 'Retry'}
+          onRetry={onRetry}
+        />
+      </View>
+    );
+  }
+  if (!availability || !availability.reservationsEnabled) {
+    return (
+      <View style={{ marginTop: Spacing[8], minHeight: 220 }}>
+        <EmptyState
+          icon="calendar"
+          title={t ? 'Sin reservas este día' : 'No reservations this day'}
+          message={t ? 'Elige otra fecha para ver horarios disponibles.' : 'Pick another date to see available times.'}
+        />
+      </View>
+    );
+  }
+  if (availability.slots.length === 0) {
+    return (
+      <View style={{ marginTop: Spacing[8], minHeight: 220 }}>
+        <EmptyState
+          icon="clock"
+          title={t ? 'Sin horarios disponibles' : 'No time slots available'}
+          message={t ? 'Elige otra fecha.' : 'Pick another date.'}
+        />
+      </View>
+    );
+  }
+
+  const reasonLabel = (reason?: AvailabilitySlot['reason']) => {
+    if (reason === 'past') return t ? 'Pasó' : 'Past';
+    if (reason === 'full') return t ? 'Lleno' : 'Full';
+    if (reason === 'blocked') return t ? 'No disp.' : 'Blocked';
+    return '';
+  };
+
   return (
     <View style={[styles.grid, { marginTop: Spacing[8] }]}>
-      {slots.map((slot) => {
-        const selected = slot === timeSlot;
+      {availability.slots.map((slot) => {
+        const selected = slot.time === timeSlot;
+        const disabled = !slot.available;
         return (
           <Pressy
-            key={slot}
-            onPress={() => setTimeSlot(slot)}
+            key={slot.time}
+            onPress={() => setTimeSlot(slot.time)}
+            disabled={disabled}
             haptic="select"
             accessibilityRole={Roles.button}
-            accessibilityLabel={slot}
-            accessibilityState={{ selected }}
+            accessibilityLabel={`${slot.time}${disabled ? ` · ${reasonLabel(slot.reason)}` : ''}`}
+            accessibilityState={{ selected, disabled }}
             style={[
               styles.slotTile,
               selected ? { borderColor: tierColor, backgroundColor: Colors.bgCard } : null,
+              disabled ? styles.slotTileDisabled : null,
             ]}
           >
             <Text
               style={[
                 TypePresets.subhead,
-                { color: selected ? Colors.textPrimary : Colors.textSecondary },
+                { color: disabled ? Colors.textMuted : selected ? Colors.textPrimary : Colors.textSecondary },
               ]}
             >
-              {slot}
+              {slot.time}
             </Text>
+            {disabled ? (
+              <Text style={[TypePresets.caption, { color: Colors.textMuted, marginTop: 2 }]}>
+                {reasonLabel(slot.reason)}
+              </Text>
+            ) : null}
           </Pressy>
         );
       })}
@@ -462,193 +560,36 @@ function StepTime({
   );
 }
 
-// ── Step 3 — Table (visual zone + seats) ─────
-function StepTable({
-  zone,
-  setZone,
-  partySize,
-  setPartySize,
-  t,
-  tierColor,
-}: {
-  zone: typeof ZONES[number];
-  setZone: (z: typeof ZONES[number]) => void;
-  partySize: number;
-  setPartySize: (n: number) => void;
-  t: boolean;
-  tierColor: string;
-}) {
-  const seats = useMemo(() => zone.capacity.filter((c) => c >= partySize)[0] ?? Math.max(...zone.capacity), [zone, partySize]);
-
-  return (
-    <View style={{ marginTop: Spacing[8] }}>
-      {/* Zone selector */}
-      <View style={styles.zoneRow}>
-        {ZONES.map((z) => {
-          const selected = z.key === zone.key;
-          return (
-            <Pressy
-              key={z.key}
-              onPress={() => {
-                setZone(z);
-                if (!z.capacity.includes(partySize)) {
-                  setPartySize(z.capacity[0]);
-                }
-              }}
-              haptic="select"
-              accessibilityRole={Roles.button}
-              accessibilityLabel={t ? z.labelEs : z.labelEn}
-              accessibilityState={{ selected }}
-              style={[
-                styles.zoneTile,
-                selected ? { borderColor: tierColor, backgroundColor: Colors.bgCard } : null,
-              ]}
-            >
-              <Caption tone={selected ? 'primary' : 'muted'}>
-                {(t ? z.labelEs : z.labelEn).toUpperCase()}
-              </Caption>
-            </Pressy>
-          );
-        })}
-      </View>
-
-      {/* Visual table with seats around */}
-      <View style={styles.tableVizWrap}>
-        <View style={styles.tableViz}>
-          <View style={[styles.tableSurface, { borderColor: tierColor }]}>
-            <Body size="sm" tone="muted">
-              {z(zone, t)}
-            </Body>
-            <Caption tone="muted" style={{ marginTop: 2 }}>
-              {partySize} {t ? 'INVITADOS' : 'GUESTS'}
-            </Caption>
-          </View>
-          <SeatRing count={seats} active={partySize} tierColor={tierColor} />
-        </View>
-      </View>
-
-      {/* Party size +/- */}
-      <View style={styles.partyRow}>
-        <Pressy
-          onPress={() => {
-            const minP = Math.min(...zone.capacity);
-            if (partySize > minP) setPartySize(partySize - 1);
-          }}
-          disabled={partySize <= Math.min(...zone.capacity)}
-          haptic="select"
-          accessibilityRole={Roles.button}
-          accessibilityLabel={t ? 'Quitar invitado' : 'Remove guest'}
-          style={[styles.partyBtn, { borderColor: Colors.border }]}
-        >
-          <Feather name="minus" size={18} color={Colors.textPrimary} />
-        </Pressy>
-        <View style={{ alignItems: 'center', flex: 1 }}>
-          <Text style={[TypePresets.heading, { color: Colors.textPrimary }]}>{partySize}</Text>
-          <Kicker tone="muted">{t ? 'INVITADOS' : 'GUESTS'}</Kicker>
-        </View>
-        <Pressy
-          onPress={() => {
-            const maxP = Math.max(...zone.capacity);
-            if (partySize < maxP) setPartySize(partySize + 1);
-          }}
-          disabled={partySize >= Math.max(...zone.capacity)}
-          haptic="select"
-          accessibilityRole={Roles.button}
-          accessibilityLabel={t ? 'Añadir invitado' : 'Add guest'}
-          style={[styles.partyBtn, { borderColor: Colors.border }]}
-        >
-          <Feather name="plus" size={18} color={Colors.textPrimary} />
-        </Pressy>
-      </View>
-    </View>
-  );
-}
-
-function z(zone: typeof ZONES[number], t: boolean) {
-  return t ? zone.labelEs : zone.labelEn;
-}
-
-function SeatRing({
-  count,
-  active,
-  tierColor,
-}: {
-  count: number;
-  active: number;
-  tierColor: string;
-}) {
-  const radius = 88;
-  return (
-    <View
-      pointerEvents="none"
-      style={{
-        position: 'absolute',
-        top: 0,
-        bottom: 0,
-        left: 0,
-        right: 0,
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}
-    >
-      {Array.from({ length: count }).map((_, i) => {
-        const angle = (i / count) * Math.PI * 2 - Math.PI / 2;
-        const dx = Math.cos(angle) * radius;
-        const dy = Math.sin(angle) * radius;
-        const filled = i < active;
-        return (
-          <View
-            key={i}
-            style={{
-              position: 'absolute',
-              transform: [{ translateX: dx }, { translateY: dy }],
-              width: 14,
-              height: 14,
-              borderRadius: 7,
-              borderWidth: 1,
-              borderColor: filled ? tierColor : Colors.border,
-              backgroundColor: filled ? tierColor : 'transparent',
-            }}
-          />
-        );
-      })}
-    </View>
-  );
-}
-
-// ── Step 4 — Confirm ─────────────────────────
+// ── Step 3 — Confirm (guests + notes + summary) ──────────────────────
 function StepConfirm({
   venueName,
-  dateObj,
+  dateStr,
   timeSlot,
-  zone,
   partySize,
+  setPartySize,
+  maxParty,
   notes,
   setNotes,
   language,
   t,
 }: {
   venueName: string;
-  dateObj: Date;
+  dateStr: string;
   timeSlot: string;
-  zone: typeof ZONES[number];
   partySize: number;
+  setPartySize: (n: number) => void;
+  maxParty: number;
   notes: string;
   setNotes: (s: string) => void;
-  language: string;
+  language: 'es' | 'en';
   t: boolean;
 }) {
-  const dateLabel = dateObj.toLocaleDateString(language, {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-  });
+  const dateLabel = formatDateOnly(dateStr, language, { weekday: 'long', month: 'long' });
+  const timeLabel = timeSlot ? formatTimeSlot(timeSlot, language) : '—';
   const rows = [
     { label: t ? 'LUGAR' : 'VENUE', value: venueName },
     { label: t ? 'FECHA' : 'DATE', value: dateLabel },
-    { label: t ? 'HORA' : 'TIME', value: timeSlot },
-    { label: t ? 'ZONA' : 'ZONE', value: t ? zone.labelEs : zone.labelEn },
-    { label: t ? 'INVITADOS' : 'GUESTS', value: String(partySize) },
+    { label: t ? 'HORA' : 'TIME', value: timeLabel },
   ];
   return (
     <View style={{ marginTop: Spacing[6] }}>
@@ -666,6 +607,39 @@ function StepConfirm({
         ))}
       </View>
 
+      {/* Party size +/- */}
+      <View style={styles.partyRow}>
+        <Pressy
+          onPress={() => partySize > MIN_PARTY && setPartySize(partySize - 1)}
+          disabled={partySize <= MIN_PARTY}
+          haptic="select"
+          accessibilityRole={Roles.button}
+          accessibilityLabel={t ? 'Quitar invitado' : 'Remove guest'}
+          style={[styles.partyBtn, { borderColor: Colors.border }]}
+        >
+          <Feather name="minus" size={18} color={Colors.textPrimary} />
+        </Pressy>
+        <View style={{ alignItems: 'center', flex: 1 }}>
+          <Text style={[TypePresets.heading, { color: Colors.textPrimary }]}>{partySize}</Text>
+          <Kicker tone="muted">{t ? 'INVITADOS' : 'GUESTS'}</Kicker>
+        </View>
+        <Pressy
+          onPress={() => partySize < maxParty && setPartySize(partySize + 1)}
+          disabled={partySize >= maxParty}
+          haptic="select"
+          accessibilityRole={Roles.button}
+          accessibilityLabel={t ? 'Añadir invitado' : 'Add guest'}
+          style={[styles.partyBtn, { borderColor: Colors.border }]}
+        >
+          <Feather name="plus" size={18} color={Colors.textPrimary} />
+        </Pressy>
+      </View>
+      {maxParty < MAX_PARTY_CAP ? (
+        <Caption tone="muted" align="center" style={{ marginTop: Spacing[2] }}>
+          {t ? `Máximo ${maxParty} para este horario` : `Max ${maxParty} for this time`}
+        </Caption>
+      ) : null}
+
       <Kicker tone="muted" style={{ marginTop: Spacing[6], marginBottom: Spacing[2] }}>
         {t ? 'NOTAS (OPCIONAL)' : 'NOTES (OPTIONAL)'}
       </Kicker>
@@ -676,9 +650,13 @@ function StepConfirm({
         placeholderTextColor={Colors.textMuted}
         multiline
         numberOfLines={3}
+        maxLength={NOTES_MAX_LENGTH}
         accessibilityLabel={t ? 'Notas' : 'Notes'}
         style={styles.notesInput}
       />
+      <Caption tone="muted" align="right" style={{ marginTop: Spacing[2] }}>
+        {`${notes.length}/${NOTES_MAX_LENGTH}`}
+      </Caption>
     </View>
   );
 }
@@ -747,56 +725,11 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
     backgroundColor: 'transparent',
   },
+  slotTileDisabled: {
+    opacity: 0.4,
+  },
 
   // Step 3
-  zoneRow: {
-    flexDirection: 'row',
-    gap: Spacing[2],
-  },
-  zoneTile: {
-    flex: 1,
-    paddingVertical: Spacing[3],
-    alignItems: 'center',
-    borderRadius: Radius.sm,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: Colors.border,
-    backgroundColor: 'transparent',
-  },
-  tableVizWrap: {
-    marginTop: Spacing[8],
-    alignItems: 'center',
-  },
-  tableViz: {
-    width: 240,
-    height: 240,
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
-  },
-  tableSurface: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  partyRow: {
-    marginTop: Spacing[6],
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing[4],
-  },
-  partyBtn: {
-    width: 48,
-    height: 48,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: Radius.sm,
-    borderWidth: StyleSheet.hairlineWidth,
-  },
-
-  // Step 4
   summaryShell: {
     backgroundColor: Colors.bgCard,
     borderRadius: Radius.md,
@@ -811,6 +744,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: Spacing[4],
     paddingVertical: Spacing[3],
+  },
+  partyRow: {
+    marginTop: Spacing[6],
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing[4],
+  },
+  partyBtn: {
+    width: 48,
+    height: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: Radius.sm,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   notesInput: {
     backgroundColor: Colors.bgCard,

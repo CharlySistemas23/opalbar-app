@@ -1,10 +1,15 @@
 import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { DmPolicy, User } from '@prisma/client';
-import { IsEnum } from 'class-validator';
+import { DmPolicy, SavedItemType, User } from '@prisma/client';
+import { IsEnum, IsString } from 'class-validator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { UsersService } from './users.service';
 import { UpdateProfileDto, UpdateInterestsDto } from './dto/update-profile.dto';
+import {
+  DeleteAccountDto,
+  UpdateNotificationSettingsDto,
+  UpdatePrivacyDto,
+} from './dto/account-settings.dto';
 
 // Backend audit P1 #7 (2026-05-18): policy was a raw string parsed via
 // Object.values check at runtime; ValidationPipe with @IsEnum now rejects
@@ -12,6 +17,16 @@ import { UpdateProfileDto, UpdateInterestsDto } from './dto/update-profile.dto';
 class UpdateDmPolicyDto {
   @IsEnum(DmPolicy)
   policy: DmPolicy;
+}
+
+// Saved items toggle. Inline `{ type, targetId }` skipped ValidationPipe
+// entirely (forbidNonWhitelisted only applies to class DTOs).
+class SaveDto {
+  @IsEnum(SavedItemType)
+  type: SavedItemType;
+
+  @IsString()
+  targetId: string;
 }
 
 @ApiTags('Users')
@@ -39,8 +54,8 @@ export class UsersController {
   }
 
   @Patch('me/notifications')
-  @ApiOperation({ summary: 'Update notification settings' })
-  updateNotifications(@CurrentUser() user: User, @Body() settings: Record<string, boolean>) {
+  @ApiOperation({ summary: 'Update notification settings (partial; unknown keys → 400)' })
+  updateNotifications(@CurrentUser() user: User, @Body() settings: UpdateNotificationSettingsDto) {
     return this.usersService.updateNotificationSettings(user.id, settings);
   }
 
@@ -48,6 +63,18 @@ export class UsersController {
   @ApiOperation({ summary: 'Update who can send me DMs (EVERYONE | FOLLOWING | NONE)' })
   updateDmPolicy(@CurrentUser() user: User, @Body() dto: UpdateDmPolicyDto) {
     return this.usersService.updateDmPolicy(user.id, dto.policy);
+  }
+
+  @Patch('me/privacy')
+  @ApiOperation({ summary: 'Toggle private account (isPrivate)' })
+  updatePrivacy(@CurrentUser() user: User, @Body() dto: UpdatePrivacyDto) {
+    return this.usersService.updatePrivacy(user.id, dto.isPrivate);
+  }
+
+  @Get('me/data-requests')
+  @ApiOperation({ summary: 'My GDPR requests (exports + deletions) with status' })
+  listDataRequests(@CurrentUser() user: User) {
+    return this.usersService.listDataRequests(user.id);
   }
 
   @Patch('me/consent')
@@ -65,17 +92,20 @@ export class UsersController {
 
   @Delete('me')
   @HttpCode(HttpStatus.ACCEPTED)
-  @ApiOperation({ summary: 'Request account deletion (GDPR - 30 day delay)' })
-  requestDeletion(@CurrentUser() user: User, @Body('reason') reason?: string) {
-    return this.usersService.requestAccountDeletion(user.id, reason);
+  @ApiOperation({ summary: 'Request account deletion (GDPR): immediate soft-delete + 30-day purge window' })
+  requestDeletion(@CurrentUser() user: User, @Body() dto: DeleteAccountDto) {
+    return this.usersService.requestAccountDeletion(user.id, {
+      reason: dto?.reason,
+      password: dto?.password,
+    });
   }
 
   // ── SEARCH / DIRECTORY ────────────────────────
 
   @Get('search')
   @ApiOperation({ summary: 'Search users by name/handle (auth required, anti-scraping)' })
-  search(@Query('q') q: string, @Query('limit') limit?: string) {
-    return this.usersService.search(q || '', parseInt(limit || '20', 10));
+  search(@CurrentUser() me: User, @Query('q') q: string, @Query('limit') limit?: string) {
+    return this.usersService.search(q || '', parseInt(limit || '20', 10), me?.id);
   }
 
   @Get('me/saved')
@@ -85,8 +115,9 @@ export class UsersController {
   }
 
   @Post('me/saved')
-  @ApiOperation({ summary: 'Toggle save of a target' })
-  toggleSave(@CurrentUser() user: User, @Body() dto: { type: string; targetId: string }) {
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Toggle save of a target → { saved: boolean }' })
+  toggleSave(@CurrentUser() user: User, @Body() dto: SaveDto) {
     return this.usersService.toggleSave(user.id, dto.type, dto.targetId);
   }
 
@@ -96,15 +127,38 @@ export class UsersController {
   // privadas. Ahora exige login Y el service chequea visibilidad por
   // privacidad. JwtAuthGuard ya esta global, asi que basta con quitar @Public.
   @Get(':id/followers')
-  @ApiOperation({ summary: 'List followers of user (respeta isPrivate)' })
-  getFollowers(@Param('id') id: string, @Query('limit') limit?: string, @CurrentUser() me?: User) {
-    return this.usersService.listFollowers(id, parseInt(limit || '30', 10), me?.id);
+  @ApiOperation({ summary: 'List followers of user, paginated (respeta isPrivate)' })
+  getFollowers(
+    @Param('id') id: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @CurrentUser() me?: User,
+  ) {
+    return this.usersService.listFollowers(id, parseInt(page || '1', 10), parseInt(limit || '30', 10), me?.id);
   }
 
   @Get(':id/following')
-  @ApiOperation({ summary: 'List users that :id is following (respeta isPrivate)' })
-  getFollowing(@Param('id') id: string, @Query('limit') limit?: string, @CurrentUser() me?: User) {
-    return this.usersService.listFollowing(id, parseInt(limit || '30', 10), me?.id);
+  @ApiOperation({ summary: 'List users that :id is following, paginated (respeta isPrivate)' })
+  getFollowing(
+    @Param('id') id: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @CurrentUser() me?: User,
+  ) {
+    return this.usersService.listFollowing(id, parseInt(page || '1', 10), parseInt(limit || '30', 10), me?.id);
+  }
+
+  @Get(':id/friends')
+  @ApiOperation({ summary: 'List accepted friends of user, paginated; mutual=1 → friends in common with me' })
+  getFriends(
+    @Param('id') id: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('mutual') mutual?: string,
+    @CurrentUser() me?: User,
+  ) {
+    const wantMutual = mutual === '1' || mutual === 'true';
+    return this.usersService.listFriends(id, me?.id, parseInt(page || '1', 10), parseInt(limit || '30', 10), wantMutual);
   }
 
   @Post(':id/follow')

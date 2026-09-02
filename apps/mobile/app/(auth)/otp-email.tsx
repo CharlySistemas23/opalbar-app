@@ -23,6 +23,10 @@ import { otpApi } from '@/api/client';
 import { useAuthStore } from '@/stores/auth.store';
 import { useAppStore } from '@/stores/app.store';
 import { apiError } from '@/api/errors';
+import { toast } from '@/components/Toast';
+import { useFeedback } from '@/hooks/useFeedback';
+import { getDeviceMeta } from '@/lib/device';
+import { hasPendingPassword, takePendingPassword } from '@/lib/pending-credentials';
 import {
   Colors,
   EditorialSpacing,
@@ -46,14 +50,14 @@ const OTP_LEN = 6;
 
 export default function OtpEmail() {
   const router = useRouter();
-  const { email, purpose, password } = useLocalSearchParams<{
+  const { email, purpose } = useLocalSearchParams<{
     email: string;
     purpose?: string;
-    password?: string;
   }>();
   const { language } = useAppStore();
   const { login } = useAuthStore();
   const t = language === 'es';
+  const fb = useFeedback();
 
   const otpType = (purpose as string) || 'EMAIL_VERIFICATION';
 
@@ -104,43 +108,82 @@ export default function OtpEmail() {
 
   async function handleVerify(code?: string) {
     const otp = code || digits.join('');
-    if (otp.length < OTP_LEN) return;
+    if (otp.length < OTP_LEN || loading) return;
     setError('');
     setLoading(true);
+
+    // 1) Verify the code. A failure here means "wrong / expired code" —
+    //    stay on screen, clear boxes, let the user retry.
     try {
       await otpApi.verify({ identifier: email, code: otp, type: otpType });
-
-      // Post-verify behavior
-      if (otpType === 'EMAIL_VERIFICATION' && password) {
-        // After verification, log the user in automatically
-        await login({ email, password });
-        // Kick off onboarding: profile data → interests → permissions → welcome
-        router.replace('/(auth)/register/step1-profile' as never);
-      } else if (otpType === 'PASSWORD_RESET') {
-        router.replace({
-          pathname: '/(auth)/new-password',
-          params: { email, code: otp },
-        } as never);
-      } else {
-        router.replace('/(auth)/login' as never);
-      }
     } catch (err: any) {
-      setError(apiError(err, t ? 'Código incorrecto' : 'Invalid code'));
+      fb.error();
+      setError(apiError(err, t ? 'Código incorrecto.' : 'Invalid code.'));
       setDigits(Array(OTP_LEN).fill(''));
       refs.current[0]?.focus();
-    } finally {
       setLoading(false);
+      return;
     }
+
+    // 2) Post-verify routing.
+    if (otpType === 'PASSWORD_RESET') {
+      fb.success();
+      setLoading(false);
+      router.replace({
+        pathname: '/(auth)/new-password',
+        params: { email, code: otp },
+      } as never);
+      return;
+    }
+
+    if (otpType === 'EMAIL_VERIFICATION' && hasPendingPassword(email)) {
+      // The account is now ACTIVE. Auto-login with the parked password; a
+      // failure here is NOT a code problem, so say so and send to login.
+      const password = takePendingPassword(email);
+      try {
+        await login({ email, password: password!, ...getDeviceMeta() });
+        fb.success();
+        setLoading(false);
+        router.replace('/(auth)/registration-complete' as never);
+      } catch (err: any) {
+        setLoading(false);
+        toast(
+          t
+            ? `Tu correo quedó verificado, pero no pudimos iniciar sesión: ${apiError(err)}`
+            : `Your email is verified, but we could not sign you in: ${apiError(err)}`,
+          'warning',
+          5000,
+        );
+        router.replace('/(auth)/login' as never);
+      }
+      return;
+    }
+
+    // Verified without a parked password (e.g. app restarted mid-flow).
+    fb.success();
+    setLoading(false);
+    toast(
+      t ? 'Correo verificado. Inicia sesión para continuar.' : 'Email verified. Sign in to continue.',
+      'success',
+    );
+    router.replace('/(auth)/login' as never);
   }
 
   async function resend() {
     if (resendIn > 0 || resending) return;
     setResending(true);
+    setError('');
     try {
       await otpApi.send({ email, type: otpType });
+      fb.select();
+      toast(t ? 'Te enviamos un nuevo código.' : 'We sent you a new code.', 'success');
       setResendIn(60);
-    } catch {
-      /* swallow — UX: stay quiet if resend fails, user can retry */
+    } catch (err: any) {
+      fb.error();
+      toast(
+        apiError(err, t ? 'No pudimos reenviar el código.' : 'Could not resend the code.'),
+        'danger',
+      );
     } finally {
       setResending(false);
     }

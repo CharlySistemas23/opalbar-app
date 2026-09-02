@@ -57,7 +57,7 @@ interface Props {
   message: string;
   /** Optional restrained body note shown in a bgCard hairline pill. */
   hint?: string;
-  primary?: { label: string; onPress: () => void; loading?: boolean };
+  primary?: { label: string; onPress: () => void; loading?: boolean; disabled?: boolean };
   secondary?: { label: string; onPress: () => void };
   onBack?: () => void;
 }
@@ -144,6 +144,7 @@ export function AuthStatusScreen({
               label={primary.label}
               onPress={primary.onPress}
               loading={primary.loading}
+              disabled={primary.disabled}
               variant="primary"
               size="lg"
               fullWidth

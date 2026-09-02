@@ -31,8 +31,10 @@ import {
 import { Colors, EditorialSpacing, Radius, Spacing, TypePresets } from '@/constants/tokens';
 import { HitSlop, Roles } from '@/constants/a11y';
 import { reviewsApi } from '@/api/client';
+import { apiError } from '@/api/errors';
 import { useAppStore } from '@/stores/app.store';
 import { useFeedback } from '@/hooks/useFeedback';
+import { toast } from '@/components/Toast';
 
 const STAR_LABEL_ES = ['', 'Mala', 'Regular', 'Buena', 'Excelente', 'Sublime'];
 const STAR_LABEL_EN = ['', 'Poor', 'Fair', 'Good', 'Great', 'Sublime'];
@@ -65,13 +67,16 @@ export default function WriteReview() {
         body: comment.trim() || undefined,
       });
       fb.success();
+      toast(
+        t
+          ? 'Gracias. Tu reseña está en revisión y se publicará pronto.'
+          : 'Thanks. Your review is under review and will publish shortly.',
+        'success',
+      );
       router.back();
     } catch (err: any) {
       fb.error();
-      Alert.alert(
-        t ? 'Error' : 'Error',
-        err.response?.data?.message ?? (t ? 'No se pudo enviar' : 'Could not submit'),
-      );
+      Alert.alert(t ? 'Error' : 'Error', apiError(err));
     } finally {
       setLoading(false);
     }
@@ -162,13 +167,13 @@ export default function WriteReview() {
                 value={comment}
                 onChangeText={setComment}
                 multiline
-                maxLength={500}
+                maxLength={1000}
                 accessibilityLabel={t ? 'Comentario' : 'Comment'}
                 textAlignVertical="top"
               />
             </View>
             <Caption tone="muted" align="right" style={{ marginTop: Spacing[2] }}>
-              {`${comment.length}/500`}
+              {`${comment.length}/1000`}
             </Caption>
           </FadeIn>
         </ScrollView>

@@ -24,7 +24,7 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
-import { LoginDto } from './dto/login.dto';
+import { Login2faDto, LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { ChangePasswordDto, ResetPasswordDto } from './dto/change-password.dto';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -80,7 +80,7 @@ export class AuthController {
   @ApiResponse({ status: 200, description: 'Returns access + refresh tokens' })
   @ApiResponse({ status: 400, description: 'Invalid or expired code' })
   async loginVerify2FA(
-    @Body() body: { identifier: string; code: string; deviceToken?: string; deviceName?: string; deviceOs?: string },
+    @Body() body: Login2faDto,
     @Ip() ip: string,
     @Headers('user-agent') userAgent: string,
   ) {
@@ -122,18 +122,29 @@ export class AuthController {
     @CurrentUser() user: User,
     @Headers('authorization') auth: string,
   ) {
-    // Extract jti from current token
-    const token = auth?.replace('Bearer ', '');
-    const decoded = this.authService['jwtService'].decode(token) as any;
-    await this.authService.logout(user.id, decoded?.sessionId || '', decoded?.jti || '');
+    // Access tokens carry `sessionId` + `jti` → deactivate exactly this device.
+    const { sessionId, jti } = this.authService.decodeBearer(auth);
+    await this.authService.logout(user.id, sessionId || '', jti || '');
   }
 
   @Post('logout-all')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Logout all active sessions' })
+  @ApiOperation({ summary: 'Logout all active sessions (including this one)' })
   async logoutAll(@CurrentUser() user: User) {
     await this.authService.logoutAllSessions(user.id);
+  }
+
+  @Post('logout-others')
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Logout every other session; this device stays logged in' })
+  async logoutOthers(
+    @CurrentUser() user: User,
+    @Headers('authorization') auth: string,
+  ) {
+    const { sessionId } = this.authService.decodeBearer(auth);
+    return this.authService.logoutAllSessions(user.id, sessionId || undefined);
   }
 
   // ── Password ──────────────────────────────
@@ -141,12 +152,14 @@ export class AuthController {
   @Post('change-password')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Change password (requires current password)' })
+  @ApiOperation({ summary: 'Change password (requires current password); other sessions are revoked' })
   async changePassword(
     @CurrentUser() user: User,
     @Body() dto: ChangePasswordDto,
+    @Headers('authorization') auth: string,
   ) {
-    await this.authService.changePassword(user.id, dto);
+    const { sessionId } = this.authService.decodeBearer(auth);
+    await this.authService.changePassword(user.id, dto, sessionId || undefined);
   }
 
   @Post('reset-password')
@@ -161,9 +174,13 @@ export class AuthController {
 
   @Get('sessions')
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Get all active sessions' })
-  async getSessions(@CurrentUser() user: User) {
-    return this.authService.getActiveSessions(user.id);
+  @ApiOperation({ summary: 'Get all active sessions (isCurrent marks this device)' })
+  async getSessions(
+    @CurrentUser() user: User,
+    @Headers('authorization') auth: string,
+  ) {
+    const { sessionId } = this.authService.decodeBearer(auth);
+    return this.authService.getActiveSessions(user.id, sessionId || undefined);
   }
 
   @Delete('sessions/:sessionId')

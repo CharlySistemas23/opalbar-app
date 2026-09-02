@@ -320,8 +320,8 @@ export default function AdminCategoriesList() {
         open={!!archiveTarget}
         onClose={() => setArchiveTarget(null)}
         onConfirm={performArchive}
-        title="Archivar categoria"
-        description={`Archivar "${archiveTarget?.name ?? ''}"? Los eventos existentes la conservaran, pero ya no aparecera al crear nuevos.`}
+        title="Archivar categoría"
+        description={`¿Archivar "${archiveTarget?.name ?? ''}"? Los eventos existentes la conservarán, pero ya no aparecerá al crear nuevos.`}
         confirmLabel="Archivar"
         confirmVariant="danger"
       />
@@ -330,7 +330,7 @@ export default function AdminCategoriesList() {
         onClose={() => setHardDelTarget(null)}
         onConfirm={performHardDelete}
         title="Eliminar permanentemente"
-        description={`Eliminar "${hardDelTarget?.name ?? ''}" y TODOS los eventos asociados? Esta accion no se puede deshacer.`}
+        description={`¿Eliminar "${hardDelTarget?.name ?? ''}" y TODOS los eventos asociados? Esta acción no se puede deshacer.`}
         confirmLabel="Eliminar todo"
         confirmVariant="danger"
       />

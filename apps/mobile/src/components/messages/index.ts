@@ -12,3 +12,5 @@ export { VoiceBubble } from './VoiceBubble';
 export { ChatInputBar } from './ChatInputBar';
 export { StickerPicker } from './StickerPicker';
 export { MessageReactionRow } from './MessageReactionRow';
+export { messagePreview, threadPreview, relTime } from './preview';
+export type { PreviewableMessage } from './preview';

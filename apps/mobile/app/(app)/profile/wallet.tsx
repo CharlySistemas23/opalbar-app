@@ -19,9 +19,9 @@
 //        Rows: 4×4 dot + text col + Numeric SM
 //   8. Spacer 40pt
 // ─────────────────────────────────────────────
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { FlatList, StyleSheet, Text, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 
@@ -84,14 +84,19 @@ export default function Wallet() {
       .finally(() => setLoading(false));
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const points = wallet?.points ?? user?.points ?? 0;
-  const tierName = wallet?.currentLevel?.name || user?.profile?.loyaltyLevel?.name;
+  const currentLevel = wallet?.profile?.loyaltyLevel ?? user?.profile?.loyaltyLevel;
+  const tierName = currentLevel?.name;
   const tier = resolveTier(tierName);
   const nextLevel = wallet?.nextLevel;
   const delta = nextLevel ? Math.max(0, (nextLevel.minPoints ?? 0) - points) : 0;
-  const progress = nextLevel ? Math.min(1, points / (nextLevel.minPoints || 1)) : 1;
+  // Progress within the CURRENT tier band, not from zero — a member at
+  // 1,200/1,000-1,500 should see the bar ~40% full, not ~80%.
+  const floor = currentLevel?.minPoints ?? 0;
+  const span = nextLevel ? Math.max(1, (nextLevel.minPoints ?? 0) - floor) : 1;
+  const progress = nextLevel ? Math.min(1, Math.max(0, (points - floor) / span)) : 1;
   const grouped = groupByMonth(txs, language);
 
   return (
@@ -138,9 +143,11 @@ export default function Wallet() {
                   {points.toLocaleString(language)}
                 </Text>
                 <Text style={[TypePresets.label, { color: tier.base }]}>
-                  {(tier.labelEn ?? '').toUpperCase()}
+                  {(t ? tier.labelEs : tier.labelEn).toUpperCase()}
                   {nextLevel
-                    ? ` · ${delta.toLocaleString(language)} PTS A ${nextLevel.name.toUpperCase()}`
+                    ? t
+                      ? ` · ${delta.toLocaleString(language)} PTS A ${nextLevel.name.toUpperCase()}`
+                      : ` · ${delta.toLocaleString(language)} PTS TO ${(nextLevel.nameEn || nextLevel.name).toUpperCase()}`
                     : ''}
                 </Text>
               </FadeIn>

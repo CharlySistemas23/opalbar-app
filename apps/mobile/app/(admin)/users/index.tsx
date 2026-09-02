@@ -1,10 +1,13 @@
 import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, ActivityIndicator, RefreshControl, Image, Modal, Alert, ScrollView } from 'react-native';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { adminApi } from '@/api/client';
+import { apiError } from '@/api/errors';
+import { useAuthStore } from '@/stores/auth.store';
 import { Colors } from '@/constants/tokens';
+import { ErrorState } from '@/components/ErrorState';
 
 type Filter = 'all' | 'ACTIVE' | 'BANNED' | 'PENDING_VERIFICATION';
 
@@ -34,13 +37,23 @@ function relTime(iso?: string | null): string {
   return `${Math.floor(d / 365)}a`;
 }
 
+const PAGE = 50;
+
 export default function AdminUsersList() {
   const router = useRouter();
+  const me = useAuthStore((s) => s.user);
+  const isSuperAdmin = me?.role === 'SUPER_ADMIN';
+  const canSeeInsights = me?.role === 'ADMIN' || isSuperAdmin;
   const [users, setUsers] = useState<any[]>([]);
+  const [meta, setMeta] = useState<{ page: number; hasNextPage: boolean; total: number }>({ page: 1, hasNextPage: false, total: 0 });
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>('all');
   const [search, setSearch] = useState('');
+  const reqId = useRef(0);
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Crear usuario
   const [creating, setCreating] = useState(false);
@@ -64,33 +77,80 @@ export default function AdminUsersList() {
       setDraft({ email: '', firstName: '', lastName: '', role: 'USER', phone: '' });
       setCreatedResult({ email: data.user?.email ?? draft.email, tempPassword: data.tempPassword ?? '—' });
       load();
-    } catch (e: any) {
-      Alert.alert('Error', e?.response?.data?.message ?? e?.message ?? 'No se pudo crear');
+    } catch (err) {
+      Alert.alert('Error', apiError(err));
     } finally { setSubmitting(false); }
   }
 
-  const load = useCallback(async () => {
+  const params = useCallback(
+    (page: number) => ({
+      page,
+      limit: PAGE,
+      ...(filter !== 'all' ? { status: filter } : {}),
+      ...(search.trim() ? { search: search.trim() } : {}),
+    }),
+    [filter, search],
+  );
+
+  const load = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      const id = ++reqId.current;
+      if (!opts?.silent) { setLoading(true); setError(null); }
+      try {
+        const r = await adminApi.users(params(1));
+        if (id !== reqId.current) return;
+        const payload = r.data?.data;
+        setUsers(payload?.data ?? []);
+        setMeta({
+          page: payload?.meta?.page ?? 1,
+          hasNextPage: !!payload?.meta?.hasNextPage,
+          total: payload?.meta?.total ?? payload?.data?.length ?? 0,
+        });
+        setError(null);
+      } catch (err) {
+        if (id !== reqId.current) return;
+        setError(apiError(err));
+      } finally {
+        if (id === reqId.current) { setLoading(false); setRefreshing(false); }
+      }
+    },
+    [params],
+  );
+
+  async function loadMore() {
+    if (loadingMore || loading || !meta.hasNextPage) return;
+    setLoadingMore(true);
     try {
-      const r = await adminApi.users({ limit: 100 });
-      setUsers(r.data?.data?.data ?? r.data?.data ?? []);
-    } catch {}
-    finally { setLoading(false); setRefreshing(false); }
-  }, []);
+      const r = await adminApi.users(params(meta.page + 1));
+      const payload = r.data?.data;
+      const next: any[] = payload?.data ?? [];
+      setUsers((prev) => {
+        const seen = new Set(prev.map((u) => u.id));
+        return [...prev, ...next.filter((u) => !seen.has(u.id))];
+      });
+      setMeta({
+        page: payload?.meta?.page ?? meta.page + 1,
+        hasNextPage: !!payload?.meta?.hasNextPage,
+        total: payload?.meta?.total ?? meta.total,
+      });
+    } catch (err) {
+      Alert.alert('Error', apiError(err));
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  const shown = useMemo(() => {
-    let list = users;
-    if (filter !== 'all') list = list.filter((u) => u.status === filter);
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      list = list.filter((u) => {
-        const n = `${u.profile?.firstName ?? ''} ${u.profile?.lastName ?? ''}`.toLowerCase();
-        return n.includes(q) || (u.email ?? '').toLowerCase().includes(q);
-      });
-    }
-    return list;
-  }, [users, filter, search]);
+  // Filter tab change → `load` identity changes (via `params`) → immediate
+  // reload below. Search text change → same effect, but debounced.
+  useEffect(() => {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => { load(); }, search ? 350 : 0);
+    return () => { if (searchTimer.current) clearTimeout(searchTimer.current); };
+  }, [load, search]);
+
+  const shown = users;
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
@@ -98,22 +158,26 @@ export default function AdminUsersList() {
         <View style={styles.logo}><Feather name="users" size={16} color={Colors.accentPrimary} /></View>
         <Text style={styles.title}>Usuarios</Text>
         <View style={{ flex: 1 }} />
-        <TouchableOpacity
-          style={styles.headerBtn}
-          activeOpacity={0.85}
-          onPress={() => setCreating(true)}
-        >
-          <Feather name="user-plus" size={14} color={Colors.accentPrimary} />
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.insightsBtn}
-          activeOpacity={0.85}
-          onPress={() => router.push('/(admin)/analytics' as never)}
-        >
-          <Feather name="bar-chart-2" size={14} color={Colors.accentPrimary} />
-          <Text style={styles.insightsBtnLbl}>Mis clientes</Text>
-        </TouchableOpacity>
-        <Text style={styles.count}>{users.length}</Text>
+        {isSuperAdmin ? (
+          <TouchableOpacity
+            style={styles.headerBtn}
+            activeOpacity={0.85}
+            onPress={() => setCreating(true)}
+          >
+            <Feather name="user-plus" size={14} color={Colors.accentPrimary} />
+          </TouchableOpacity>
+        ) : null}
+        {canSeeInsights ? (
+          <TouchableOpacity
+            style={styles.insightsBtn}
+            activeOpacity={0.85}
+            onPress={() => router.push('/(admin)/analytics' as never)}
+          >
+            <Feather name="bar-chart-2" size={14} color={Colors.accentPrimary} />
+            <Text style={styles.insightsBtnLbl}>Mis clientes</Text>
+          </TouchableOpacity>
+        ) : null}
+        <Text style={styles.count}>{meta.total}</Text>
       </View>
 
       <View style={styles.searchBox}>
@@ -136,17 +200,28 @@ export default function AdminUsersList() {
 
       {loading ? (
         <View style={styles.center}><ActivityIndicator color={Colors.accentPrimary} /></View>
+      ) : error ? (
+        <ErrorState message={error} onRetry={() => load()} />
       ) : (
         <FlatList
           data={shown}
           keyExtractor={(u) => u.id}
           contentContainerStyle={{ padding: 20, paddingBottom: 120, gap: 8 }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={Colors.accentPrimary} />}
+          onEndReachedThreshold={0.4}
+          onEndReached={loadMore}
           ListEmptyComponent={
             <View style={styles.empty}>
               <Feather name="users" size={40} color={Colors.textMuted} />
               <Text style={styles.emptyText}>Sin usuarios que coincidan.</Text>
             </View>
+          }
+          ListFooterComponent={
+            loadingMore ? (
+              <View style={{ paddingVertical: 20 }}>
+                <ActivityIndicator color={Colors.accentPrimary} />
+              </View>
+            ) : null
           }
           renderItem={({ item }) => {
             const fn = item.profile?.firstName ?? '';

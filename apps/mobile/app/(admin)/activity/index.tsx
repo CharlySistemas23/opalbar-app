@@ -11,8 +11,10 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { adminApi } from '@/api/client';
+import { apiError } from '@/api/errors';
 import { Colors, Radius, Spacing } from '@/constants/tokens';
 import { Body, Caption, Kicker, SegmentedControl } from '@/components/ui';
+import { ErrorState } from '@/components/ErrorState';
 import { AdminHeader } from '@/components/admin';
 import type { SegmentOption } from '@/components/ui';
 
@@ -32,12 +34,16 @@ export default function ActivityFeed() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState<Filter>('all');
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    setError(null);
     try {
       const r = await adminApi.activity(80);
       setItems(r.data?.data ?? r.data ?? []);
-    } catch {}
+    } catch (err) {
+      setError(apiError(err));
+    }
     finally { setLoading(false); setRefreshing(false); }
   }, []);
 
@@ -68,6 +74,8 @@ export default function ActivityFeed() {
         <View style={styles.center}>
           <ActivityIndicator color={Colors.accentPrimary} />
         </View>
+      ) : error ? (
+        <ErrorState message={error} onRetry={load} />
       ) : (
         <FlatList
           data={shown}
@@ -84,7 +92,7 @@ export default function ActivityFeed() {
             <View style={styles.empty}>
               <Feather name="activity" size={32} color={Colors.textMuted} />
               <Caption tone="muted" style={{ marginTop: Spacing[2] }}>
-                Sin actividad en esta categoria.
+                Sin actividad en esta categoría.
               </Caption>
             </View>
           }

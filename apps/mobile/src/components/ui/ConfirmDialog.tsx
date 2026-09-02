@@ -14,11 +14,16 @@
 //   · Secondary "Cancelar" always visible
 //   · Backdrop tap is disabled by default (force explicit decision)
 //   · Auto-loading state on the confirm button while `onConfirm` runs
+//   · A rejected `onConfirm` is NEVER swallowed: the dialog stays open,
+//     the error is surfaced (toast via apiError by default, or `onError`)
+//     so the user can retry or cancel.
 // ─────────────────────────────────────────────
-import { ReactNode, useState } from 'react';
+import { ReactNode, useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { Colors, Spacing, TypePresets } from '@/constants/tokens';
+import { apiError } from '@/api/errors';
+import { toast } from '@/components/Toast';
 import { Button } from './Button';
 import { Modal } from './Modal';
 
@@ -26,11 +31,18 @@ interface Props {
   open: boolean;
   onClose: () => void;
   onConfirm: () => void | Promise<void>;
+  /**
+   * Called when `onConfirm` throws/rejects. Defaults to a danger toast with
+   * the translated API error. Return nothing; the dialog stays open.
+   */
+  onError?: (err: unknown) => void;
   title: string;
   description?: string | ReactNode;
   confirmLabel?: string;
   cancelLabel?: string;
   confirmVariant?: 'primary' | 'danger';
+  /** Disable the confirm CTA (e.g. until a confirmation word matches). */
+  confirmDisabled?: boolean;
   /** Disable backdrop tap close. Default true for confirms. */
   forceDecision?: boolean;
   testID?: string;
@@ -40,23 +52,37 @@ export function ConfirmDialog({
   open,
   onClose,
   onConfirm,
+  onError,
   title,
   description,
   confirmLabel = 'Confirmar',
   cancelLabel = 'Cancelar',
   confirmVariant = 'primary',
+  confirmDisabled = false,
   forceDecision = true,
   testID,
 }: Props) {
   const [busy, setBusy] = useState(false);
+  const mounted = useRef(true);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   async function handleConfirm() {
-    if (busy) return;
+    if (busy || confirmDisabled) return;
+    setBusy(true);
     try {
-      setBusy(true);
       await Promise.resolve(onConfirm());
+    } catch (err) {
+      // Surface, never hide. Dialog stays open so the user can retry/cancel.
+      if (onError) onError(err);
+      else toast(apiError(err), 'danger');
     } finally {
-      setBusy(false);
+      if (mounted.current) setBusy(false);
     }
   }
 
@@ -95,6 +121,7 @@ export function ConfirmDialog({
           size="md"
           fullWidth
           loading={busy}
+          disabled={confirmDisabled}
           onPress={handleConfirm}
           haptic={confirmVariant === 'danger' ? 'destructive' : 'tap'}
         />

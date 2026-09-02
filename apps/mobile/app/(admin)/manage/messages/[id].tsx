@@ -20,6 +20,7 @@ import {
   ConfirmDialog,
   Subhead,
 } from '@/components/ui';
+import { ErrorState } from '@/components/ErrorState';
 import { AdminHeader, StatusPill } from '@/components/admin';
 
 function userName(u: any) {
@@ -34,16 +35,20 @@ export default function ThreadModerationView() {
   const [thread, setThread] = useState<any>(null);
   const [messages, setMessages] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [confirmDel, setConfirmDel] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    setError(null);
     try {
       const [tRes, mRes] = await Promise.all([
-        adminApi.threadDetail(id).catch(() => null),
-        adminApi.threadMessages(id).catch(() => null),
+        adminApi.threadDetail(id),
+        adminApi.threadMessages(id),
       ]);
       setThread(tRes?.data?.data ?? tRes?.data ?? null);
       setMessages(mRes?.data?.data ?? mRes?.data ?? []);
+    } catch (err) {
+      setError(apiError(err));
     } finally { setLoading(false); }
   }, [id]);
 
@@ -71,6 +76,13 @@ export default function ThreadModerationView() {
         <ActivityIndicator color={Colors.accentPrimary} />
       </View>
     );
+  if (error)
+    return (
+      <SafeAreaView style={styles.root} edges={['top']}>
+        <AdminHeader title="Conversación" kicker="Modo moderación" onBack={goBack} />
+        <ErrorState message={error} onRetry={() => { setLoading(true); load(); }} />
+      </SafeAreaView>
+    );
   if (!thread)
     return (
       <View style={styles.center}>
@@ -83,7 +95,7 @@ export default function ThreadModerationView() {
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
-      <AdminHeader title="Conversacion" kicker="Modo moderacion" onBack={goBack} />
+      <AdminHeader title="Conversación" kicker="Modo moderación" onBack={goBack} />
 
       <View style={styles.participants}>
         <ParticipantCard user={a} onPress={() => viewUser(a.id)} />
@@ -179,7 +191,7 @@ export default function ThreadModerationView() {
       <View style={styles.footer}>
         <Feather name="info" size={12} color={Colors.textMuted} />
         <Caption tone="muted" size="sm">
-          Manten presionado un mensaje para eliminarlo.
+          Mantén presionado un mensaje para eliminarlo.
         </Caption>
       </View>
 
@@ -188,7 +200,7 @@ export default function ThreadModerationView() {
         onClose={() => setConfirmDel(null)}
         onConfirm={performDelete}
         title="Eliminar mensaje"
-        description="Eliminar este mensaje permanentemente? Quedara registro de moderacion."
+        description="¿Ocultar este mensaje? No se borra de la base de datos — queda marcado como eliminado (con registro de moderación) y ambos participantes dejan de verlo."
         confirmLabel="Eliminar"
         confirmVariant="danger"
       />

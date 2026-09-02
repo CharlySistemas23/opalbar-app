@@ -3,6 +3,7 @@
 //  Axios instance with JWT interceptors + auto-refresh
 // ─────────────────────────────────────────────
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
+import { getDeviceMeta } from '../lib/device';
 
 // In release/OTA builds __DEV__ is false. If EXPO_PUBLIC_API_URL didn't make
 // it into the bundle (e.g. local .env pointing to a LAN IP leaked into an
@@ -11,7 +12,19 @@ const PROD_API = 'https://opalbar-app-production.up.railway.app/api/v1';
 const DEV_API = 'http://localhost:3000/api/v1';
 const ENV_URL = process.env['EXPO_PUBLIC_API_URL'];
 const isLanUrl = typeof ENV_URL === 'string' && /^https?:\/\/(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?/.test(ENV_URL);
-const BASE_URL = ENV_URL && !(!__DEV__ && isLanUrl) ? ENV_URL : (__DEV__ ? DEV_API : PROD_API);
+export const BASE_URL = ENV_URL && !(!__DEV__ && isLanUrl) ? ENV_URL : (__DEV__ ? DEV_API : PROD_API);
+
+/**
+ * Turns a relative upload path (`/uploads/x.jpg`) into an absolute URL on the
+ * API host. Screens used to fall back to `localhost:3000`, which is dead on a
+ * device — this derives the origin from BASE_URL instead.
+ */
+export function toAbsoluteImageUrl(url?: string | null): string | undefined {
+  if (!url) return undefined;
+  if (/^(https?:|data:|file:|content:)/i.test(url)) return url;
+  const origin = BASE_URL.replace(/\/api\/v\d+\/?$/, '');
+  return `${origin}${url.startsWith('/') ? '' : '/'}${url}`;
+}
 
 // ── Axios instance ────────────────────────────
 export const apiClient = axios.create({
@@ -80,6 +93,18 @@ function setupInterceptors(client: typeof apiClient) {
       const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
 
       if (error.response?.status !== 401 || originalRequest._retry) {
+        return Promise.reject(error);
+      }
+
+      // 401 from the auth endpoints themselves (wrong password, bad OTP,
+      // expired reset code) is a normal outcome, not a dead session. Never
+      // try to refresh nor flip the user into guest mode for those.
+      const url = originalRequest.url ?? '';
+      if (/\/auth\/(login|register|reset-password|refresh)|\/otp\//.test(url)) {
+        return Promise.reject(error);
+      }
+      // Nothing to refresh and no session existed → just surface the error.
+      if (!tokenStore.getAccessToken() && !tokenStore.getRefreshToken()) {
         return Promise.reject(error);
       }
 
@@ -164,13 +189,22 @@ setupInterceptors(apiClientUpload);
 // ── API modules ──────────────────────────────
 export const authApi = {
   register: (data: unknown) => apiClient.post('/auth/register', data),
-  login: (data: unknown) => apiClient.post('/auth/login', data),
+  // deviceName/deviceOs are merged in so the session shows up as
+  // "iPhone 15 · iOS 17" in Perfil → Sesiones activas.
+  login: (data: unknown) =>
+    apiClient.post('/auth/login', { ...getDeviceMeta(), ...(data as Record<string, unknown>) }),
   logout: () => apiClient.post('/auth/logout'),
+  /** Revokes EVERY session, including this device. */
   logoutAll: () => apiClient.post('/auth/logout-all'),
+  /** Revokes every other session; this device stays logged in. r.data.data = { revoked } */
+  logoutOthers: () => apiClient.post('/auth/logout-others'),
   me: () => apiClient.get('/auth/me'),
-  changePassword: (data: unknown) => apiClient.post('/auth/change-password', data),
+  /** Other sessions are revoked server-side; the current one stays alive. */
+  changePassword: (data: { currentPassword: string; newPassword: string }) =>
+    apiClient.post('/auth/change-password', data),
   resetPassword: (data: { identifier: string; otpCode: string; newPassword: string }) =>
     apiClient.post('/auth/reset-password', data),
+  /** r.data.data = [{ id, deviceName, deviceOs, ipAddress, userAgent, createdAt, updatedAt, lastActiveAt, expiresAt, isCurrent }] */
   sessions: () => apiClient.get('/auth/sessions'),
   revokeSession: (id: string) => apiClient.delete(`/auth/sessions/${id}`),
 };
@@ -180,26 +214,68 @@ export const otpApi = {
   verify: (data: unknown) => apiClient.post('/otp/verify', data),
 };
 
+export type NotificationSettingKey =
+  | 'pushEnabled'
+  | 'emailEnabled'
+  | 'eventReminders'
+  | 'newEvents'
+  | 'newOffers'
+  | 'communityReplies'
+  | 'communityReactions'
+  | 'pointsUpdates'
+  | 'marketingEmails'
+  | 'weeklyDigest'
+  | 'events'
+  | 'offers'
+  | 'community'
+  | 'reservations'
+  | 'marketing';
+
 export const usersApi = {
   me: () => apiClient.get('/users/me'),
   updateProfile: (data: unknown) => apiClientUpload.patch('/users/me/profile', data),
   updateInterests: (data: unknown) => apiClient.patch('/users/me/interests', data),
-  updatePrivacy: (data: unknown) => apiClient.patch('/users/me/consent', data),
-  updateNotifications: (data: unknown) => apiClient.patch('/users/me/notifications', data),
+  /** Cuenta privada. r.data.data = { id, isPrivate, dmPolicy, friendPolicy, mentionPolicy } */
+  updatePrivacy: (data: { isPrivate: boolean }) => apiClient.patch('/users/me/privacy', data),
+  /**
+   * Partial patch — send ONLY the keys that changed. Accepted keys: the real
+   * NotificationSettings columns (pushEnabled, emailEnabled, eventReminders,
+   * newEvents, newOffers, communityReplies, communityReactions, pointsUpdates,
+   * marketingEmails, weeklyDigest) or the aliases events/offers/community/
+   * reservations/marketing. Unknown keys → 400.
+   */
+  updateNotifications: (data: Partial<Record<NotificationSettingKey, boolean>>) =>
+    apiClient.patch('/users/me/notifications', data),
   updateDmPolicy: (
     policy: 'EVERYONE' | 'FOLLOWING' | 'FRIENDS_OF_FRIENDS' | 'FRIENDS_ONLY' | 'NONE',
   ) => apiClient.patch('/users/me/dm-policy', { policy }),
   updateConsent: (data: unknown) => apiClient.patch('/users/me/consent', data),
+  /** r.data.data = DataExportRequest & { alreadyRequested: boolean } */
   exportData: () => apiClient.post('/users/me/export'),
-  deleteAccount: (reason?: string) => apiClient.delete('/users/me', { data: { reason } }),
+  /** r.data.data = { exports: [...], deletions: [...] } (status PENDING|PROCESSING|COMPLETED|FAILED) */
+  dataRequests: () => apiClient.get('/users/me/data-requests'),
+  /**
+   * Soft-deletes NOW (sessions killed) and schedules the purge in 30 days.
+   * `password` is required when the account has one.
+   * Accepts a plain reason string for backwards compatibility.
+   */
+  deleteAccount: (input?: string | { reason?: string; password?: string }) =>
+    apiClient.delete('/users/me', {
+      data: typeof input === 'string' ? { reason: input || undefined } : (input ?? {}),
+    }),
 
   // Search & profiles
   search: (q: string, limit = 20) => apiClient.get('/users/search', { params: { q, limit } }),
   getPublic: (id: string) => apiClient.get(`/users/${id}`),
 
-  // Follows
-  followers: (id: string) => apiClient.get(`/users/${id}/followers`),
-  following: (id: string) => apiClient.get(`/users/${id}/following`),
+  // Follows — paginated: r.data.data = { data: User[], meta: { total, page, limit, totalPages, hasNextPage } }
+  followers: (id: string, params: { page?: number; limit?: number } = {}) =>
+    apiClient.get(`/users/${id}/followers`, { params }),
+  following: (id: string, params: { page?: number; limit?: number } = {}) =>
+    apiClient.get(`/users/${id}/following`, { params }),
+  // Friends of a user (same paginated envelope). mutual: 1 → only friends in common with me.
+  friends: (id: string, params: { page?: number; limit?: number; mutual?: 1 } = {}) =>
+    apiClient.get(`/users/${id}/friends`, { params }),
   follow: (id: string) => apiClient.post(`/users/${id}/follow`),
   unfollow: (id: string) => apiClient.delete(`/users/${id}/follow`),
 
@@ -236,6 +312,8 @@ export const friendshipsApi = {
   remove: (userId: string) => apiClient.delete(`/friendships/${userId}`),
   block: (userId: string) => apiClient.post(`/friendships/${userId}/block`),
   unblock: (userId: string) => apiClient.delete(`/friendships/${userId}/block`),
+  /** Users I have blocked: [{ id, isPrivate, profile, blockedAt, friendshipId }] */
+  blocked: () => apiClient.get('/friendships/blocked'),
   updatePolicy: (policy: FriendPolicy) =>
     apiClient.patch('/friendships/me/policy', { policy }),
 };
@@ -290,6 +368,13 @@ export const messagesApi = {
   acceptRequest: (id: string) => apiClient.post(`/messages/requests/${id}/accept`),
   declineRequest: (id: string) => apiClient.post(`/messages/requests/${id}/decline`),
   blockRequest: (id: string) => apiClient.post(`/messages/requests/${id}/block`),
+  /** Tab-badge counters: r.data.data = { threads, messages } */
+  unreadCount: () => apiClient.get('/messages/unread-count'),
+  /** Report the other participant of a thread (creates a USER report). */
+  reportThread: (
+    id: string,
+    data: { reason: string; description?: string; messageId?: string },
+  ) => apiClient.post(`/messages/threads/${id}/report`, data),
 };
 
 export const eventsApi = {
@@ -340,6 +425,8 @@ export const communityApi = {
   deleteStory: (id: string) => apiClient.delete(`/community/stories/${id}`),
   viewStory: (id: string) => apiClient.post(`/community/stories/${id}/view`),
   reactStory: (id: string, emoji: string) => apiClient.post(`/community/stories/${id}/react`, { emoji }),
+  /** Owner only: r.data.data = { total, viewers: [{ id, firstName, lastName, avatarUrl, viewedAt, reactions }] } */
+  storyViewers: (id: string) => apiClient.get(`/community/stories/${id}/viewers`),
 };
 
 export const walletApi = {
@@ -359,7 +446,7 @@ export const notificationsApi = {
   list: (params?: unknown) => apiClient.get('/notifications', { params }),
   markRead: (id: string) => apiClient.patch(`/notifications/${id}/read`),
   markAllRead: () => apiClient.patch('/notifications/read-all'),
-  updateSettings: (data: unknown) => apiClient.patch('/notifications/settings', data),
+  // Settings live in usersApi.updateNotifications (PATCH /users/me/notifications).
   delete: (id: string) => apiClient.delete(`/notifications/${id}`),
 };
 
@@ -376,13 +463,32 @@ export const venueApi = {
     apiClient.patch(`/venues/${id}`, data),
 };
 
+export type ReservationScope = 'upcoming' | 'past';
+export type AvailabilitySlot = {
+  time: string;
+  remaining: number;
+  available: boolean;
+  reason?: 'past' | 'full' | 'blocked';
+};
+
 export const reservationsApi = {
-  create: (data: unknown) => apiClient.post('/reservations', data),
-  my: () => apiClient.get('/reservations/my'),
+  create: (data: { venueId: string; date: string; timeSlot: string; partySize: number; specialRequests?: string; eventId?: string }) =>
+    apiClient.post('/reservations', data),
+  /** Paginated: r.data.data = { data: Reservation[], meta }. scope=upcoming|past (venue-local day). */
+  my: (params: { scope?: ReservationScope; status?: string; page?: number; limit?: number } = {}) =>
+    apiClient.get('/reservations/my', { params }),
   get: (id: string) => apiClient.get(`/reservations/${id}`),
   detail: (id: string) => apiClient.get(`/reservations/${id}`),
-  modify: (id: string, data: { date?: string; partySize?: number; specialRequests?: string }) =>
-    apiClient.patch(`/reservations/${id}`, data),
+  /**
+   * r.data.data = { venueId, date, today, reservationsEnabled, openTime, closeTime,
+   * slotMinutes, capacity, slots: AvailabilitySlot[] }
+   */
+  availability: (venueId: string, date: string, excludeReservationId?: string) =>
+    apiClient.get('/reservations/availability', { params: { venueId, date, excludeReservationId } }),
+  modify: (
+    id: string,
+    data: { date?: string; timeSlot?: string; partySize?: number; specialRequests?: string },
+  ) => apiClient.patch(`/reservations/${id}`, data),
   cancel: (id: string) => apiClient.delete(`/reservations/${id}`),
 };
 
@@ -398,12 +504,17 @@ export const supportApi = {
   myTickets: () => apiClient.get('/support/tickets/my'),
   messages: (ticketId: string) => apiClient.get(`/support/tickets/${ticketId}/messages`),
   sendMessage: (ticketId: string, data: unknown) => apiClient.post(`/support/tickets/${ticketId}/messages`, data),
+  /** Single ticket: r.data.data = { id, subject, category, status, assignedTo, ... } */
+  ticket: (ticketId: string) => apiClient.get(`/support/tickets/${ticketId}`),
+  closeTicket: (ticketId: string) => apiClient.post(`/support/tickets/${ticketId}/close`),
   quickReplies: () => apiClient.get('/support/quick-replies'),
 };
 
 export const reviewsApi = {
   create: (data: unknown) => apiClient.post('/reviews', data),
-  byVenue: (venueId: string) => apiClient.get(`/reviews/venue/${venueId}`),
+  /** Paginated: r.data.data = { data: Review[], meta } */
+  byVenue: (venueId: string, params: { page?: number; limit?: number; minRating?: number } = {}) =>
+    apiClient.get(`/reviews/venue/${venueId}`, { params }),
   venueSummary: (venueId: string) => apiClient.get(`/reviews/venue/${venueId}/summary`),
   my: () => apiClient.get('/reviews/my'),
   update: (id: string, data: unknown) => apiClient.patch(`/reviews/${id}`, data),
@@ -444,6 +555,7 @@ export const adminApi = {
   featureFlags: () => apiClient.get('/admin/flags'),
   updateFeatureFlag: (key: string, enabled: boolean) =>
     apiClient.patch(`/admin/flags/${key}`, { enabled }),
+  deleteFeatureFlag: (key: string) => apiClient.delete(`/admin/flags/${key}`),
   pendingPosts: (params?: any) => apiClient.get('/admin/posts/pending', { params }),
   approvePost: (id: string) => apiClient.patch(`/admin/posts/${id}/approve`),
   rejectPost: (id: string, reason: string) => apiClient.patch(`/admin/posts/${id}/reject`, { reason }),
@@ -522,6 +634,24 @@ export const adminApi = {
     apiClient.post(`/admin/venues/${venueId}/blocks`, data),
   deleteVenueBlock: (venueId: string, blockId: string) =>
     apiClient.delete(`/admin/venues/${venueId}/blocks/${blockId}`),
+
+  // ── Moderación de comunidad (feed completo, cualquier status) ──
+  posts: (params?: { status?: string; reported?: boolean | 1; search?: string; page?: number; limit?: number }) =>
+    apiClient.get('/admin/community/posts', { params }),
+  post: (id: string) => apiClient.get(`/admin/community/posts/${id}`),
+  updatePostStatus: (id: string, status: 'PUBLISHED' | 'HIDDEN' | 'REJECTED', reason?: string) =>
+    apiClient.patch(`/admin/community/posts/${id}/status`, reason ? { status, reason } : { status }),
+  deletePost: (id: string) => apiClient.delete(`/admin/community/posts/${id}`),
+  // Venues (todos, activos e inactivos) para pickers del admin
+  venues: () => apiClient.get('/admin/venues'),
+  // Ticket detalle (usuario + agente + hilo completo)
+  ticket: (id: string) => apiClient.get(`/admin/support/tickets/${id}`),
+  updateTicket: (id: string, data: { status?: string; priority?: string; assignedToId?: string | null }) =>
+    apiClient.patch(`/admin/support/tickets/${id}`, data),
+  // Niveles de lealtad incluyendo inactivos
+  loyaltyLevels: () => apiClient.get('/admin/loyalty/levels'),
+  // Marcar verificado sin OTP (override de admin)
+  markUserVerified: (id: string) => apiClient.post(`/admin/users/${id}/mark-verified`),
 
   // ── Venue stories (OPAL BAR PV) ──────────────────
   venueStories: {

@@ -6,6 +6,7 @@ import { Feather } from '@expo/vector-icons';
 import { adminApi } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { Colors } from '@/constants/tokens';
+import { ErrorState } from '@/components/ErrorState';
 
 type FeatherIcon = React.ComponentProps<typeof Feather>['name'];
 
@@ -27,13 +28,17 @@ export default function ReportDetail() {
   const router = useRouter();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
+    setError(null);
     try {
       const r = await adminApi.reportDetail(id);
       setData(r.data?.data ?? r.data);
-    } catch {} finally { setLoading(false); }
+    } catch (err) {
+      setError(apiError(err));
+    } finally { setLoading(false); }
   }, [id]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
@@ -52,6 +57,11 @@ export default function ReportDetail() {
   }
 
   if (loading) return <View style={styles.center}><ActivityIndicator color={Colors.accentPrimary} /></View>;
+  if (error) return (
+    <SafeAreaView style={styles.root} edges={['top']}>
+      <ErrorState message={error} onRetry={load} />
+    </SafeAreaView>
+  );
   if (!data?.report) return <View style={styles.center}><Text style={{ color: Colors.textMuted }}>Reporte no encontrado</Text></View>;
 
   const { report, target, otherReports } = data;

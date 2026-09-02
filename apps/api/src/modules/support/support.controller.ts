@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { SupportService } from './support.service';
@@ -21,6 +21,27 @@ export class SupportController {
   @ApiOperation({ summary: 'Get my support tickets' })
   getMine(@CurrentUser('id') userId: string, @Query() filter: TicketFilterDto) {
     return this.service.getMyTickets(userId, filter);
+  }
+
+  @Get('tickets/:id')
+  @ApiOperation({ summary: 'Get one of my tickets (subject, status, assigned agent)' })
+  getOne(
+    @Param('id') id: string,
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') role: UserRole,
+  ) {
+    return this.service.getTicket(id, userId, role);
+  }
+
+  @Post('tickets/:id/close')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Close my ticket' })
+  close(
+    @Param('id') id: string,
+    @CurrentUser('id') userId: string,
+    @CurrentUser('role') role: UserRole,
+  ) {
+    return this.service.closeTicket(id, userId, role);
   }
 
   @Get('tickets/:id/messages')

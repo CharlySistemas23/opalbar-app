@@ -1,147 +1,268 @@
-import {
-  View,
-  StyleSheet,
-  FlatList,
-  ActivityIndicator,
-  RefreshControl,
-  Alert,
-  Pressable,
-} from 'react-native';
-import { useCallback, useState } from 'react';
-import { useFocusEffect, useRouter } from 'expo-router';
+// ─────────────────────────────────────────────
+//  Admin · Comunidad — feed de moderación estilo Facebook
+//
+//  Los posts se publican al instante; aquí el equipo los verifica
+//  después. Tabs por estado + "Reportados" (≥1 reporte pendiente).
+//  Acciones por tarjeta: Verificar / Ocultar / Rechazar / Fijar /
+//  Eliminar / Ver reportes. Long-press = selección múltiple.
+// ─────────────────────────────────────────────
+import { View, StyleSheet, FlatList, RefreshControl, Pressable, ActivityIndicator, ScrollView } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+
 import { adminApi } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { useFeedback } from '@/hooks/useFeedback';
+import { useRealtime } from '@/hooks/useRealtime';
 import { useSafeBack } from '@/hooks/useSafeBack';
+import { toast } from '@/components/Toast';
 import { Colors, Radius, Spacing } from '@/constants/tokens';
-import { Body, Button, Caption, ConfirmDialog, Sheet, Subhead } from '@/components/ui';
-import { AdminHeader } from '@/components/admin';
+import { Button, Caption, Input, SegmentedControl, SkeletonList } from '@/components/ui';
+import { ErrorState } from '@/components/ErrorState';
+import { EmptyState } from '@/components/EmptyState';
+import { ConfirmSheet } from '@/components/ConfirmSheet';
+import {
+  AdminHeader,
+  PostModerationCard,
+  ReasonSheet,
+  postAuthorName,
+  type AdminPost,
+} from '@/components/admin';
 
-const REJECT_REASONS = ['Spam', 'Lenguaje ofensivo', 'Fuera de tema'];
+type Tab = 'PUBLISHED' | 'PENDING_REVIEW' | 'HIDDEN' | 'REJECTED' | 'REPORTED';
 
-export default function CommunityAdmin() {
+const TABS: { value: Tab; label: string }[] = [
+  { value: 'PUBLISHED', label: 'Publicados' },
+  { value: 'PENDING_REVIEW', label: 'Pendientes' },
+  { value: 'HIDDEN', label: 'Ocultos' },
+  { value: 'REJECTED', label: 'Rechazados' },
+  { value: 'REPORTED', label: 'Reportados' },
+];
+
+const REJECT_PRESETS = ['Spam', 'Lenguaje ofensivo', 'Fuera de tema', 'Contenido inapropiado'];
+const PAGE = 20;
+
+const EMPTY: Record<Tab, { title: string; message: string }> = {
+  PUBLISHED: { title: 'Sin publicaciones', message: 'Cuando la comunidad publique, aparecerá aquí.' },
+  PENDING_REVIEW: { title: 'Todo al día', message: 'No hay posts pendientes de revisión.' },
+  HIDDEN: { title: 'Nada oculto', message: 'No has ocultado ningún post.' },
+  REJECTED: { title: 'Sin rechazados', message: 'Ningún post ha sido rechazado.' },
+  REPORTED: { title: 'Sin reportes', message: 'Ningún post tiene reportes pendientes.' },
+};
+
+export default function CommunityModeration() {
   const router = useRouter();
   const goBack = useSafeBack('/(admin)/manage');
-  const [posts, setPosts] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [selectMode, setSelectMode] = useState(false);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [busy, setBusy] = useState(false);
-  const [rejectId, setRejectId] = useState<string | null>(null);
-  const [bulkRejectOpen, setBulkRejectOpen] = useState(false);
-  const [confirmBulkApprove, setConfirmBulkApprove] = useState(false);
   const fb = useFeedback();
 
-  const load = useCallback(async () => {
+  const [tab, setTab] = useState<Tab>('PUBLISHED');
+  const [search, setSearch] = useState('');
+  const [posts, setPosts] = useState<AdminPost[]>([]);
+  const [meta, setMeta] = useState<{ page: number; hasNextPage: boolean; total: number }>({ page: 1, hasNextPage: false, total: 0 });
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [bulkBusy, setBulkBusy] = useState(false);
+
+  const [rejectTarget, setRejectTarget] = useState<AdminPost | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<AdminPost | null>(null);
+  const [bulkRejectOpen, setBulkRejectOpen] = useState(false);
+  const [bulkVerifyOpen, setBulkVerifyOpen] = useState(false);
+
+  const reqId = useRef(0);
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const params = useCallback(
+    (page: number) => ({
+      page,
+      limit: PAGE,
+      ...(tab === 'REPORTED' ? { reported: 1 as const } : { status: tab }),
+      ...(search.trim() ? { search: search.trim() } : {}),
+    }),
+    [tab, search],
+  );
+
+  const load = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      const id = ++reqId.current;
+      if (!opts?.silent) { setLoading(true); setError(null); }
+      try {
+        const r = await adminApi.posts(params(1));
+        if (id !== reqId.current) return;
+        const payload = r.data?.data;
+        setPosts(payload?.data ?? []);
+        setMeta({
+          page: payload?.meta?.page ?? 1,
+          hasNextPage: !!payload?.meta?.hasNextPage,
+          total: payload?.meta?.total ?? payload?.data?.length ?? 0,
+        });
+        setError(null);
+      } catch (err) {
+        if (id !== reqId.current) return;
+        setError(apiError(err));
+      } finally {
+        if (id === reqId.current) { setLoading(false); setRefreshing(false); }
+      }
+    },
+    [params],
+  );
+
+  const loadMore = useCallback(async () => {
+    if (loadingMore || loading || !meta.hasNextPage) return;
+    setLoadingMore(true);
     try {
-      const r = await adminApi.pendingPosts({ limit: 100 });
-      setPosts(r.data?.data?.data ?? r.data?.data ?? []);
-    } catch {}
-    finally { setLoading(false); setRefreshing(false); }
-  }, []);
+      const r = await adminApi.posts(params(meta.page + 1));
+      const payload = r.data?.data;
+      const next: AdminPost[] = payload?.data ?? [];
+      setPosts((prev) => {
+        const seen = new Set(prev.map((p) => p.id));
+        return [...prev, ...next.filter((p) => !seen.has(p.id))];
+      });
+      setMeta({
+        page: payload?.meta?.page ?? meta.page + 1,
+        hasNextPage: !!payload?.meta?.hasNextPage,
+        total: payload?.meta?.total ?? meta.total,
+      });
+    } catch (err) {
+      toast(apiError(err), 'danger');
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [loadingMore, loading, meta, params]);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  // Tab change → immediate reload. Search → debounced.
+  useEffect(() => {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => { load(); }, search ? 350 : 0);
+    return () => { if (searchTimer.current) clearTimeout(searchTimer.current); };
+  }, [load, search]);
 
-  function exitSelectMode() {
-    setSelectMode(false);
-    setSelected(new Set());
-  }
+  useRealtime(['post', 'report'], () => { load({ silent: true }); });
 
+  function exitSelectMode() { setSelectMode(false); setSelected(new Set()); }
   function toggleSelect(id: string) {
     fb.tap();
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+    setSelected((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   }
 
-  function selectAll() {
-    fb.tap();
-    setSelected(new Set(posts.map((p) => p.id)));
+  // ── Single actions (optimistic + revert) ──
+  function removeLocally(id: string) {
+    setPosts((p) => p.filter((x) => x.id !== id));
+    setMeta((m) => ({ ...m, total: Math.max(0, m.total - 1) }));
+  }
+  function patchLocally(id: string, patch: Partial<AdminPost>) {
+    setPosts((p) => p.map((x) => (x.id === id ? { ...x, ...patch } : x)));
   }
 
-  async function approve(id: string) {
+  async function setStatus(post: AdminPost, status: 'PUBLISHED' | 'HIDDEN' | 'REJECTED', reason?: string) {
+    if (busyId) return;
+    setBusyId(post.id);
+    const snapshot = posts;
+    const staysInTab = tab === 'REPORTED';
+    if (staysInTab) patchLocally(post.id, { status, rejectionReason: reason ?? post.rejectionReason });
+    else removeLocally(post.id);
     try {
-      await adminApi.approvePost(id);
-      setPosts((p) => p.filter((x) => x.id !== id));
+      await adminApi.updatePostStatus(post.id, status, reason);
       fb.success();
-    } catch (err) {
-      fb.error();
-      Alert.alert('Error', apiError(err));
-    }
-  }
-
-  async function doReject(id: string, reason: string) {
-    try {
-      await adminApi.rejectPost(id, reason);
-      setPosts((p) => p.filter((x) => x.id !== id));
-      fb.success();
-    } catch (err) {
-      fb.error();
-      Alert.alert('Error', apiError(err));
-    }
-  }
-
-  async function performBulkApprove() {
-    setConfirmBulkApprove(false);
-    if (selected.size === 0 || busy) return;
-    setBusy(true);
-    try {
-      const ids = Array.from(selected);
-      const r = await adminApi.bulkApprovePosts(ids);
-      const data = r.data?.data ?? r.data;
-      setPosts((p) => p.filter((x) => !selected.has(x.id)));
-      exitSelectMode();
-      fb.success();
-      Alert.alert(
-        'Listo',
-        `${data.processed ?? ids.length} aprobados${data.skipped ? ` · ${data.skipped} omitidos` : ''}.`,
+      toast(
+        status === 'PUBLISHED' ? 'Post verificado y publicado' : status === 'HIDDEN' ? 'Post oculto del feed' : 'Post rechazado',
+        'success',
       );
     } catch (err) {
+      setPosts(snapshot);
       fb.error();
-      Alert.alert('Error', apiError(err));
+      toast(apiError(err), 'danger');
     } finally {
-      setBusy(false);
+      setBusyId(null);
     }
   }
 
-  async function doBulkReject(reason: string) {
+  async function togglePin(post: AdminPost) {
+    if (busyId) return;
+    setBusyId(post.id);
+    const next = !post.isPinned;
+    patchLocally(post.id, { isPinned: next });
+    try {
+      await adminApi.pinPost(post.id, next);
+      fb.success();
+      toast(next ? 'Post fijado en el feed' : 'Post desfijado', 'success');
+    } catch (err) {
+      patchLocally(post.id, { isPinned: !next });
+      fb.error();
+      toast(apiError(err), 'danger');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function doDelete() {
+    const post = deleteTarget;
+    if (!post) return;
+    setDeleteTarget(null);
+    setBusyId(post.id);
+    const snapshot = posts;
+    removeLocally(post.id);
+    try {
+      await adminApi.deletePost(post.id);
+      fb.success();
+      toast('Post eliminado', 'success');
+    } catch (err) {
+      setPosts(snapshot);
+      fb.error();
+      toast(apiError(err), 'danger');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  // ── Bulk ──
+  async function bulk(kind: 'verify' | 'reject', reason?: string) {
     setBulkRejectOpen(false);
-    setBusy(true);
+    setBulkVerifyOpen(false);
+    if (selected.size === 0 || bulkBusy) return;
+    setBulkBusy(true);
+    const ids = Array.from(selected);
+    const snapshot = posts;
+    setPosts((p) => p.filter((x) => !selected.has(x.id)));
     try {
-      const ids = Array.from(selected);
-      const r = await adminApi.bulkRejectPosts(ids, reason);
-      const data = r.data?.data ?? r.data;
-      setPosts((p) => p.filter((x) => !selected.has(x.id)));
+      const r = kind === 'verify' ? await adminApi.bulkApprovePosts(ids) : await adminApi.bulkRejectPosts(ids, reason);
+      const data = r.data?.data ?? {};
       exitSelectMode();
       fb.success();
-      Alert.alert(
-        'Listo',
-        `${data.processed ?? ids.length} rechazados${data.skipped ? ` · ${data.skipped} omitidos` : ''}.`,
+      toast(
+        `${data.processed ?? ids.length} ${kind === 'verify' ? 'verificados' : 'rechazados'}${data.skipped ? ` · ${data.skipped} omitidos` : ''}`,
+        'success',
       );
+      load({ silent: true });
     } catch (err) {
+      setPosts(snapshot);
       fb.error();
-      Alert.alert('Error', apiError(err));
+      toast(apiError(err), 'danger');
     } finally {
-      setBusy(false);
+      setBulkBusy(false);
     }
   }
+
+  const openDetail = (post: AdminPost) => router.push(`/(admin)/manage/community/${post.id}` as never);
+  const empty = EMPTY[tab];
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
       {selectMode ? (
         <AdminHeader
           title={`${selected.size} seleccionado${selected.size === 1 ? '' : 's'}`}
-          kicker="Moderacion"
+          kicker="Moderación"
           onBack={exitSelectMode}
           right={
             <Pressable
-              onPress={selectAll}
+              onPress={() => { fb.tap(); setSelected(new Set(posts.map((p) => p.id))); }}
               hitSlop={10}
               accessibilityRole="button"
               accessibilityLabel="Seleccionar todo"
@@ -153,127 +274,87 @@ export default function CommunityAdmin() {
         />
       ) : (
         <AdminHeader
-          title="Posts pendientes"
-          kicker="Moderacion"
+          title="Comunidad"
+          kicker="Moderación"
           onBack={goBack}
           right={
             <View style={styles.counter}>
               <Caption tone="accent" style={{ fontWeight: '700' }}>
-                {posts.length}
+                {meta.total}
               </Caption>
             </View>
           }
         />
       )}
 
+      <View style={styles.filters}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} bounces={false} style={{ marginHorizontal: -Spacing[5] }} contentContainerStyle={{ paddingHorizontal: Spacing[5] }}>
+          <SegmentedControl<Tab> value={tab} onChange={(v) => { fb.select(); setTab(v); exitSelectMode(); }} options={TABS} fullWidth={false} />
+        </ScrollView>
+        <Input
+          placeholder="Buscar por texto, nombre o correo"
+          value={search}
+          onChangeText={setSearch}
+          returnKeyType="search"
+          autoCapitalize="none"
+          autoCorrect={false}
+          leftIcon={<Feather name="search" size={14} color={Colors.textMuted} />}
+          rightIcon={search ? <Feather name="x" size={14} color={Colors.textMuted} /> : undefined}
+          onRightIconPress={search ? () => setSearch('') : undefined}
+          rightIconLabel="Limpiar búsqueda"
+        />
+      </View>
+
       {loading ? (
-        <View style={styles.center}>
-          <ActivityIndicator color={Colors.accentPrimary} />
+        <View style={{ padding: Spacing[5] }}>
+          <SkeletonList count={4} itemHeight={150} />
         </View>
+      ) : error ? (
+        <ErrorState message={error} onRetry={() => load()} />
       ) : (
         <FlatList
           data={posts}
           keyExtractor={(p) => p.id}
-          contentContainerStyle={{
-            padding: Spacing[5],
-            paddingBottom: selectMode ? 120 : 40,
-            gap: Spacing[2],
-          }}
+          contentContainerStyle={{ padding: Spacing[5], paddingTop: Spacing[2], paddingBottom: selectMode ? 120 : 40, gap: Spacing[3] }}
           refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={() => { setRefreshing(true); load(); }}
-              tintColor={Colors.accentPrimary}
+            <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load({ silent: true }); }} tintColor={Colors.accentPrimary} />
+          }
+          onEndReachedThreshold={0.4}
+          onEndReached={loadMore}
+          ListEmptyComponent={
+            <EmptyState
+              icon={tab === 'REPORTED' ? 'flag' : tab === 'PENDING_REVIEW' ? 'check-circle' : 'inbox'}
+              title={search ? 'Sin resultados' : empty.title}
+              message={search ? `Nada coincide con “${search.trim()}”.` : empty.message}
+              tint={tab === 'PENDING_REVIEW' ? Colors.accentSuccess : undefined}
             />
           }
-          ListEmptyComponent={
-            <View style={styles.empty}>
-              <Feather name="check-circle" size={36} color={Colors.accentSuccess} />
-              <Subhead style={{ marginTop: Spacing[2] }}>Todo al dia</Subhead>
-              <Caption tone="muted">No hay posts pendientes de moderacion.</Caption>
-            </View>
-          }
-          renderItem={({ item }) => {
-            const checked = selected.has(item.id);
-            return (
-              <View style={[styles.card, checked && styles.cardSelected]}>
-                <Pressable
-                  onPress={() => {
-                    if (selectMode) toggleSelect(item.id);
-                    else router.push(`/(admin)/manage/community/${item.id}` as never);
-                  }}
-                  onLongPress={() => {
-                    if (!selectMode) {
-                      fb.select();
-                      setSelectMode(true);
-                      setSelected(new Set([item.id]));
-                    }
-                  }}
-                  delayLongPress={250}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Post de ${item.user?.profile?.firstName ?? 'usuario'}`}
-                  style={{ gap: Spacing[2] }}
-                >
-                  <View style={styles.cardHead}>
-                    {selectMode ? (
-                      <View style={[styles.checkbox, checked && styles.checkboxOn]}>
-                        {checked ? (
-                          <Feather name="check" size={14} color={Colors.textInverse} />
-                        ) : null}
-                      </View>
-                    ) : null}
-                    <View style={styles.avatar}>
-                      <Body tone="inverse" weight="bold">
-                        {(item.user?.profile?.firstName?.[0] ?? '?').toUpperCase()}
-                      </Body>
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Subhead>
-                        {item.user?.profile?.firstName} {item.user?.profile?.lastName}
-                      </Subhead>
-                      <Caption tone="muted" style={{ marginTop: 2 }}>
-                        hace {relTime(item.createdAt)} · score:{' '}
-                        {item.moderationScore?.toFixed?.(2) ?? '—'}
-                      </Caption>
-                    </View>
-                  </View>
-                  {item.content ? (
-                    <Body size="sm" numberOfLines={3}>
-                      {item.content}
-                    </Body>
-                  ) : null}
-                  {item.imageUrl ? (
-                    <View style={styles.imgBadge}>
-                      <Feather name="image" size={12} color={Colors.textMuted} />
-                      <Caption tone="muted" size="sm">Incluye imagen</Caption>
-                    </View>
-                  ) : null}
-                </Pressable>
-                {!selectMode ? (
-                  <View style={styles.actions}>
-                    <View style={{ flex: 1 }}>
-                      <Button
-                        label="Rechazar"
-                        variant="danger"
-                        size="sm"
-                        onPress={() => setRejectId(item.id)}
-                        leftIcon={<Feather name="x" size={14} color={Colors.accentDanger} />}
-                      />
-                    </View>
-                    <View style={{ flex: 1.3 }}>
-                      <Button
-                        label="Aprobar"
-                        variant="primary"
-                        size="sm"
-                        onPress={() => approve(item.id)}
-                        leftIcon={<Feather name="check" size={14} color={Colors.textInverse} />}
-                      />
-                    </View>
-                  </View>
-                ) : null}
+          ListFooterComponent={
+            loadingMore ? (
+              <View style={{ paddingVertical: Spacing[4] }}>
+                <ActivityIndicator color={Colors.accentPrimary} />
               </View>
-            );
-          }}
+            ) : null
+          }
+          renderItem={({ item }) => (
+            <PostModerationCard
+              post={item}
+              selectable={selectMode}
+              selected={selected.has(item.id)}
+              hideActions={selectMode}
+              busy={busyId === item.id || bulkBusy}
+              onPress={(p) => (selectMode ? toggleSelect(p.id) : openDetail(p))}
+              onLongPress={(p) => {
+                if (!selectMode) { fb.select(); setSelectMode(true); setSelected(new Set([p.id])); }
+              }}
+              onVerify={(p) => setStatus(p, 'PUBLISHED')}
+              onHide={(p) => setStatus(p, 'HIDDEN')}
+              onReject={(p) => setRejectTarget(p)}
+              onTogglePin={togglePin}
+              onDelete={(p) => setDeleteTarget(p)}
+              onViewReports={openDetail}
+            />
+          )}
         />
       )}
 
@@ -284,89 +365,83 @@ export default function CommunityAdmin() {
               label={`Rechazar (${selected.size})`}
               variant="danger"
               onPress={() => setBulkRejectOpen(true)}
-              disabled={selected.size === 0 || busy}
-              loading={busy}
+              disabled={selected.size === 0 || bulkBusy}
+              loading={bulkBusy}
               leftIcon={<Feather name="x" size={14} color={Colors.accentDanger} />}
             />
           </View>
           <View style={{ flex: 1.3 }}>
             <Button
-              label={`Aprobar (${selected.size})`}
+              label={`Verificar (${selected.size})`}
               variant="primary"
-              onPress={() => setConfirmBulkApprove(true)}
-              disabled={selected.size === 0 || busy}
-              loading={busy}
+              onPress={() => setBulkVerifyOpen(true)}
+              disabled={selected.size === 0 || bulkBusy}
+              loading={bulkBusy}
               leftIcon={<Feather name="check" size={14} color={Colors.textInverse} />}
             />
           </View>
         </View>
       ) : null}
 
-      {/* Single reject sheet */}
-      <Sheet
-        open={!!rejectId}
-        onClose={() => setRejectId(null)}
-        title="Motivo de rechazo"
-      >
-        <View style={{ gap: Spacing[2] }}>
-          {REJECT_REASONS.map((r) => (
-            <Button
-              key={r}
-              label={r}
-              variant="secondary"
-              onPress={() => {
-                const id = rejectId!;
-                setRejectId(null);
-                doReject(id, r);
-              }}
-            />
-          ))}
-        </View>
-      </Sheet>
+      <ReasonSheet
+        open={!!rejectTarget}
+        onClose={() => setRejectTarget(null)}
+        title="Rechazar post"
+        subtitle={rejectTarget ? `Se notificará a ${postAuthorName(rejectTarget)} con el motivo.` : undefined}
+        presets={REJECT_PRESETS}
+        minLength={3}
+        maxLength={500}
+        confirmLabel="Rechazar"
+        variant="danger"
+        onConfirm={(reason) => {
+          const p = rejectTarget;
+          setRejectTarget(null);
+          if (p) setStatus(p, 'REJECTED', reason);
+        }}
+      />
 
-      <Sheet
+      <ReasonSheet
         open={bulkRejectOpen}
         onClose={() => setBulkRejectOpen(false)}
-        title={`Rechazar ${selected.size} post${selected.size > 1 ? 's' : ''}`}
-      >
-        <View style={{ gap: Spacing[2] }}>
-          {REJECT_REASONS.map((r) => (
-            <Button
-              key={r}
-              label={r}
-              variant="secondary"
-              onPress={() => doBulkReject(r)}
-            />
-          ))}
-        </View>
-      </Sheet>
+        title={`Rechazar ${selected.size} post${selected.size === 1 ? '' : 's'}`}
+        presets={REJECT_PRESETS}
+        minLength={3}
+        maxLength={500}
+        confirmLabel="Rechazar todos"
+        variant="danger"
+        onConfirm={(reason) => bulk('reject', reason)}
+      />
 
-      <ConfirmDialog
-        open={confirmBulkApprove}
-        onClose={() => setConfirmBulkApprove(false)}
-        onConfirm={performBulkApprove}
-        title={`Aprobar ${selected.size} post${selected.size > 1 ? 's' : ''}`}
-        description="Publicar todos los seleccionados?"
-        confirmLabel="Aprobar"
+      <ConfirmSheet
+        visible={bulkVerifyOpen}
+        onClose={() => setBulkVerifyOpen(false)}
+        title={`Verificar ${selected.size} post${selected.size === 1 ? '' : 's'}`}
+        message="Se marcarán como publicados y verificados por el equipo."
+        icon="check-circle"
+        variant="success"
+        confirmLabel="Verificar"
+        onConfirm={() => bulk('verify')}
+        loading={bulkBusy}
+      />
+
+      <ConfirmSheet
+        visible={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        title="Eliminar post"
+        message={deleteTarget ? `El post de ${postAuthorName(deleteTarget)} desaparecerá del feed y de su perfil. Esta acción no se puede deshacer.` : ''}
+        icon="trash-2"
+        variant="danger"
+        confirmLabel="Eliminar"
+        onConfirm={doDelete}
+        loading={!!deleteTarget && busyId === deleteTarget.id}
       />
     </SafeAreaView>
   );
 }
 
-function relTime(d?: string) {
-  if (!d) return '';
-  const diff = Math.max(0, Math.floor((Date.now() - new Date(d).getTime()) / 1000));
-  if (diff < 60) return `${diff}s`;
-  if (diff < 3600) return `${Math.floor(diff / 60)}min`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
-  return `${Math.floor(diff / 86400)}d`;
-}
-
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
   pressed: { opacity: 0.7 },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-
   iconBtn: {
     width: 36,
     height: 36,
@@ -386,50 +461,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-
-  empty: { alignItems: 'center', paddingTop: 80, gap: 4 },
-
-  card: {
-    backgroundColor: Colors.bgCard,
-    borderRadius: Radius['2xl'],
-    paddingHorizontal: Spacing[4],
-    paddingVertical: Spacing[3],
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: Colors.border,
-    gap: Spacing[3],
-  },
-  cardSelected: {
-    borderColor: Colors.accentPrimary,
-    backgroundColor: 'rgba(201,169,97,0.06)',
-  },
-  cardHead: { flexDirection: 'row', gap: Spacing[2], alignItems: 'center' },
-  checkbox: {
-    width: 22,
-    height: 22,
-    borderRadius: 6,
-    borderWidth: 1.5,
-    borderColor: Colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: Colors.bgElevated,
-  },
-  checkboxOn: {
-    backgroundColor: Colors.accentPrimary,
-    borderColor: Colors.accentPrimary,
-  },
-  avatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: Colors.accentPrimary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  imgBadge: { flexDirection: 'row', gap: 6, alignItems: 'center' },
-
-  actions: { flexDirection: 'row', gap: Spacing[2], paddingTop: 4 },
-
+  filters: { paddingHorizontal: Spacing[5], paddingBottom: Spacing[2], gap: Spacing[3] },
   bulkBar: {
     position: 'absolute',
     bottom: 0,

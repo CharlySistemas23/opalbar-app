@@ -60,15 +60,15 @@ export default function NewStory() {
   const [publishing, setPublishing] = useState(false);
 
   async function pickFromCamera() {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== 'granted') {
-      toast(t ? 'Necesitamos acceso a la cámara.' : 'We need camera access.', 'warning');
-      return;
-    }
-    setPicking(true);
     try {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== 'granted') {
+        toast(t ? 'Necesitamos acceso a la cámara.' : 'We need camera access.', 'warning');
+        return;
+      }
+      setPicking(true);
       const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'],
         allowsEditing: true,
         aspect: [9, 16],
         quality: 0.9,
@@ -76,21 +76,24 @@ export default function NewStory() {
       if (!result.canceled && result.assets[0]) {
         setLocalImage(result.assets[0].uri);
       }
+    } catch (err) {
+      fb.error();
+      toast(t ? 'No se pudo abrir la cámara.' : 'Could not open the camera.', 'danger');
     } finally {
       setPicking(false);
     }
   }
 
   async function pickFromGallery() {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      toast(t ? 'Necesitamos acceso a tu galería.' : 'We need photo library access.', 'warning');
-      return;
-    }
-    setPicking(true);
     try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        toast(t ? 'Necesitamos acceso a tu galería.' : 'We need photo library access.', 'warning');
+        return;
+      }
+      setPicking(true);
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'],
         allowsEditing: true,
         aspect: [9, 16],
         quality: 0.9,
@@ -98,6 +101,9 @@ export default function NewStory() {
       if (!result.canceled && result.assets[0]) {
         setLocalImage(result.assets[0].uri);
       }
+    } catch (err) {
+      fb.error();
+      toast(t ? 'No se pudo abrir la galería.' : 'Could not open the photo library.', 'danger');
     } finally {
       setPicking(false);
     }
@@ -114,6 +120,7 @@ export default function NewStory() {
       try {
         mediaUrl = await uploadImage(localImage, { kind: 'story' });
       } catch (err) {
+        fb.error();
         const msg = err instanceof UploadError ? err.message : 'upload failed';
         toast(
           t ? `No se pudo subir la imagen: ${msg}` : `Could not upload image: ${msg}`,
@@ -319,6 +326,7 @@ export default function NewStory() {
         initialTags={photoTags}
         onClose={() => setTaggerOpen(false)}
         onSubmit={setPhotoTags}
+        t={t}
       />
     </SafeAreaView>
   );

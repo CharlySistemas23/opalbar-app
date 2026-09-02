@@ -9,6 +9,7 @@ import { RedisService, LockBusyError } from '../../database/redis.service';
 import { paginate, getPaginationOffset } from '../../common/dto/pagination.dto';
 import { RealtimeService } from '../realtime/realtime.service';
 import { CreateOfferDto, OfferFilterDto, UpdateOfferDto } from './dto/offer.dto';
+import { isWithinWindow, nowMx } from '../reservations/mx-time';
 
 // Cache TTLs — public reads. Offers change less than events so we can hold longer.
 const CACHE_TTL_LIST = 60;
@@ -58,8 +59,8 @@ export class OffersService {
         }),
       });
 
-      // Cards never read description/terms (long Text columns) — pulling them
-      // bloats list responses for no UI gain. Trim to just the card surface.
+      // Cards don't read `terms` (long Text column). Description is shown as
+      // the card subtitle, so it stays in the list surface.
       const [data, total] = await Promise.all([
         this.prisma.offer.findMany({
           where,
@@ -69,6 +70,8 @@ export class OffersService {
             id: true,
             title: true,
             titleEn: true,
+            description: true,
+            descriptionEn: true,
             imageUrl: true,
             type: true,
             status: true,
@@ -209,6 +212,19 @@ export class OffersService {
 
     const now = new Date();
 
+    // Idempotent: an unused, unexpired code already exists → hand it back
+    // instead of charging points twice.
+    const active = await this.prisma.offerRedemption.findFirst({
+      where: {
+        userId,
+        offerId,
+        isUsed: false,
+        OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (active) return active;
+
     // Validity checks
     if (offer.status !== OfferStatus.ACTIVE) throw new BadRequestException('Offer is not active');
     if (offer.startDate > now || offer.endDate < now) throw new BadRequestException('Offer is not currently valid');
@@ -216,15 +232,24 @@ export class OffersService {
       throw new ConflictException('Offer has been fully redeemed');
     }
 
-    // Day of week check
-    const dayOfWeek = now.getDay();
-    if (offer.daysOfWeek.length > 0 && !offer.daysOfWeek.includes(dayOfWeek)) {
+    // Day-of-week + time window are evaluated in the venue's timezone
+    // (server runs UTC — `now.getDay()` was off by one after 18:00 local).
+    const local = nowMx(now);
+    if (offer.daysOfWeek.length > 0 && !offer.daysOfWeek.includes(local.weekday)) {
       throw new BadRequestException('Offer is not valid today');
     }
+    if ((offer.startTime || offer.endTime) && !isWithinWindow(local.time, offer.startTime, offer.endTime)) {
+      throw new BadRequestException('Offer is not valid at this time');
+    }
 
-    // Per-user limit
+    // Per-user limit — codes that expired without being used don't count
+    // against the user (they never received the benefit).
     const userRedemptions = await this.prisma.offerRedemption.count({
-      where: { userId, offerId },
+      where: {
+        userId,
+        offerId,
+        OR: [{ isUsed: true }, { expiresAt: null }, { expiresAt: { gt: now } }],
+      },
     });
     if (userRedemptions >= offer.maxPerUser) {
       throw new ConflictException('You have already redeemed this offer the maximum number of times');

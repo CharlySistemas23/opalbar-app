@@ -24,6 +24,13 @@ interface AppState {
   notificationCount: number;
   hapticsEnabled: boolean;
   soundsEnabled: boolean;
+  /**
+   * App-lock with Face ID / Touch ID / fingerprint. When true and the user
+   * is authenticated, the root layout requires LocalAuthentication on cold
+   * start and after >30s in background. Toggle via `useBiometricLock()` from
+   * `src/lib/biometric.ts` (it verifies hardware + enrollment first).
+   */
+  biometricLock: boolean;
 
   setLanguage: (lang: Language) => void;
   setHasOnboarded: (val: boolean) => void;
@@ -32,6 +39,7 @@ interface AppState {
   clearNotifications: () => void;
   setHapticsEnabled: (val: boolean) => void;
   setSoundsEnabled: (val: boolean) => void;
+  setBiometricLock: (val: boolean) => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -42,6 +50,7 @@ export const useAppStore = create<AppState>()(
       notificationCount: 0,
       hapticsEnabled: true,
       soundsEnabled: true,
+      biometricLock: false,
 
       setLanguage: (language) => set({ language }),
       setHasOnboarded: (hasOnboarded) => set({ hasOnboarded }),
@@ -50,6 +59,7 @@ export const useAppStore = create<AppState>()(
       clearNotifications: () => set({ notificationCount: 0 }),
       setHapticsEnabled: (hapticsEnabled) => set({ hapticsEnabled }),
       setSoundsEnabled: (soundsEnabled) => set({ soundsEnabled }),
+      setBiometricLock: (biometricLock) => set({ biometricLock }),
     }),
     {
       name: 'opalbar-app',

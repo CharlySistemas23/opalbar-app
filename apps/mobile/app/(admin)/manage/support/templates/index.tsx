@@ -11,6 +11,7 @@ import { apiError } from '@/api/errors';
 import { useSafeBack } from '@/hooks/useSafeBack';
 import { Colors } from '@/constants/tokens';
 import { ConfirmDialog } from '@/components/ui';
+import { ErrorState } from '@/components/ErrorState';
 import { AdminHeader } from '@/components/admin';
 
 const CATEGORY_OPTIONS = [
@@ -27,6 +28,7 @@ export default function QuickRepliesList() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [confirmDel, setConfirmDel] = useState<{ id: string; title: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const [showEdit, setShowEdit] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
@@ -36,10 +38,13 @@ export default function QuickRepliesList() {
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
+    setError(null);
     try {
       const r = await adminApi.quickReplies();
       setReplies(r.data?.data ?? r.data ?? []);
-    } catch {} finally {
+    } catch (err) {
+      setError(apiError(err));
+    } finally {
       setLoading(false); setRefreshing(false);
     }
   }, []);
@@ -121,6 +126,8 @@ export default function QuickRepliesList() {
 
       {loading ? (
         <View style={styles.center}><ActivityIndicator color={Colors.accentPrimary} /></View>
+      ) : error ? (
+        <ErrorState message={error} onRetry={load} />
       ) : (
         <FlatList
           data={replies}
@@ -232,7 +239,7 @@ export default function QuickRepliesList() {
         onClose={() => setConfirmDel(null)}
         onConfirm={performDelete}
         title="Eliminar plantilla"
-        description={`Eliminar "${confirmDel?.title ?? ''}"? Ya no podra insertarse en el chat.`}
+        description={`¿Eliminar "${confirmDel?.title ?? ''}"? Ya no podrá insertarse en el chat (puedes recrearla si te arrepientes).`}
         confirmLabel="Eliminar"
         confirmVariant="danger"
       />

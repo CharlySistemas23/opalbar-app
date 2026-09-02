@@ -1,248 +1,262 @@
 // ─────────────────────────────────────────────
-//  Biometric — Editorial Premium
+//  Biometric lock — Editorial Premium
 //
-//  Three states wrapped in one screen: probing (loader), unavailable /
-//  not-enrolled (warning), ready (success). All states share the editorial
-//  scaffold: kicker, Display headline, lead, primary + secondary buttons.
-//  Lógica intacta (mismo hook, mismas rutas) — sólo el layer visual cambia.
+//  Full-screen app-lock rendered by the root layout (BiometricGate) as an
+//  overlay while `useBiometricLockState().locked` is true. The user is
+//  already signed in; this screen only proves device ownership via
+//  Face ID / Touch ID / fingerprint (device passcode as system fallback).
+//
+//  States
+//   · probing      — hardware check in flight (skeleton)
+//   · ready        — auto-prompts once on mount, "Desbloquear" retries
+//   · unavailable  — hardware / enrollment gone → lock disables itself
+//
+//  Also mounted as a route (/(auth)/biometric) for safety; in that case a
+//  successful unlock navigates home instead of just dropping the overlay.
 // ─────────────────────────────────────────────
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Feather } from '@expo/vector-icons';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { useAppStore } from '@/stores/app.store';
-import { authenticate, getBiometricState, type BiometricState } from '@/lib/biometric';
-import { Colors, EditorialSpacing, Spacing } from '@/constants/tokens';
-import { HitSlop } from '@/constants/a11y';
+import { useAuthStore } from '@/stores/auth.store';
+import {
+  authenticate,
+  getBiometricState,
+  setBiometricLock,
+  unlockNow,
+  useBiometricLockState,
+  type BiometricState,
+} from '@/lib/biometric';
+import { toast } from '@/components/Toast';
+import { useFeedback } from '@/hooks/useFeedback';
+import { Colors, EditorialSpacing, Radius, Spacing } from '@/constants/tokens';
 import {
   Body,
   Button,
   Caption,
   Display,
   FadeIn,
-  Hairline,
+  Heading,
   Kicker,
   Lead,
+  Skeleton,
 } from '@/components/ui';
 
-export default function Biometric() {
+type MciName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
+
+const ICON_BY_KIND: Record<BiometricState['kind'], MciName> = {
+  face: 'face-recognition',
+  fingerprint: 'fingerprint',
+  iris: 'eye-outline',
+  generic: 'shield-lock-outline',
+  none: 'shield-lock-outline',
+};
+
+interface Props {
+  /** True when rendered by the root gate (overlay), false when a route. */
+  overlay?: boolean;
+}
+
+export default function BiometricLock({ overlay = false }: Props) {
   const router = useRouter();
   const { language } = useAppStore();
   const t = language === 'es';
+  const fb = useFeedback();
+  const logout = useAuthStore((s) => s.logout);
+  const wasLocked = useRef(useBiometricLockState.getState().locked);
 
   const [state, setState] = useState<BiometricState | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [authing, setAuthing] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const autoPrompted = useRef(false);
 
+  const finishUnlock = useCallback(() => {
+    fb.success();
+    unlockNow();
+    if (!overlay && !wasLocked.current) {
+      router.replace('/(tabs)/home' as never);
+    }
+  }, [fb, overlay, router]);
+
+  const tryUnlock = useCallback(async () => {
+    if (authing) return;
+    setAuthing(true);
+    setFailed(false);
+    const ok = await authenticate(
+      t ? 'Desbloquea OPALBAR' : 'Unlock OPALBAR',
+    );
+    setAuthing(false);
+    if (ok) {
+      finishUnlock();
+    } else {
+      fb.error();
+      setFailed(true);
+    }
+  }, [authing, t, finishUnlock, fb]);
+
+  // Probe hardware. If biometrics vanished (enrollment removed) the lock
+  // cannot be satisfied → disable the feature and let the user through.
   useEffect(() => {
-    getBiometricState().then(setState);
+    let alive = true;
+    getBiometricState().then((s) => {
+      if (!alive) return;
+      setState(s);
+      if (!s.available || !s.enrolled) {
+        setBiometricLock(false);
+        toast(
+          t
+            ? 'Bloqueo biométrico desactivado: tu dispositivo ya no tiene biometría configurada.'
+            : 'Biometric lock disabled: your device no longer has biometrics set up.',
+          'info',
+        );
+        unlockNow();
+        if (!overlay) router.replace('/(tabs)/home' as never);
+      }
+    });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function handleUse() {
-    setLoading(true);
-    const ok = await authenticate(
-      t ? 'Confirma tu identidad para entrar' : 'Confirm your identity to sign in',
-    );
-    setLoading(false);
-    if (ok) {
-      router.replace('/(tabs)/home' as never);
+  // Auto-prompt once as soon as we know biometrics are usable.
+  useEffect(() => {
+    if (!state || !state.available || !state.enrolled || autoPrompted.current) return;
+    autoPrompted.current = true;
+    const id = setTimeout(() => {
+      tryUnlock();
+    }, 350);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state]);
+
+  async function handleLogout() {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    try {
+      await logout();
+    } finally {
+      unlockNow();
+      setLoggingOut(false);
+      router.replace('/(auth)/welcome' as never);
     }
   }
 
-  function goPasswordLogin() {
-    router.replace('/(auth)/login' as never);
-  }
+  const kind = state?.kind ?? 'generic';
+  const usable = !!state && state.available && state.enrolled;
 
-  // Header shared across all states
-  const Header = (
-    <View style={styles.header}>
-      <Pressable
-        onPress={() => router.back()}
-        hitSlop={HitSlop.expand}
-        accessibilityRole="button"
-        accessibilityLabel={t ? 'Volver' : 'Back'}
-        style={styles.backBtn}
-      >
-        <Feather name="arrow-left" size={20} color={Colors.textPrimary} />
-      </Pressable>
-    </View>
-  );
-
-  // ── Probing ────────────────────────────────
-  if (!state) {
-    return (
-      <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
-        {Header}
-        <View style={styles.center}>
-          <FadeIn>
-            <ActivityIndicator color={Colors.accentPrimary} />
-          </FadeIn>
-          <FadeIn delay={180} style={{ marginTop: Spacing[6] }}>
-            <Kicker tone="champagne" align="center">
-              {t ? 'VERIFICANDO DISPOSITIVO' : 'CHECKING DEVICE'}
-            </Kicker>
-          </FadeIn>
-          <FadeIn delay={260} style={{ marginTop: Spacing[3], maxWidth: 320 }}>
-            <Lead tone="secondary" align="center">
-              {t
-                ? 'Comprobando si tu dispositivo soporta biometría…'
-                : 'Checking if your device supports biometrics…'}
-            </Lead>
-          </FadeIn>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  // ── Unavailable / not enrolled ─────────────
-  if (!state.available || !state.enrolled) {
-    const kicker = state.available
+  const unlockLabel =
+    kind === 'face'
       ? t
-        ? 'BIOMETRÍA NO CONFIGURADA'
-        : 'NO BIOMETRICS ENROLLED'
-      : t
-        ? 'BIOMETRÍA NO DISPONIBLE'
-        : 'BIOMETRICS UNAVAILABLE';
-
-    const title = state.available
-      ? t
-        ? 'Sin biometría\nconfigurada.'
-        : 'No biometrics\nenrolled.'
-      : t
-        ? 'Tu dispositivo no\nsoporta biometría.'
-        : "Your device doesn't\nsupport biometrics.";
-
-    const message = state.available
-      ? t
-        ? 'No tienes huellas ni Face ID registrados. Configúralos desde los ajustes del sistema o entra con tu contraseña.'
-        : 'No fingerprints or Face ID enrolled yet. Set them up in system settings, or use your password.'
-      : t
-        ? 'Inicia sesión con tu contraseña — funciona igual de bien.'
-        : 'Sign in with your password — works just as well.';
-
-    return (
-      <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
-        {Header}
-        <View style={styles.scroll}>
-          <FadeIn>
-            <Kicker tone="champagne">{kicker}</Kicker>
-          </FadeIn>
-          <FadeIn delay={80} style={{ marginTop: Spacing[3] }}>
-            <Display size="md">{title}</Display>
-          </FadeIn>
-          <FadeIn delay={180} style={{ marginTop: Spacing[4], maxWidth: 360 }}>
-            <Lead tone="secondary">{message}</Lead>
-          </FadeIn>
-
-          <View style={styles.footer}>
-            <Hairline />
-            <FadeIn delay={260} style={{ marginTop: Spacing[6] }}>
-              <Button
-                label={t ? 'Iniciar sesión' : 'Sign in'}
-                onPress={goPasswordLogin}
-                variant="primary"
-                size="lg"
-                fullWidth
-                rightIcon={<Feather name="arrow-right" size={18} color={Colors.textInverse} />}
-              />
-            </FadeIn>
-          </View>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  // ── Ready ──────────────────────────────────
-  const kicker =
-    state.kind === 'face'
-      ? t
-        ? 'ENTRADA RÁPIDA'
-        : 'QUICK ENTRY'
-      : t
-        ? 'ENTRADA RÁPIDA'
-        : 'QUICK ENTRY';
-
-  const title =
-    state.kind === 'face'
-      ? t
-        ? 'Entra con\nFace ID.'
-        : 'Sign in with\nFace ID.'
-      : state.kind === 'fingerprint'
+        ? 'Desbloquear con Face ID'
+        : 'Unlock with Face ID'
+      : kind === 'fingerprint'
         ? t
-          ? 'Entra con\nhuella.'
-          : 'Sign in with\nfingerprint.'
+          ? 'Desbloquear con huella'
+          : 'Unlock with fingerprint'
         : t
-          ? 'Entra con\nbiometría.'
-          : 'Sign in with\nbiometrics.';
-
-  const primaryLabel =
-    state.kind === 'face'
-      ? t
-        ? 'Usar Face ID'
-        : 'Use Face ID'
-      : state.kind === 'fingerprint'
-        ? t
-          ? 'Usar huella digital'
-          : 'Use fingerprint'
-        : t
-          ? 'Usar biometría'
-          : 'Use biometrics';
+          ? 'Desbloquear'
+          : 'Unlock';
 
   return (
     <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
-      {Header}
-      <View style={styles.scroll}>
-        <FadeIn>
-          <Kicker tone="champagne">{kicker}</Kicker>
-        </FadeIn>
-        <FadeIn delay={80} style={{ marginTop: Spacing[3] }}>
-          <Display size="md">{title}</Display>
-        </FadeIn>
-        <FadeIn delay={180} style={{ marginTop: Spacing[4], maxWidth: 360 }}>
-          <Lead tone="secondary">
-            {t
-              ? 'Rápido, seguro, sin escribir nada. Tus datos biométricos nunca salen del dispositivo.'
-              : 'Fast, secure, no typing required. Your biometric data never leaves the device.'}
-          </Lead>
-        </FadeIn>
+      <View style={styles.content}>
+        <View style={styles.hero}>
+          <FadeIn>
+            <View style={styles.brandMark} accessibilityIgnoresInvertColors>
+              <Heading
+                size="lg"
+                tone="accent"
+                style={{ lineHeight: 28 }}
+                accessibilityElementsHidden
+              >
+                O
+              </Heading>
+            </View>
+          </FadeIn>
 
-        <FadeIn delay={280} style={styles.hintBlock}>
-          <Body size="sm" tone="muted">
-            {t
-              ? 'Si prefieres tu contraseña, sigue funcionando.'
-              : "If you prefer your password, it still works."}
-          </Body>
-        </FadeIn>
+          <FadeIn delay={120}>
+            <Kicker align="center" tone="accent" style={{ opacity: 0.9 }}>
+              {t ? 'OPALBAR · BLOQUEADO' : 'OPALBAR · LOCKED'}
+            </Kicker>
+          </FadeIn>
 
-        <View style={styles.footer}>
-          <Hairline />
-          <FadeIn delay={360} style={{ marginTop: Spacing[6] }}>
+          <FadeIn delay={200}>
+            <Display size="lg" align="center">
+              {t ? 'Desbloquea\npara continuar.' : 'Unlock to\ncontinue.'}
+            </Display>
+          </FadeIn>
+
+          <FadeIn delay={300}>
+            <Lead tone="secondary" align="center" style={styles.lead}>
+              {t
+                ? 'Tu sesión sigue activa. Confirma que eres tú para abrir la app.'
+                : 'Your session is still active. Confirm it is you to open the app.'}
+            </Lead>
+          </FadeIn>
+
+          <FadeIn delay={380} style={styles.iconWrap}>
+            {state ? (
+              <View
+                style={[styles.iconChip, failed && styles.iconChipFailed]}
+                accessibilityElementsHidden
+                importantForAccessibility="no-hide-descendants"
+              >
+                <MaterialCommunityIcons
+                  name={ICON_BY_KIND[kind]}
+                  size={40}
+                  color={failed ? Colors.accentDanger : Colors.accentPrimary}
+                />
+              </View>
+            ) : (
+              <Skeleton width={88} height={88} radius={Radius.xl} />
+            )}
+          </FadeIn>
+
+          {failed ? (
+            <FadeIn>
+              <Caption tone="danger" align="center">
+                {t
+                  ? 'No pudimos verificar tu identidad. Inténtalo de nuevo.'
+                  : 'We could not verify your identity. Try again.'}
+              </Caption>
+            </FadeIn>
+          ) : null}
+        </View>
+
+        <View style={styles.actions}>
+          <FadeIn delay={460}>
             <Button
-              label={primaryLabel}
-              onPress={handleUse}
-              loading={loading}
+              label={unlockLabel}
+              onPress={tryUnlock}
+              loading={authing || !state}
+              disabled={!usable}
               variant="primary"
               size="lg"
               fullWidth
               accessibilityHint={t ? 'Abre el lector biométrico' : 'Opens the biometric reader'}
             />
           </FadeIn>
-          <FadeIn delay={430} style={{ marginTop: Spacing[3] }}>
+          <FadeIn delay={520}>
             <Button
-              label={t ? 'Usar contraseña' : 'Use password'}
-              onPress={goPasswordLogin}
+              label={t ? 'Cerrar sesión' : 'Sign out'}
+              onPress={handleLogout}
+              loading={loggingOut}
               variant="ghost"
               size="lg"
               fullWidth
             />
           </FadeIn>
-          <FadeIn delay={500} style={{ marginTop: Spacing[4] }}>
-            <Caption tone="muted" align="center">
+          <FadeIn delay={580}>
+            <Body size="sm" tone="muted" align="center">
               {t
-                ? 'Cifrado en el chip seguro de tu dispositivo.'
-                : 'Encrypted on your device’s secure enclave.'}
-            </Caption>
+                ? 'Tus datos biométricos nunca salen del dispositivo.'
+                : 'Your biometric data never leaves the device.'}
+            </Body>
           </FadeIn>
         </View>
       </View>
@@ -251,31 +265,52 @@ export default function Biometric() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: Colors.bgPrimary },
-  header: { paddingHorizontal: EditorialSpacing.pageGutter, paddingTop: Spacing[2] },
-  backBtn: {
-    width: 44,
-    height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginLeft: -Spacing[2],
+  root: {
+    flex: 1,
+    backgroundColor: Colors.bgPrimary,
   },
-  scroll: {
+  content: {
     flex: 1,
     paddingHorizontal: EditorialSpacing.pageGutter,
-    paddingTop: Spacing[8],
-    paddingBottom: Spacing[8],
+    paddingVertical: 60,
+    justifyContent: 'space-between',
   },
-  center: {
-    flex: 1,
+  hero: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: EditorialSpacing.pageGutter,
+    gap: Spacing[4],
   },
-  hintBlock: {
+  brandMark: {
+    width: 64,
+    height: 64,
+    borderRadius: Radius.xl,
+    backgroundColor: Colors.bgElevated,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(246,241,231,0.10)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  lead: {
+    maxWidth: 320,
+  },
+  iconWrap: {
     marginTop: Spacing[6],
+    alignItems: 'center',
   },
-  footer: {
-    marginTop: 'auto',
+  iconChip: {
+    width: 88,
+    height: 88,
+    borderRadius: Radius.xl,
+    backgroundColor: Colors.bgCard,
+    borderWidth: 1,
+    borderColor: 'rgba(201,169,97,0.35)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  iconChipFailed: {
+    borderColor: 'rgba(196,104,104,0.45)',
+  },
+  actions: {
+    gap: Spacing[3],
   },
 });

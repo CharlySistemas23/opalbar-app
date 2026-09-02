@@ -6,9 +6,9 @@
 //  Lista de pendientes; cada row tiene Accept (Button primary) /
 //  Decline (Button ghost) / Block (Button ghost danger).
 // ─────────────────────────────────────────────
-import { useCallback, useEffect, useState } from 'react';
-import { Alert, FlatList, Image, StyleSheet, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Alert, FlatList, Image, RefreshControl, StyleSheet, View } from 'react-native';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 
@@ -23,13 +23,20 @@ import {
   Heading,
   Kicker,
   Pressy,
+  Sheet,
   SkeletonList,
   Subhead,
 } from '@/components/ui';
 import { EmptyState } from '@/components/EmptyState';
+import { ErrorState } from '@/components/ErrorState';
+import { toast } from '@/components/Toast';
+import { messagePreview, relTime } from '@/components/messages';
 import { Colors, EditorialSpacing, Radius, Spacing } from '@/constants/tokens';
 import { HitSlop, Roles } from '@/constants/a11y';
+import { playUiSound } from '@/hooks/useFeedback';
+import { useRealtime } from '@/hooks/useRealtime';
 import { messagesApi } from '@/api/client';
+import { apiError } from '@/api/errors';
 import { useAppStore } from '@/stores/app.store';
 
 const AVATAR_COLORS = ['#C9A961', '#7FA0BC', '#9F8DBE', '#6FA88A', '#C46868', '#C48A8A'];
@@ -37,19 +44,20 @@ function colorFor(id: string) {
   const idx = Math.abs([...id].reduce((a, c) => a + c.charCodeAt(0), 0)) % AVATAR_COLORS.length;
   return AVATAR_COLORS[idx];
 }
-function relTime(d?: string, t?: boolean) {
-  if (!d) return '';
-  const diff = Math.max(0, Math.floor((Date.now() - new Date(d).getTime()) / 1000));
-  if (diff < 60) return t ? 'ahora' : 'now';
-  if (diff < 3600) return `${Math.floor(diff / 60)}m`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
-  return `${Math.floor(diff / 86400)}d`;
-}
 
 type Request = {
   id: string;
   lastMessageAt?: string;
-  lastMessage?: { id: string; content: string; createdAt: string; senderId: string } | null;
+  lastMessage?: {
+    id: string;
+    content?: string | null;
+    imageUrl?: string | null;
+    stickerKey?: string | null;
+    audioUrl?: string | null;
+    audioDurationSec?: number | null;
+    createdAt: string;
+    senderId: string;
+  } | null;
   otherUser: {
     id: string;
     profile?: { firstName?: string; lastName?: string; avatarUrl?: string };
@@ -68,20 +76,44 @@ export default function MessageRequestsScreen() {
 
   const [items, setItems] = useState<Request[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [menuTarget, setMenuTarget] = useState<Request | null>(null);
   const [blockTarget, setBlockTarget] = useState<Request | null>(null);
+  const loadedOnce = useRef(false);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (opts: { silent?: boolean } = {}) => {
+    if (!opts.silent) setError(null);
     try {
       const r = await messagesApi.requests();
       setItems(r.data?.data ?? []);
-    } catch {}
-    finally {
+      setError(null);
+      loadedOnce.current = true;
+    } catch (err) {
+      if (opts.silent && loadedOnce.current) toast(apiError(err), 'danger');
+      else setError(apiError(err));
+    } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useFocusEffect(
+    useCallback(() => {
+      load({ silent: loadedOnce.current });
+    }, [load]),
+  );
+
+  const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (debounce.current) clearTimeout(debounce.current); }, []);
+  useRealtime(['thread', 'message'], () => {
+    if (debounce.current) clearTimeout(debounce.current);
+    debounce.current = setTimeout(() => {
+      debounce.current = null;
+      load({ silent: true });
+    }, 300);
+  });
 
   function removeLocal(id: string) {
     setItems((prev) => prev.filter((x) => x.id !== id));
@@ -168,11 +200,24 @@ export default function MessageRequestsScreen() {
         <View style={styles.listPad}>
           <SkeletonList count={4} itemHeight={140} />
         </View>
+      ) : error && items.length === 0 ? (
+        <ErrorState
+          message={error}
+          retryLabel={t ? 'Reintentar' : 'Retry'}
+          onRetry={() => { setLoading(true); load(); }}
+        />
       ) : (
         <FlatList
           data={items}
           keyExtractor={(x) => x.id}
           contentContainerStyle={styles.listContent}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => { playUiSound('swoosh'); setRefreshing(true); load(); }}
+              tintColor={Colors.accentPrimary}
+            />
+          }
           ItemSeparatorComponent={() => (
             <Hairline variant="subtle" marginHorizontal={EditorialSpacing.pageGutter} />
           )}
@@ -184,6 +229,7 @@ export default function MessageRequestsScreen() {
                 t={t}
                 onAccept={() => accept(item)}
                 onDecline={() => decline(item)}
+                onMenu={() => setMenuTarget(item)}
                 onBlock={() => setBlockTarget(item)}
               />
             </FadeIn>
@@ -201,6 +247,45 @@ export default function MessageRequestsScreen() {
           }
         />
       )}
+
+      <Sheet
+        open={!!menuTarget}
+        onClose={() => setMenuTarget(null)}
+        title={menuTarget ? nameOf(menuTarget) : ''}
+      >
+        {menuTarget ? (
+          <View style={{ gap: Spacing[1], paddingBottom: Spacing[2] }}>
+            <Pressy
+              onPress={() => {
+                const uid = menuTarget.otherUser?.id;
+                setMenuTarget(null);
+                if (uid) router.push(`/(app)/users/${uid}` as never);
+              }}
+              accessibilityRole={Roles.button}
+              accessibilityLabel={t ? 'Ver perfil' : 'View profile'}
+              haptic="select"
+              style={styles.sheetRow}
+            >
+              <Feather name="user" size={18} color={Colors.textPrimary} />
+              <Body>{t ? 'Ver perfil' : 'View profile'}</Body>
+            </Pressy>
+            <Pressy
+              onPress={() => {
+                const target = menuTarget;
+                setMenuTarget(null);
+                setBlockTarget(target);
+              }}
+              accessibilityRole={Roles.button}
+              accessibilityLabel={t ? 'Bloquear' : 'Block'}
+              haptic="destructive"
+              style={styles.sheetRow}
+            >
+              <Feather name="slash" size={18} color={Colors.accentDanger} />
+              <Body tone="danger">{t ? 'Bloquear' : 'Block'}</Body>
+            </Pressy>
+          </View>
+        ) : null}
+      </Sheet>
 
       <ConfirmDialog
         open={!!blockTarget}
@@ -230,6 +315,7 @@ function RequestRow({
   t,
   onAccept,
   onDecline,
+  onMenu,
   onBlock,
 }: {
   req: Request;
@@ -237,12 +323,13 @@ function RequestRow({
   t: boolean;
   onAccept: () => void;
   onDecline: () => void;
+  onMenu: () => void;
   onBlock: () => void;
 }) {
   const name = nameOf(req);
   const initials = name.split(' ').map((s) => s[0]).join('').slice(0, 2).toUpperCase();
   const avatar = req.otherUser?.profile?.avatarUrl;
-  const preview = req.lastMessage?.content ?? '';
+  const preview = messagePreview(req.lastMessage, t);
 
   return (
     <View style={styles.row}>
@@ -261,7 +348,7 @@ function RequestRow({
           </Caption>
         </View>
         <Pressy
-          onPress={onBlock}
+          onPress={onMenu}
           accessibilityLabel={t ? 'Más opciones' : 'More options'}
           accessibilityRole={Roles.button}
           hitSlop={HitSlop.expand}
@@ -385,5 +472,12 @@ const styles = StyleSheet.create({
     borderRadius: Radius.button,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+
+  sheetRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing[3],
+    minHeight: 52,
   },
 });

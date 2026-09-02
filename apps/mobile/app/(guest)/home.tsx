@@ -36,9 +36,11 @@ import {
 } from '@/components/ui';
 import { Colors, EditorialSpacing, Radius, Spacing } from '@/constants/tokens';
 import { HitSlop, Roles } from '@/constants/a11y';
-import { eventsApi, offersApi } from '@/api/client';
+import { eventsApi, offersApi, toAbsoluteImageUrl } from '@/api/client';
+import { apiError } from '@/api/errors';
 import { useAppStore } from '@/stores/app.store';
 import { OpalbarRoutes } from '@/lib/website';
+import { ErrorState } from '@/components/ErrorState';
 
 interface EventItem {
   id: string;
@@ -54,15 +56,28 @@ interface OfferItem {
   id: string;
   title: string;
   description?: string;
-  validWhen?: string;
+  daysOfWeek?: number[];
+  startTime?: string | null;
+  endTime?: string | null;
 }
 
-function toAbsoluteImageUrl(url?: string): string | undefined {
-  if (!url) return undefined;
-  if (/^https?:\/\//i.test(url) || url.startsWith('data:image/')) return url;
-  const api = process.env['EXPO_PUBLIC_API_URL'] || 'http://localhost:3000/api/v1';
-  const base = api.replace(/\/api\/v1\/?$/, '').replace(/\/$/, '');
-  return `${base}${url.startsWith('/') ? '' : '/'}${url}`;
+/** Real schedule ("Vie, Sáb · 20:00–02:00") — falls back to the description. */
+function offerSchedule(offer: OfferItem, t: boolean): string | undefined {
+  const DAY_ES = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+  const DAY_EN = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const labels = t ? DAY_ES : DAY_EN;
+  const days = offer.daysOfWeek;
+  let dayStr: string | undefined;
+  if (days && days.length > 0 && days.length < 7) {
+    dayStr = [...days].sort((a, b) => a - b).map((d) => labels[d]).join(', ');
+  } else if (days && days.length === 7) {
+    dayStr = t ? 'Todos los días' : 'Every day';
+  }
+  const timeStr = offer.startTime && offer.endTime
+    ? `${offer.startTime}–${offer.endTime}`
+    : offer.startTime || offer.endTime || undefined;
+  if (dayStr && timeStr) return `${dayStr} · ${timeStr}`;
+  return dayStr || timeStr || offer.description;
 }
 
 function fmtDate(d: string | undefined, lang: string, t: boolean) {
@@ -87,25 +102,29 @@ export default function GuestHome() {
   const [offers, setOffers] = useState<OfferItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function load() {
+    setError(null);
     try {
-      const [eRes, oRes] = await Promise.all([
-        eventsApi.list({ limit: 5 }).catch(() => null),
-        offersApi.list({ limit: 3 }).catch(() => null),
+      const [eRes, oRes] = await Promise.allSettled([
+        // "Esta semana" must never lead with a past event.
+        eventsApi.list({ limit: 5, startDate: new Date().toISOString() }),
+        offersApi.list({ limit: 3 }),
       ]);
-      const evs =
-        eRes?.data?.data?.items ??
-        eRes?.data?.data?.data ??
-        eRes?.data?.data ??
-        [];
-      const ofs =
-        oRes?.data?.data?.items ??
-        oRes?.data?.data?.data ??
-        oRes?.data?.data ??
-        [];
-      setEvents(Array.isArray(evs) ? evs : []);
-      setOffers(Array.isArray(ofs) ? ofs : []);
+      if (eRes.status === 'fulfilled') {
+        const evs = eRes.value.data?.data?.items ?? eRes.value.data?.data?.data ?? eRes.value.data?.data ?? [];
+        setEvents(Array.isArray(evs) ? evs : []);
+      }
+      if (oRes.status === 'fulfilled') {
+        const ofs = oRes.value.data?.data?.items ?? oRes.value.data?.data?.data ?? oRes.value.data?.data ?? [];
+        setOffers(Array.isArray(ofs) ? ofs : []);
+      }
+      // A real network failure on both requests must show an error state,
+      // not the misleading "no events available" empty copy.
+      if (eRes.status === 'rejected' && oRes.status === 'rejected') {
+        setError(apiError(eRes.reason));
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -218,6 +237,14 @@ export default function GuestHome() {
               <Skeleton width="60%" height={14} />
               <Skeleton width="40%" height={12} />
             </View>
+          ) : error ? (
+            <View style={{ minHeight: 200 }}>
+              <ErrorState
+                message={error}
+                retryLabel={t ? 'Reintentar' : 'Retry'}
+                onRetry={() => { setLoading(true); load(); }}
+              />
+            </View>
           ) : events.length === 0 ? (
             <Body
               tone="muted"
@@ -278,6 +305,10 @@ export default function GuestHome() {
               <Skeleton height={64} radius={Radius.md} />
               <Skeleton height={64} radius={Radius.md} />
             </View>
+          ) : error ? (
+            <Body tone="muted" style={{ paddingVertical: Spacing[5] }}>
+              {t ? 'No pudimos cargar los privilegios.' : "We couldn't load the privileges."}
+            </Body>
           ) : offers.length === 0 ? (
             <Body
               tone="muted"
@@ -286,26 +317,29 @@ export default function GuestHome() {
               {t ? 'Sin privilegios disponibles.' : 'No privileges available.'}
             </Body>
           ) : (
-            offers.map((off, idx) => (
-              <FadeIn key={off.id} delay={60 * idx}>
-                <View style={styles.offerRow}>
-                  <Feather
-                    name="lock"
-                    size={14}
-                    color={Colors.textMuted}
-                    style={{ marginTop: 2 }}
-                  />
-                  <View style={{ flex: 1 }}>
-                    <Subhead numberOfLines={1}>{off.title}</Subhead>
-                    {off.validWhen || off.description ? (
-                      <Caption tone="muted" numberOfLines={1} style={{ marginTop: 2 }}>
-                        {off.validWhen || off.description}
-                      </Caption>
-                    ) : null}
+            offers.map((off, idx) => {
+              const schedule = offerSchedule(off, t);
+              return (
+                <FadeIn key={off.id} delay={60 * idx}>
+                  <View style={styles.offerRow}>
+                    <Feather
+                      name="lock"
+                      size={14}
+                      color={Colors.textMuted}
+                      style={{ marginTop: 2 }}
+                    />
+                    <View style={{ flex: 1 }}>
+                      <Subhead numberOfLines={1}>{off.title}</Subhead>
+                      {schedule ? (
+                        <Caption tone="muted" numberOfLines={1} style={{ marginTop: 2 }}>
+                          {schedule}
+                        </Caption>
+                      ) : null}
+                    </View>
                   </View>
-                </View>
-              </FadeIn>
-            ))
+                </FadeIn>
+              );
+            })
           )}
 
           <View style={{ marginTop: Spacing[5] }}>

@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEmail, IsOptional, IsPhoneNumber, IsString, MinLength } from 'class-validator';
+import { IsEmail, IsOptional, IsPhoneNumber, IsString, Length, MinLength } from 'class-validator';
 
 export class LoginDto {
   @ApiPropertyOptional({ example: 'user@opalbar.com' })
@@ -28,6 +28,32 @@ export class LoginDto {
   deviceName?: string;
 
   @ApiPropertyOptional({ description: 'Device OS e.g. iOS 17' })
+  @IsOptional()
+  @IsString()
+  deviceOs?: string;
+}
+
+export class Login2faDto {
+  @ApiProperty({ example: 'admin@opalbar.com' })
+  @IsString()
+  identifier: string;
+
+  @ApiProperty({ example: '123456', description: '6-digit email OTP' })
+  @IsString()
+  @Length(6, 6)
+  code: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  deviceToken?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  deviceName?: string;
+
+  @ApiPropertyOptional()
   @IsOptional()
   @IsString()
   deviceOs?: string;

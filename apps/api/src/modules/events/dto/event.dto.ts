@@ -1,11 +1,25 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { EventStatus } from '@prisma/client';
-import { Type } from 'class-transformer';
+import { Transform } from 'class-transformer';
 import {
   IsArray, IsBoolean, IsDateString, IsEnum, IsInt, IsNumber,
-  IsOptional, IsString, MaxLength, Min, MinLength,
+  IsOptional, IsString, Matches, MaxLength, Min, MinLength,
 } from 'class-validator';
 import { PaginationDto } from '../../../common/dto/pagination.dto';
+
+/**
+ * Query-string booleans arrive as strings. `@Type(() => Boolean)` turned
+ * `"false"` into `true` (non-empty string), so `?isFree=false` filtered for
+ * free events. Only the literal `true`/`"true"` counts as true now.
+ */
+const toBool = ({ value }: { value: unknown }) => value === true || value === 'true';
+
+export class CreateCategoryDto {
+  @ApiProperty() @IsString() @MinLength(2) @MaxLength(60) name: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(60) nameEn?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(40) icon?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() @Matches(/^#[0-9a-fA-F]{6}$/, { message: 'color must be a hex color' }) color?: string;
+}
 
 export class CreateEventDto {
   @ApiProperty() @IsString() @MinLength(3) @MaxLength(120) title: string;
@@ -52,8 +66,8 @@ export class EventFilterDto extends PaginationDto {
   @ApiPropertyOptional() @IsOptional() @IsString() venueId?: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() startDate?: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() endDate?: string;
-  @ApiPropertyOptional({ default: false }) @IsOptional() @Type(() => Boolean) @IsBoolean() isFree?: boolean;
-  @ApiPropertyOptional({ default: false }) @IsOptional() @Type(() => Boolean) @IsBoolean() highlighted?: boolean;
+  @ApiPropertyOptional({ default: false }) @IsOptional() @Transform(toBool) @IsBoolean() isFree?: boolean;
+  @ApiPropertyOptional({ default: false }) @IsOptional() @Transform(toBool) @IsBoolean() highlighted?: boolean;
   @ApiPropertyOptional({ enum: EventStatus }) @IsOptional() @IsEnum(EventStatus) status?: EventStatus;
-  @ApiPropertyOptional() @IsOptional() @Type(() => Boolean) @IsBoolean() includeAll?: boolean;
+  @ApiPropertyOptional() @IsOptional() @Transform(toBool) @IsBoolean() includeAll?: boolean;
 }

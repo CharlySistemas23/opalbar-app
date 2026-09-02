@@ -29,7 +29,6 @@ export type PhotoTag = {
   x: number; // 0..1
   y: number; // 0..1
   displayName: string;
-  username?: string | null;
   avatarUrl?: string | null;
 };
 
@@ -39,9 +38,11 @@ type Props = {
   initialTags?: PhotoTag[];
   onClose: () => void;
   onSubmit: (tags: PhotoTag[]) => void;
+  /** true = Spanish (app default), false = English. */
+  t?: boolean;
 };
 
-export function PhotoTagger({ visible, imageUri, initialTags, onClose, onSubmit }: Props) {
+export function PhotoTagger({ visible, imageUri, initialTags, onClose, onSubmit, t = true }: Props) {
   const [tags, setTags] = useState<PhotoTag[]>(initialTags ?? []);
   const [pending, setPending] = useState<{ x: number; y: number } | null>(null);
   const [query, setQuery] = useState('');
@@ -81,13 +82,12 @@ export function PhotoTagger({ visible, imageUri, initialTags, onClose, onSubmit 
     if (!pending) return;
     const fn = (user.firstName ?? user.profile?.firstName ?? '').trim();
     const ln = (user.lastName ?? user.profile?.lastName ?? '').trim();
-    const displayName = `${fn} ${ln}`.trim() || user.username || 'Usuario';
+    const displayName = `${fn} ${ln}`.trim() || (t ? 'Usuario' : 'User');
     const next: PhotoTag = {
       userId: user.id,
       x: pending.x,
       y: pending.y,
       displayName,
-      username: user.username,
       avatarUrl: user.avatarUrl ?? user.profile?.avatarUrl ?? null,
     };
     // Replace if same user already tagged.
@@ -140,9 +140,9 @@ export function PhotoTagger({ visible, imageUri, initialTags, onClose, onSubmit 
             <Pressable onPress={onClose} style={styles.headerBtn} hitSlop={10}>
               <Feather name="x" size={24} color={Colors.textPrimary} />
             </Pressable>
-            <Text style={styles.headerTitle}>Etiquetar personas</Text>
+            <Text style={styles.headerTitle}>{t ? 'Etiquetar personas' : 'Tag people'}</Text>
             <Pressable onPress={handleDone} style={[styles.headerBtn, styles.doneBtn]}>
-              <Text style={styles.doneLabel}>Listo</Text>
+              <Text style={styles.doneLabel}>{t ? 'Listo' : 'Done'}</Text>
             </Pressable>
           </View>
 
@@ -175,7 +175,7 @@ export function PhotoTagger({ visible, imageUri, initialTags, onClose, onSubmit 
                 )}
               </Pressable>
             ) : (
-              <Text style={{ color: Colors.textMuted }}>Sin imagen.</Text>
+              <Text style={{ color: Colors.textMuted }}>{t ? 'Sin imagen.' : 'No image.'}</Text>
             )}
           </View>
 
@@ -185,7 +185,7 @@ export function PhotoTagger({ visible, imageUri, initialTags, onClose, onSubmit 
                 <Feather name="search" size={16} color={Colors.textMuted} />
                 <TextInput
                   style={styles.searchInput}
-                  placeholder="Buscar persona…"
+                  placeholder={t ? 'Buscar persona…' : 'Search for a person…'}
                   placeholderTextColor={Colors.textMuted}
                   value={query}
                   onChangeText={search}
@@ -202,12 +202,12 @@ export function PhotoTagger({ visible, imageUri, initialTags, onClose, onSubmit 
                   </View>
                 )}
                 {!searching && results.length === 0 && query.length > 0 && (
-                  <Text style={styles.searchEmpty}>Sin resultados.</Text>
+                  <Text style={styles.searchEmpty}>{t ? 'Sin resultados.' : 'No results.'}</Text>
                 )}
                 {results.map((u) => {
                   const fn = (u.firstName ?? u.profile?.firstName ?? '').trim();
                   const ln = (u.lastName ?? u.profile?.lastName ?? '').trim();
-                  const name = `${fn} ${ln}`.trim() || u.username || 'Usuario';
+                  const name = `${fn} ${ln}`.trim() || (t ? 'Usuario' : 'User');
                   const avatar = u.avatarUrl ?? u.profile?.avatarUrl ?? null;
                   return (
                     <Pressable
@@ -219,14 +219,11 @@ export function PhotoTagger({ visible, imageUri, initialTags, onClose, onSubmit 
                         <Image source={{ uri: avatar }} style={styles.resultAvatar} />
                       ) : (
                         <View style={[styles.resultAvatar, styles.resultAvatarFallback]}>
-                          <Text style={styles.resultAvatarText}>
-                            {(fn[0] || u.username?.[0] || '?').toUpperCase()}
-                          </Text>
+                          <Text style={styles.resultAvatarText}>{(fn[0] || '?').toUpperCase()}</Text>
                         </View>
                       )}
                       <View style={{ flex: 1 }}>
                         <Text style={styles.resultName}>{name}</Text>
-                        {u.username && <Text style={styles.resultHandle}>@{u.username}</Text>}
                       </View>
                     </Pressable>
                   );
@@ -237,7 +234,9 @@ export function PhotoTagger({ visible, imageUri, initialTags, onClose, onSubmit 
             <View style={styles.hintBar}>
               <Feather name="user-plus" size={14} color={Colors.textMuted} />
               <Text style={styles.hintText}>
-                Toca la foto donde quieres etiquetar a alguien.
+                {t
+                  ? 'Toca la foto donde quieres etiquetar a alguien.'
+                  : 'Tap the photo where you want to tag someone.'}
               </Text>
             </View>
           )}

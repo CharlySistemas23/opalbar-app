@@ -4,7 +4,7 @@
 //  Fullscreen presentation page. Kicker (short code) + Display (venue
 //  name) + QR centered in a hairline card + caption with date/time.
 // ─────────────────────────────────────────────
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -28,6 +28,8 @@ import { HitSlop, Roles } from '@/constants/a11y';
 import { reservationsApi } from '@/api/client';
 import { useAppStore } from '@/stores/app.store';
 import { apiError } from '@/api/errors';
+import { ErrorState } from '@/components/ErrorState';
+import { formatDateOnly, formatTimeSlot } from '@/utils/date';
 
 export default function ReservationQR() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -36,32 +38,37 @@ export default function ReservationQR() {
   const t = language === 'es';
 
   const [code, setCode] = useState<string | null>(null);
-  const [meta, setMeta] = useState<{ venue?: string; date?: string; partySize?: number } | null>(null);
+  const [meta, setMeta] = useState<{ venue?: string; date?: string; timeSlot?: string; partySize?: number } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const load = useCallback(async () => {
     if (!id) return;
-    reservationsApi
-      .detail(id)
-      .then((r) => {
-        const res = r.data?.data ?? r.data;
-        setCode(res?.confirmCode ?? res?.code ?? null);
-        setMeta({
-          venue: res?.venue?.name,
-          date: res?.date ?? res?.startTime,
-          partySize: res?.partySize,
-        });
-      })
-      .catch((err) => setError(apiError(err)))
-      .finally(() => setLoading(false));
+    setError(null);
+    try {
+      const r = await reservationsApi.detail(id);
+      const res = r.data?.data ?? r.data;
+      setCode(res?.confirmCode ?? null);
+      setMeta({
+        venue: res?.venue?.name,
+        date: res?.date,
+        timeSlot: res?.timeSlot,
+        partySize: res?.partySize,
+      });
+    } catch (err) {
+      setError(apiError(err));
+    } finally {
+      setLoading(false);
+    }
   }, [id]);
 
-  const dateStr = meta?.date
-    ? new Date(meta.date).toLocaleString(language, {
-        weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
-      })
-    : '';
+  useEffect(() => { load(); }, [load]);
+
+  // `date` is UTC midnight + `timeSlot` is the venue-local "HH:mm" — never
+  // combine them through `new Date()` or the day shifts west of UTC.
+  const dayStr = formatDateOnly(meta?.date, language, { month: 'short' });
+  const slotStr = formatTimeSlot(meta?.timeSlot, language);
+  const dateStr = [dayStr, slotStr].filter(Boolean).join(' · ');
   const shortCode = (code || '').slice(-8).toUpperCase();
 
   return (
@@ -90,12 +97,12 @@ export default function ReservationQR() {
             <Skeleton width="100%" height={280} radius={Radius.lg} />
           </View>
         ) : error ? (
-          <View style={styles.errorBlock}>
-            <Feather name="alert-circle" size={32} color={Colors.accentDanger} />
-            <Body tone="secondary" align="center" style={{ marginTop: Spacing[3] }}>
-              {error}
-            </Body>
-          </View>
+          <ErrorState
+            message={error}
+            title={t ? 'No pudimos cargar tu código' : "Couldn't load your code"}
+            retryLabel={t ? 'Reintentar' : 'Retry'}
+            onRetry={() => { setLoading(true); load(); }}
+          />
         ) : !code ? (
           <Body tone="secondary" align="center">
             {t ? 'Esta reserva no tiene código.' : 'This reservation has no code.'}
@@ -145,8 +152,8 @@ export default function ReservationQR() {
               </Subhead>
               <Caption tone="muted" align="center" style={{ marginTop: Spacing[2] }}>
                 {t
-                  ? 'Mantén la pantalla encendida. Puedes volver a esta reserva cuando quieras.'
-                  : 'Keep your screen on. You can return to this reservation anytime.'}
+                  ? 'Puedes volver a esta reserva cuando quieras.'
+                  : 'You can return to this reservation anytime.'}
               </Caption>
             </FadeIn>
           </View>
@@ -199,10 +206,5 @@ const styles = StyleSheet.create({
 
   metaBlock: {
     paddingVertical: Spacing[4],
-  },
-
-  errorBlock: {
-    paddingVertical: Spacing[10],
-    alignItems: 'center',
   },
 });

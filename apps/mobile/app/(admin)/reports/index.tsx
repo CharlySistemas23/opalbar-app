@@ -1,12 +1,14 @@
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, RefreshControl, Alert, Pressable } from 'react-native';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { adminApi } from '@/api/client';
 import { apiError } from '@/api/errors';
+import { useAdminCounts } from '@/hooks/useAdminCounts';
 import { Colors, Spacing } from '@/constants/tokens';
-import { Caption, SegmentedControl, Subhead } from '@/components/ui';
+import { Caption, Input, SegmentedControl, Subhead } from '@/components/ui';
+import { ErrorState } from '@/components/ErrorState';
 import { AdminHeader } from '@/components/admin';
 import type { SegmentOption } from '@/components/ui';
 
@@ -19,32 +21,105 @@ const TYPE_META: Record<string, { icon: any; color: string; label: string }> = {
   REVIEW: { icon: 'star', color: Colors.accentChampagne, label: 'Reseña' },
 };
 
+const PAGE = 20;
+
 export default function AdminReports() {
   const router = useRouter();
   const [reports, setReports] = useState<any[]>([]);
+  const [meta, setMeta] = useState<{ page: number; hasNextPage: boolean; total: number }>({ page: 1, hasNextPage: false, total: 0 });
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>('PENDING');
+  // `search` is debounced from `searchInput` below, then feeds into `params`
+  // so a single load fires per commit (no double-fetch from combining a
+  // focus-effect reload with a separate search-effect reload).
+  const [search, setSearch] = useState('');
+  const [searchInput, setSearchInput] = useState('');
+  const reqId = useRef(0);
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { counts: pendingCounts, refresh: refreshPendingCount } = useAdminCounts();
 
-  const load = useCallback(async () => {
-    try {
-      const r = await adminApi.reports({ limit: 100 });
-      setReports(r.data?.data?.data ?? r.data?.data ?? []);
-    } catch {}
-    finally { setLoading(false); setRefreshing(false); }
-  }, []);
+  const params = useCallback(
+    (page: number) => ({
+      page,
+      limit: PAGE,
+      status: filter === 'all' ? 'ALL' : filter,
+      ...(search.trim() ? { search: search.trim() } : {}),
+    }),
+    [filter, search],
+  );
 
+  const load = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      const id = ++reqId.current;
+      if (!opts?.silent) { setLoading(true); setError(null); }
+      try {
+        const r = await adminApi.reports(params(1));
+        if (id !== reqId.current) return;
+        const payload = r.data?.data;
+        setReports(payload?.data ?? []);
+        setMeta({
+          page: payload?.meta?.page ?? 1,
+          hasNextPage: !!payload?.meta?.hasNextPage,
+          total: payload?.meta?.total ?? payload?.data?.length ?? 0,
+        });
+        setError(null);
+      } catch (err) {
+        if (id !== reqId.current) return;
+        setError(apiError(err));
+      } finally {
+        if (id === reqId.current) { setLoading(false); setRefreshing(false); }
+      }
+    },
+    [params],
+  );
+
+  // Tab change and committed search both change `params` → new `load`
+  // identity → this re-fires (also covers focus-return refresh, e.g. after
+  // resolving a report from its detail screen).
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  const shown = useMemo(() => {
-    if (filter === 'all') return reports;
-    return reports.filter((r) => r.status === filter);
-  }, [reports, filter]);
+  // Debounce the raw input into `search` so typing doesn't fire a request
+  // per keystroke; committing `search` is what actually triggers `load`.
+  useEffect(() => {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => { setSearch(searchInput); }, searchInput ? 350 : 0);
+    return () => { if (searchTimer.current) clearTimeout(searchTimer.current); };
+  }, [searchInput]);
+
+  async function loadMore() {
+    if (loadingMore || loading || !meta.hasNextPage) return;
+    setLoadingMore(true);
+    try {
+      const r = await adminApi.reports(params(meta.page + 1));
+      const payload = r.data?.data;
+      const next: any[] = payload?.data ?? [];
+      setReports((prev) => {
+        const seen = new Set(prev.map((x) => x.id));
+        return [...prev, ...next.filter((x) => !seen.has(x.id))];
+      });
+      setMeta({
+        page: payload?.meta?.page ?? meta.page + 1,
+        hasNextPage: !!payload?.meta?.hasNextPage,
+        total: payload?.meta?.total ?? meta.total,
+      });
+    } catch (err) {
+      setError(apiError(err));
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+
+  const shown = reports;
 
   async function resolve(id: string, status: 'RESOLVED' | 'DISMISSED' = 'RESOLVED') {
     try {
       await adminApi.resolveReport(id, status);
       setReports((p) => p.filter((x) => x.id !== id));
+      setMeta((m) => ({ ...m, total: Math.max(0, m.total - 1) }));
+      refreshPendingCount();
     } catch (err) { Alert.alert('Error', apiError(err)); }
   }
 
@@ -52,12 +127,12 @@ export default function AdminReports() {
     <SafeAreaView style={styles.root} edges={['top']}>
       <AdminHeader
         title="Reportes"
-        kicker="Moderacion"
+        kicker="Moderación"
         onBack={() => router.back()}
         right={
           <View style={styles.count}>
             <Caption tone="danger" style={{ fontWeight: '700' }}>
-              {reports.filter(r => r.status === 'PENDING').length}
+              {pendingCounts.reports}
             </Caption>
           </View>
         }
@@ -74,22 +149,46 @@ export default function AdminReports() {
             { value: 'all', label: 'Todos' },
           ] as SegmentOption<Filter>[]}
         />
+        <Input
+          value={searchInput}
+          onChangeText={setSearchInput}
+          placeholder="Buscar por motivo, nombre o correo"
+          returnKeyType="search"
+          autoCapitalize="none"
+          autoCorrect={false}
+          leftIcon={<Feather name="search" size={14} color={Colors.textMuted} />}
+          rightIcon={searchInput ? <Feather name="x" size={14} color={Colors.textMuted} /> : undefined}
+          onRightIconPress={searchInput ? () => setSearchInput('') : undefined}
+          rightIconLabel="Limpiar búsqueda"
+          style={{ marginTop: Spacing[3] }}
+        />
       </View>
 
       {loading ? (
         <View style={styles.center}><ActivityIndicator color={Colors.accentPrimary} /></View>
+      ) : error ? (
+        <ErrorState message={error} onRetry={() => load()} />
       ) : (
         <FlatList
           data={shown}
           keyExtractor={(r) => r.id}
           contentContainerStyle={{ padding: 20, paddingBottom: 120, gap: 10 }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={Colors.accentPrimary} />}
+          onEndReachedThreshold={0.4}
+          onEndReached={loadMore}
           ListEmptyComponent={
             <View style={styles.empty}>
               <Feather name="check-circle" size={48} color={Colors.accentSuccess} />
-              <Text style={styles.emptyTitle}>Sin reportes</Text>
-              <Text style={styles.emptyText}>Todo limpio por ahora.</Text>
+              <Text style={styles.emptyTitle}>{search ? 'Sin resultados' : 'Sin reportes'}</Text>
+              <Text style={styles.emptyText}>{search ? `Nada coincide con "${search.trim()}".` : 'Todo limpio por ahora.'}</Text>
             </View>
+          }
+          ListFooterComponent={
+            loadingMore ? (
+              <View style={{ paddingVertical: 20 }}>
+                <ActivityIndicator color={Colors.accentPrimary} />
+              </View>
+            ) : null
           }
           renderItem={({ item }) => {
             const meta = TYPE_META[item.targetType] ?? TYPE_META.POST;

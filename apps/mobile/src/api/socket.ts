@@ -22,9 +22,9 @@ let _socket: Socket | null = null;
 export function getSocket(): Socket {
   if (_socket && _socket.connected) return _socket;
   if (_socket) {
-    // Update auth in case token rotated
+    // Update auth in case token rotated. Guests (no token) stay dormant.
     _socket.auth = { token: tokenStore.getAccessToken() ?? '' };
-    _socket.connect();
+    if (tokenStore.getAccessToken() && !_socket.active) _socket.connect();
     return _socket;
   }
 
@@ -32,7 +32,7 @@ export function getSocket(): Socket {
     // Polling first — Railway's edge / some WiFi routers refuse WSS upgrades,
     // which would leave the chat permanently "Desconectado".
     transports: ['polling', 'websocket'],
-    autoConnect: true,
+    autoConnect: !!tokenStore.getAccessToken(),
     reconnection: true,
     reconnectionAttempts: Infinity,
     reconnectionDelay: 1000,
@@ -43,14 +43,46 @@ export function getSocket(): Socket {
     },
   });
 
+  _socket.on('connect', () => {
+    _lastAuthError = null;
+    if (__DEV__) console.log('[socket] connected', _socket?.id);
+  });
+  _socket.on('auth_error', (payload: { code?: string }) => {
+    _lastAuthError = payload?.code ?? 'INVALID_TOKEN';
+    if (__DEV__) console.log('[socket] auth_error', _lastAuthError);
+  });
+  _socket.on('disconnect', (reason) => {
+    if (__DEV__) console.log('[socket] disconnect', reason);
+    // Server-initiated disconnects are not retried by socket.io. An expired
+    // token → refresh via the axios interceptor; `updateSocketToken` then
+    // reconnects with the rotated token.
+    if (reason !== 'io server disconnect') return;
+    if (_lastAuthError === 'TOKEN_EXPIRED' || _lastAuthError === 'INVALID_TOKEN') {
+      requestTokenRefresh();
+    } else if (!_lastAuthError && tokenStore.getAccessToken()) {
+      setTimeout(() => {
+        const s = _socket;
+        if (!s || s.connected || !tokenStore.getAccessToken()) return;
+        s.auth = { token: tokenStore.getAccessToken() ?? '' };
+        s.connect();
+      }, 1500);
+    }
+  });
   if (__DEV__) {
-    _socket.on('connect', () => console.log('[socket] connected', _socket?.id));
-    _socket.on('disconnect', (reason) => console.log('[socket] disconnect', reason));
     _socket.on('connect_error', (err) => console.log('[socket] connect_error', err.message));
     _socket.on('error', (err) => console.log('[socket] error', err));
   }
 
   return _socket;
+}
+
+let _lastAuthError: string | null = null;
+
+function requestTokenRefresh() {
+  if (!tokenStore.getRefreshToken()) return;
+  import('./client')
+    .then(({ apiClient }) => apiClient.get('/users/me', { params: { _ws: 1 } }))
+    .catch(() => { /* interceptor already handled the outcome */ });
 }
 
 /** Close the connection (e.g. on logout). */
@@ -64,12 +96,18 @@ export function closeSocket() {
 
 /** Refresh auth token on the live socket without reconnecting. */
 export function updateSocketToken(token: string | null) {
-  if (_socket) {
-    _socket.auth = { token: token ?? '' };
-    // Force re-auth by reconnecting
-    if (_socket.connected) {
-      _socket.disconnect();
-      _socket.connect();
-    }
+  if (!_socket) return;
+  _socket.auth = { token: token ?? '' };
+  _lastAuthError = null;
+  if (!token) {
+    if (_socket.active) _socket.disconnect();
+    return;
+  }
+  // Force re-auth by reconnecting
+  if (_socket.connected) {
+    _socket.disconnect();
+    _socket.connect();
+  } else if (!_socket.active) {
+    _socket.connect();
   }
 }

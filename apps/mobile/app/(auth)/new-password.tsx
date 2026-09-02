@@ -5,7 +5,7 @@
 //  inline rule line. Single eye toggle covers both fields. Success
 //  emits a toast and redirects to login.
 // ─────────────────────────────────────────────
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -23,7 +23,8 @@ import { Feather } from '@expo/vector-icons';
 import { authApi } from '@/api/client';
 import { useAppStore } from '@/stores/app.store';
 import { apiError } from '@/api/errors';
-import { Colors, EditorialSpacing, Spacing } from '@/constants/tokens';
+import { useFeedback } from '@/hooks/useFeedback';
+import { Colors, EditorialSpacing, Radius, Spacing } from '@/constants/tokens';
 import { HitSlop } from '@/constants/a11y';
 import {
   Body,
@@ -36,11 +37,15 @@ import {
   Lead,
 } from '@/components/ui';
 
+/** Same policy the API enforces on /auth/reset-password and /auth/register. */
+const PASSWORD_RE = /^(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,64}$/;
+
 export default function NewPassword() {
   const router = useRouter();
   const { email, code } = useLocalSearchParams<{ email: string; code: string }>();
   const { language } = useAppStore();
   const t = language === 'es';
+  const fb = useFeedback();
 
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -48,17 +53,38 @@ export default function NewPassword() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const passOk =
-    password.length >= 8 &&
-    /[A-Z]/.test(password) &&
-    /[0-9]/.test(password) &&
-    /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password);
+  // Mirrors the backend policy (auth DTO): 8–64 chars, 1 uppercase,
+  // 1 digit, 1 symbol (anything non-alphanumeric).
+  const rules = useMemo(
+    () => [
+      { key: 'len', ok: password.length >= 8 && password.length <= 64, es: '8 a 64 caracteres', en: '8 to 64 characters' },
+      { key: 'upper', ok: /[A-Z]/.test(password), es: 'Una mayúscula', en: 'One uppercase letter' },
+      { key: 'digit', ok: /\d/.test(password), es: 'Un número', en: 'One number' },
+      { key: 'symbol', ok: /[^A-Za-z0-9]/.test(password), es: 'Un símbolo', en: 'One symbol' },
+    ],
+    [password],
+  );
+  const passOk = PASSWORD_RE.test(password);
   const matchOk = confirm.length > 0 && confirm === password;
+  const missingParams = !email || !code;
 
   async function handleReset() {
+    if (loading) return;
     setError(null);
+    if (missingParams) {
+      setError(
+        t
+          ? 'Este enlace ya no es válido. Solicita un nuevo código.'
+          : 'This link is no longer valid. Request a new code.',
+      );
+      return;
+    }
     if (!passOk) {
-      setError(t ? 'Contraseña muy débil.' : 'Password too weak.');
+      setError(
+        t
+          ? 'La contraseña aún no cumple todos los requisitos.'
+          : 'The password does not meet all requirements yet.',
+      );
       return;
     }
     if (password !== confirm) {
@@ -72,13 +98,17 @@ export default function NewPassword() {
         otpCode: code,
         newPassword: password,
       });
+      fb.success();
       toast(
         t ? 'Contraseña actualizada. Inicia sesión.' : 'Password updated. Please sign in.',
         'success',
       );
       router.replace('/(auth)/login' as never);
     } catch (err: any) {
-      setError(apiError(err, t ? 'No se pudo actualizar.' : 'Could not update.'));
+      fb.error();
+      setError(
+        apiError(err, t ? 'No pudimos actualizar la contraseña.' : 'Could not update the password.'),
+      );
     } finally {
       setLoading(false);
     }
@@ -108,7 +138,7 @@ export default function NewPassword() {
           showsVerticalScrollIndicator={false}
         >
           <FadeIn>
-            <Kicker tone="champagne">{t ? 'NUEVA CLAVE' : 'NEW SECRET'}</Kicker>
+            <Kicker tone="champagne">{t ? 'NUEVA CONTRASEÑA' : 'NEW PASSWORD'}</Kicker>
           </FadeIn>
           <FadeIn delay={80} style={{ marginTop: Spacing[3] }}>
             <Display size="md">
@@ -153,19 +183,32 @@ export default function NewPassword() {
                       ? 'Mostrar contraseña'
                       : 'Show password'
                 }
-                helper={
-                  t
-                    ? '8+ caracteres, mayúscula, número y símbolo.'
-                    : '8+ chars, 1 uppercase, 1 number, 1 symbol.'
-                }
-                error={
-                  password && !passOk
-                    ? t
-                      ? 'Aún no cumple los requisitos.'
-                      : 'Does not meet requirements yet.'
-                    : undefined
-                }
               />
+              <View
+                style={styles.rules}
+                accessibilityLabel={t ? 'Requisitos de la contraseña' : 'Password requirements'}
+              >
+                {rules.map((r) => {
+                  const active = password.length > 0;
+                  const color = !active
+                    ? Colors.textMuted
+                    : r.ok
+                      ? Colors.accentSuccess
+                      : Colors.accentDanger;
+                  return (
+                    <View key={r.key} style={styles.ruleRow}>
+                      <Feather
+                        name={r.ok ? 'check-circle' : 'circle'}
+                        size={13}
+                        color={color}
+                      />
+                      <Caption tone={!active ? 'muted' : r.ok ? 'success' : 'danger'}>
+                        {t ? r.es : r.en}
+                      </Caption>
+                    </View>
+                  );
+                })}
+              </View>
             </FadeIn>
 
             <FadeIn delay={330}>
@@ -202,6 +245,7 @@ export default function NewPassword() {
                 label={t ? 'Actualizar contraseña' : 'Update password'}
                 onPress={handleReset}
                 loading={loading}
+                disabled={!passOk || !matchOk}
                 variant="primary"
                 size="lg"
                 fullWidth
@@ -241,6 +285,21 @@ const styles = StyleSheet.create({
   form: {
     marginTop: Spacing[8],
     gap: Spacing[4],
+  },
+  rules: {
+    marginTop: Spacing[3],
+    paddingHorizontal: Spacing[3],
+    paddingVertical: Spacing[3],
+    gap: Spacing[2],
+    backgroundColor: Colors.bgCard,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: Radius.lg,
+  },
+  ruleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing[2],
   },
   helperRow: {
     marginTop: Spacing[4],

@@ -5,6 +5,7 @@ import { Public } from '../../common/decorators/public.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { VenuesService } from './venues.service';
 import { UpdateVenueDto } from './dto/update-venue.dto';
+import { CreateVenueDto, UpdateVenueConfigDto } from './dto/venue-config.dto';
 
 @ApiTags('Venues')
 @ApiBearerAuth()
@@ -39,17 +40,8 @@ export class VenuesController {
   @Patch(':id/config')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @ApiOperation({ summary: 'Update venue reservation config (Admin only)' })
-  updateConfig(
-    @Param('id') id: string,
-    @Body() body: {
-      openTime?: string;
-      closeTime?: string;
-      reservationCapacity?: number;
-      reservationsEnabled?: boolean;
-      slotMinutes?: number;
-    },
-  ) {
-    return this.venuesService.updateConfig(id, body);
+  updateConfig(@Param('id') id: string, @Body() dto: UpdateVenueConfigDto) {
+    return this.venuesService.updateConfig(id, dto);
   }
 
   @Patch(':id')
@@ -63,15 +55,7 @@ export class VenuesController {
   @Roles(UserRole.SUPER_ADMIN)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create a new venue (SuperAdmin only)' })
-  create(@Body() body: {
-    name: string;
-    address?: string;
-    city?: string;
-    description?: string;
-    phone?: string;
-    imageUrl?: string;
-    coverUrl?: string;
-  }) {
-    return this.venuesService.create(body);
+  create(@Body() dto: CreateVenueDto) {
+    return this.venuesService.create(dto);
   }
 }

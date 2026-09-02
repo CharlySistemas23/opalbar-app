@@ -24,6 +24,7 @@ import { Colors, Spacing, TypePresets } from '@/constants/tokens';
 import { Durations } from '@/constants/motion';
 import { Roles } from '@/constants/a11y';
 import { useAppStore } from '@/stores/app.store';
+import { useUnreadRealtime, useUnreadStore } from '@/stores/unread.store';
 import { Pressy } from '@/components/ui/Pressy';
 import { playUiSound } from '@/hooks/useFeedback';
 
@@ -48,6 +49,11 @@ const TABS: TabDef[] = [
 
 function NoirTopBar({ state, navigation }: any) {
   const { language } = useAppStore();
+  // Un solo punto dorado por tab: "Cuenta" agrupa mensajes, notificaciones y
+  // solicitudes de amistad (todas viven detrás de esa pestaña).
+  const accountDot = useUnreadStore(
+    (s) => s.messages + s.notifications + s.friendRequests > 0,
+  );
 
   return (
     <SafeAreaView edges={['bottom']} style={styles.safe}>
@@ -75,6 +81,7 @@ function NoirTopBar({ state, navigation }: any) {
               key={route.key}
               focused={focused}
               label={def.label[language]}
+              dot={route.name === 'profile' && accountDot}
               onPress={onPress}
             />
           );
@@ -87,10 +94,12 @@ function NoirTopBar({ state, navigation }: any) {
 function TabItem({
   focused,
   label,
+  dot = false,
   onPress,
 }: {
   focused: boolean;
   label: string;
+  dot?: boolean;
   onPress: () => void;
 }) {
   const progress = useSharedValue(focused ? 1 : 0);
@@ -117,6 +126,7 @@ function TabItem({
       accessibilityState={{ selected: focused }}
       style={styles.tab}
     >
+      {dot ? <View style={styles.dot} /> : null}
       <Text
         style={[
           TypePresets.subhead,
@@ -137,6 +147,10 @@ function TabItem({
 }
 
 export default function TabsLayout() {
+  // Mounted once for the whole authenticated app: loads the badge counters,
+  // refreshes them on foreground and keeps them live over the /rt socket.
+  useUnreadRealtime();
+
   // Tab bar custom at the bottom (NOT top — top position caused crashes
   // because expo-router v6 doesn't support `tabBarPosition` and the
   // workaround with `tabBarStyle: position absolute + sceneStyle paddingTop`
@@ -182,6 +196,15 @@ const styles = StyleSheet.create({
     left: '20%',
     right: '20%',
     height: 1,
+    backgroundColor: Colors.accentPrimary,
+  },
+  dot: {
+    position: 'absolute',
+    top: Spacing[2],
+    right: '22%',
+    width: 6,
+    height: 6,
+    borderRadius: 3,
     backgroundColor: Colors.accentPrimary,
   },
 });

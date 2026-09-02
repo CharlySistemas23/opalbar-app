@@ -64,7 +64,7 @@ export class PushService {
     // broadcastToAllActiveUsers, direct callers like reservations and offers
     // were bypassing the user's master push toggle).
     try {
-      const settings = await this.prisma.notificationSetting.findUnique({
+      const settings = await this.prisma.notificationSettings.findUnique({
         where: { userId },
         select: { pushEnabled: true },
       });

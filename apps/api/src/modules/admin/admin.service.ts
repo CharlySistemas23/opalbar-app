@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
 import * as bcrypt from 'bcryptjs';
@@ -11,6 +11,7 @@ import {
   ReportStatus,
   UserRole,
   UserStatus,
+  OtpType,
 } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { paginate, getPaginationOffset, PaginationDto } from '../../common/dto/pagination.dto';
@@ -647,7 +648,23 @@ export class AdminService {
   }
 
   async updateUserRole(adminId: string, userId: string, role: UserRole) {
-    const prev = await this.prisma.user.findUnique({ where: { id: userId }, select: { role: true } });
+    if (userId === adminId) {
+      throw new BadRequestException('No puedes cambiar tu propio rol');
+    }
+    const prev = await this.prisma.user.findUnique({ where: { id: userId }, select: { role: true, status: true } });
+    if (!prev) throw new NotFoundException('User not found');
+    if (prev.role === role) {
+      return this.prisma.user.findUnique({ where: { id: userId } });
+    }
+    // Never demote the last SUPER_ADMIN — the platform would lose its owner.
+    if (prev.role === UserRole.SUPER_ADMIN && role !== UserRole.SUPER_ADMIN) {
+      const remaining = await this.prisma.user.count({
+        where: { role: UserRole.SUPER_ADMIN, status: { not: UserStatus.DELETED }, id: { not: userId } },
+      });
+      if (remaining === 0) {
+        throw new BadRequestException('No puedes quitar el rol al último SUPER_ADMIN');
+      }
+    }
     const result = await this.prisma.user.update({ where: { id: userId }, data: { role } });
     await this.logAdminAction({
       adminId,
@@ -663,28 +680,168 @@ export class AdminService {
 
   // ── POSTS MODERATION ─────────────────────
 
-  async getPendingPosts(pagination: PaginationDto) {
-    const { page = 1, limit = 20 } = pagination;
+  /**
+   * Moderation feed. Posts publish immediately (PUBLISHED) and admins verify
+   * afterwards, so by default this lists EVERY status (newest first). Filters:
+   *  · `status`   — PostStatus
+   *  · `reported` — only posts with ≥1 PENDING report
+   *  · `search`   — content / author email / author name
+   */
+  async getPosts(filter: PaginationDto & { status?: PostStatus; reported?: boolean }) {
+    const { page = 1, limit = 20, status, reported, search } = filter;
     const skip = getPaginationOffset(page, limit);
-    const where = { status: PostStatus.PENDING_REVIEW };
+    const q = search?.trim();
+
+    const where: Prisma.PostWhereInput = {
+      deletedAt: null,
+      ...(status ? { status } : {}),
+      ...(reported ? { reports: { some: { status: ReportStatus.PENDING } } } : {}),
+      ...(q
+        ? {
+            OR: [
+              { content: { contains: q, mode: 'insensitive' } },
+              { user: { email: { contains: q, mode: 'insensitive' } } },
+              { user: { profile: { firstName: { contains: q, mode: 'insensitive' } } } },
+              { user: { profile: { lastName: { contains: q, mode: 'insensitive' } } } },
+            ],
+          }
+        : {}),
+    };
 
     const [data, total] = await Promise.all([
       this.prisma.post.findMany({
         where, skip, take: limit,
-        include: { user: { select: { id: true, email: true, profile: true } } },
-        orderBy: { createdAt: 'asc' },
+        include: {
+          user: {
+            select: {
+              id: true, email: true, role: true, status: true,
+              profile: { select: { firstName: true, lastName: true, avatarUrl: true } },
+            },
+          },
+          _count: {
+            select: {
+              comments: { where: { deletedAt: null } },
+              reports: { where: { status: ReportStatus.PENDING } },
+              emojiReactions: true,
+            },
+          },
+        },
+        // The moderation queue is FIFO — oldest flagged post first, so nothing
+        // rots at the bottom of the list. Every other filter is newest-first.
+        orderBy:
+          status === PostStatus.PENDING_REVIEW
+            ? [{ createdAt: 'asc' }]
+            : status
+              ? [{ createdAt: 'desc' }]
+              : [{ isPinned: 'desc' }, { createdAt: 'desc' }],
       }),
       this.prisma.post.count({ where }),
     ]);
 
-    // Add surface type (community vs wall) for frontend filtering
-    const WALL_MARKER = '__WALL__';
-    const dataWithSurface = data.map((post: any) => ({
-      ...post,
-      surface: post.mediaUrls?.includes(WALL_MARKER) ? 'wall' : 'community',
-    }));
+    return paginate(data.map((p) => this.shapeAdminPost(p)), total, page, limit);
+  }
 
-    return paginate(dataWithSurface, total, page, limit);
+  /** Any status, includes author email, pending + resolved reports and moderation history. */
+  async getPostDetail(postId: string) {
+    const post = await this.prisma.post.findUnique({
+      where: { id: postId },
+      include: {
+        user: {
+          select: {
+            id: true, email: true, role: true, status: true, createdAt: true,
+            profile: { select: { firstName: true, lastName: true, avatarUrl: true } },
+            _count: { select: { posts: true, reportedItems: true } },
+          },
+        },
+        reports: {
+          orderBy: { createdAt: 'desc' },
+          take: 50,
+          include: {
+            reporter: {
+              select: { id: true, email: true, profile: { select: { firstName: true, lastName: true, avatarUrl: true } } },
+            },
+          },
+        },
+        _count: {
+          select: {
+            comments: { where: { deletedAt: null } },
+            reports: { where: { status: ReportStatus.PENDING } },
+            emojiReactions: true,
+          },
+        },
+      },
+    });
+    if (!post) throw new NotFoundException('Post not found');
+
+    const moderationLog = await this.prisma.moderationLog.findMany({
+      where: { targetType: 'POST', targetId: postId },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+      include: {
+        moderator: { select: { id: true, email: true, profile: { select: { firstName: true, lastName: true } } } },
+      },
+    });
+
+    return { ...this.shapeAdminPost(post), moderationLog };
+  }
+
+  /** Unified moderation payload: unified likesCount, marker-free mediaUrls, surface, counts. */
+  private shapeAdminPost(post: any) {
+    const WALL_MARKER = '__WALL__';
+    const rawMedia: string[] = Array.isArray(post.mediaUrls) ? post.mediaUrls : [];
+    const surface = rawMedia.includes(WALL_MARKER) ? 'wall' : 'community';
+    const mediaUrls = rawMedia.filter((u) => u !== WALL_MARKER);
+    if (post.imageUrl && !mediaUrls.includes(post.imageUrl)) mediaUrls.unshift(post.imageUrl);
+    const { _count, user, ...rest } = post;
+    return {
+      ...rest,
+      user,
+      author: user,
+      surface,
+      mediaUrls,
+      likesCount: Math.max(post.likesCount ?? 0, _count?.emojiReactions ?? 0),
+      commentsCount: _count?.comments ?? post.commentsCount ?? 0,
+      reportsCount: _count?.reports ?? 0,
+      _count,
+    };
+  }
+
+  /**
+   * Single entry point for the moderation feed actions.
+   *  · PUBLISHED → approve (points + POST_APPROVED once, from PENDING_REVIEW)
+   *  · REJECTED  → reject (POST_REJECTED with reason)
+   *  · HIDDEN    → hide silently (kept for the author, off the feed)
+   */
+  async setPostStatus(moderatorId: string, postId: string, status: PostStatus, reason?: string) {
+    if (status === PostStatus.PUBLISHED) {
+      await this.moderatePost(moderatorId, postId, 'approve');
+    } else if (status === PostStatus.REJECTED) {
+      await this.moderatePost(moderatorId, postId, 'reject', reason);
+    } else if (status === PostStatus.HIDDEN) {
+      const post = await this.prisma.post.findUnique({ where: { id: postId }, select: { id: true, userId: true, deletedAt: true } });
+      if (!post || post.deletedAt) throw new NotFoundException('Post not found');
+      await this.prisma.$transaction([
+        this.prisma.post.update({ where: { id: postId }, data: { status: PostStatus.HIDDEN, rejectionReason: reason ?? null } }),
+        this.prisma.moderationLog.create({
+          data: { moderatorId, targetType: 'POST', targetId: postId, action: ModerationAction.HIDDEN, reason },
+        }),
+      ]);
+      await this.community.invalidateFeedCache();
+      this.realtime.broadcast('post', 'hidden', { id: postId });
+      this.communityGateway.emitChanged({ type: 'post_deleted', postId });
+    } else {
+      throw new BadRequestException('Estado no permitido. Usa PUBLISHED, HIDDEN o REJECTED');
+    }
+    return this.getPostDetail(postId);
+  }
+
+  /** Soft-delete from the moderation panel (same semantics as staff delete in community). */
+  async deletePost(moderatorId: string, postId: string, role: UserRole) {
+    await this.community.deletePost(postId, moderatorId, role);
+    await this.prisma.moderationLog.create({
+      data: { moderatorId, targetType: 'POST', targetId: postId, action: ModerationAction.HIDDEN, reason: 'Eliminado por moderación' },
+    }).catch(() => null);
+    return { success: true };
   }
 
   async moderatePost(moderatorId: string, postId: string, action: 'approve' | 'reject', reason?: string) {
@@ -885,16 +1042,39 @@ export class AdminService {
 
   // ── REPORTS ───────────────────────────────
 
-  async getReports(pagination: PaginationDto) {
-    const { page = 1, limit = 20 } = pagination;
+  /**
+   * Reports list. `status` defaults to PENDING (the moderation queue); pass
+   * `status=ALL` to list every report. `search` matches description, reporter
+   * email/name or the exact target id.
+   */
+  async getReports(filter: PaginationDto & { status?: ReportStatus | 'ALL' }) {
+    const { page = 1, limit = 20, search } = filter;
+    const status = filter.status ?? ReportStatus.PENDING;
     const skip = getPaginationOffset(page, limit);
-    const where = { status: ReportStatus.PENDING };
+    const q = search?.trim();
+
+    const where: Prisma.ReportWhereInput = {
+      ...(status !== 'ALL' ? { status } : {}),
+      ...(q
+        ? {
+            OR: [
+              { targetId: q },
+              { description: { contains: q, mode: 'insensitive' } },
+              { reporter: { email: { contains: q, mode: 'insensitive' } } },
+              { reporter: { profile: { firstName: { contains: q, mode: 'insensitive' } } } },
+              { reporter: { profile: { lastName: { contains: q, mode: 'insensitive' } } } },
+            ],
+          }
+        : {}),
+    };
 
     const [data, total] = await Promise.all([
       this.prisma.report.findMany({
         where, skip, take: limit,
-        include: { reporter: { select: { id: true, email: true } } },
-        orderBy: { createdAt: 'asc' },
+        include: {
+          reporter: { select: { id: true, email: true, profile: { select: { firstName: true, lastName: true, avatarUrl: true } } } },
+        },
+        orderBy: status === ReportStatus.PENDING ? { createdAt: 'asc' } : { createdAt: 'desc' },
       }),
       this.prisma.report.count({ where }),
     ]);
@@ -927,9 +1107,10 @@ export class AdminService {
     if (!request) throw new NotFoundException('Request not found');
 
     if (action === 'REJECT') {
+      // DataRequestStatus has no REJECTED — a rejected request is closed as FAILED.
       const r = await this.prisma.dataExportRequest.update({
         where: { id },
-        data: { status: 'REJECTED', processedAt: new Date() },
+        data: { status: 'FAILED', processedAt: new Date() },
       });
       this.realtime.toUserAndStaff(request.userId, 'gdpr', 'rejected', { id, data: { kind: 'export' } });
       return r;
@@ -1034,7 +1215,8 @@ export class AdminService {
           where: { id: userId },
           select: {
             id: true, email: true, phone: true, role: true, status: true, isVerified: true,
-            createdAt: true, lastActiveAt: true, dmPolicy: true,
+            points: true, createdAt: true, lastSeenAt: true, dmPolicy: true, friendPolicy: true,
+            mentionPolicy: true, isPrivate: true,
             profile: true,
             interests: { select: { category: { select: { name: true, slug: true } } } },
             consent: true,
@@ -1042,20 +1224,28 @@ export class AdminService {
           },
         }),
         this.prisma.post.findMany({
-          where: { authorId: userId },
-          select: { id: true, content: true, mediaUrls: true, status: true, createdAt: true, updatedAt: true },
+          where: { userId },
+          select: { id: true, content: true, imageUrl: true, mediaUrls: true, status: true, createdAt: true, updatedAt: true },
         }),
         this.prisma.comment.findMany({
-          where: { authorId: userId },
+          where: { userId },
           select: { id: true, postId: true, content: true, createdAt: true, updatedAt: true },
         }),
         this.prisma.reservation.findMany({
           where: { userId },
-          select: { id: true, status: true, partySize: true, dateTime: true, notes: true, createdAt: true },
+          select: {
+            id: true, status: true, partySize: true, date: true, timeSlot: true,
+            specialRequests: true, confirmCode: true, createdAt: true,
+            venue: { select: { name: true } },
+          },
         }),
         this.prisma.review.findMany({
           where: { userId },
-          select: { id: true, rating: true, content: true, createdAt: true },
+          select: {
+            id: true, rating: true, title: true, body: true, pros: true, cons: true,
+            visitDate: true, status: true, createdAt: true,
+            venue: { select: { name: true } },
+          },
         }),
         this.prisma.follow.findMany({
           where: { followerId: userId },
@@ -1067,12 +1257,19 @@ export class AdminService {
         }),
         this.prisma.session.findMany({
           where: { userId },
-          select: { id: true, deviceName: true, deviceOs: true, ipAddress: true, createdAt: true, lastUsedAt: true, isActive: true },
+          select: {
+            id: true, deviceName: true, deviceOs: true, ipAddress: true, userAgent: true,
+            createdAt: true, updatedAt: true, expiresAt: true, isActive: true,
+          },
         }),
-        this.prisma.pointsTransaction.findMany({
+        this.prisma.walletTransaction.findMany({
           where: { userId },
-          select: { id: true, delta: true, reason: true, createdAt: true },
-        }).catch(() => [] as Array<{ id: string; delta: number; reason: string | null; createdAt: Date }>),
+          select: {
+            id: true, type: true, points: true, balance: true, description: true,
+            referenceType: true, createdAt: true,
+          },
+          orderBy: { createdAt: 'desc' },
+        }),
         this.prisma.notification.findMany({
           where: { userId },
           select: { id: true, type: true, title: true, body: true, createdAt: true, readAt: true },
@@ -1107,7 +1304,7 @@ export class AdminService {
     if (action === 'REJECT') {
       const r = await this.prisma.dataDeletionRequest.update({
         where: { id },
-        data: { status: 'REJECTED', processedAt: new Date() },
+        data: { status: 'FAILED', processedAt: new Date() },
       });
       this.realtime.toUserAndStaff(request.userId, 'gdpr', 'rejected', { id, data: { kind: 'deletion' } });
       return r;
@@ -1237,7 +1434,7 @@ export class AdminService {
     return {
       user: { id: user.id, email: user.email, role: user.role },
       tempPassword,
-      message: 'Usuario creado. Comunicale la contraseña al usuario; puede cambiarla desde su perfil.',
+      message: 'Usuario creado. Comunícale la contraseña al usuario; puede cambiarla desde su perfil.',
     };
   }
 
@@ -1255,7 +1452,7 @@ export class AdminService {
       where: { userId, isActive: true },
       data: { isActive: false },
     }).catch(() => null);
-    this.realtime.toUser(userId, 'auth', 'sessions_revoked', { reason: 'password_reset_by_admin' });
+    this.realtime.toUser(userId, 'auth', 'sessions_revoked', { data: { reason: 'password_reset_by_admin' } });
     return {
       tempPassword,
       message: 'Contraseña reseteada. Sus sesiones activas fueron cerradas.',
@@ -1267,15 +1464,35 @@ export class AdminService {
     if (!target) throw new NotFoundException('User not found');
     if (target.isVerified) return { sent: false, message: 'El usuario ya está verificado.' };
     if (!target.email) throw new BadRequestException('El usuario no tiene email para reenviar verificación.');
-    // Reusa OTP service si está disponible — fallback a "marcado como verificado por admin"
-    try {
-      // OtpService es opcional aquí; si no se inyecta lanzamos un mensaje claro
-      // (el endpoint sigue resolviendo OK en ese caso para evitar 500).
-      await this.prisma.user.update({ where: { id: userId }, data: { isVerified: true } });
-      return { sent: true, message: 'Usuario marcado como verificado por administración.' };
-    } catch (e: any) {
-      throw new BadRequestException(e?.message ?? 'No se pudo reenviar la verificación');
-    }
+    // Real send: same EMAIL_VERIFICATION OTP flow the signup uses (rate-limited
+    // per identifier by OtpService). The user finishes it from the app.
+    const result = await this.otp.sendOtp({ email: target.email, type: OtpType.EMAIL_VERIFICATION });
+    this.logger.log(`[admin] verification OTP re-sent to ${target.email} (user ${userId})`);
+    return { sent: true, expiresIn: result.expiresIn, message: 'Código de verificación reenviado por correo.' };
+  }
+
+  /** Admin override: mark the account as verified without the OTP round-trip. */
+  async markUserVerified(adminId: string, userId: string) {
+    const target = await this.prisma.user.findUnique({ where: { id: userId }, select: { isVerified: true, status: true } });
+    if (!target) throw new NotFoundException('User not found');
+    if (target.isVerified) return { success: true, message: 'El usuario ya está verificado.' };
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        isVerified: true,
+        ...(target.status === UserStatus.PENDING_VERIFICATION ? { status: UserStatus.ACTIVE } : {}),
+      },
+    });
+    await this.logAdminAction({
+      adminId,
+      targetUserId: userId,
+      action: AdminActionType.VERIFY,
+      summary: 'Marcado como verificado por administración',
+      before: { isVerified: false, status: target.status },
+      after: { isVerified: true },
+    }).catch(() => null);
+    this.realtime.toUserAndStaff(userId, 'user', 'updated', { id: userId, data: { isVerified: true } });
+    return { success: true, message: 'Usuario marcado como verificado.' };
   }
 
   // ─────────────────────────────────────────────
@@ -1326,7 +1543,7 @@ export class AdminService {
       where: { id: postId },
       data: { isPinned: pinned },
     });
-    await this.communityService.invalidateFeedCache().catch(() => null);
+    await this.community.invalidateFeedCache().catch(() => null);
     this.realtime.broadcast('post', pinned ? 'pinned' : 'unpinned', { id: postId });
     return updated;
   }
@@ -1396,7 +1613,7 @@ export class AdminService {
     if (text.length > 2000) throw new BadRequestException('Mensaje demasiado largo (máximo 2000)');
     const target = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!target) throw new NotFoundException('Usuario no encontrado');
-    if (target.id === adminId) throw new BadRequestException('No te podés mandar un mensaje a vos mismo');
+    if (target.id === adminId) throw new BadRequestException('No puedes enviarte un mensaje a ti mismo');
 
     // Buscar/crear thread entre admin y user. La unique constraint es
     // (userAId, userBId) — para evitar duplicados ordenamos los IDs.
@@ -1495,13 +1712,13 @@ export class AdminService {
       where: { userId, isActive: true },
       data: { isActive: false },
     });
-    this.realtime.toUser(userId, 'auth', 'sessions_revoked', { count: r.count });
+    this.realtime.toUser(userId, 'auth', 'sessions_revoked', { data: { count: r.count } });
     return { revoked: r.count };
   }
 
   async bulkDeleteReviews(ids: string[]) {
     if (!Array.isArray(ids) || ids.length === 0) {
-      throw new BadRequestException('Pasá al menos un id');
+      throw new BadRequestException('Indica al menos un id');
     }
     if (ids.length > 100) {
       throw new BadRequestException('Máximo 100 reseñas por bulk');
@@ -1517,8 +1734,40 @@ export class AdminService {
         rejectionReason: 'Eliminado masivamente por moderación.',
       },
     });
-    this.realtime.toStaff('review', 'bulk_deleted', { count: r.count });
+    this.realtime.toStaff('review', 'bulk_deleted', { data: { count: r.count } });
     return { deleted: r.count };
+  }
+
+  /** Every venue, active or not — the admin pickers must be able to target an inactive venue. */
+  async listVenues() {
+    return this.prisma.venue.findMany({
+      orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
+      select: {
+        id: true, name: true, slug: true, city: true, address: true, imageUrl: true, isActive: true,
+        openTime: true, closeTime: true, reservationCapacity: true, reservationsEnabled: true, slotMinutes: true,
+        _count: { select: { events: true, offers: true, reservations: true } },
+      },
+    });
+  }
+
+  /** Ticket + requester + agent + full message thread (staff view; no read-receipt side effects). */
+  async getTicketDetail(ticketId: string) {
+    const ticket = await this.prisma.supportTicket.findUnique({
+      where: { id: ticketId },
+      include: {
+        user: { select: { id: true, email: true, phone: true, role: true, status: true, profile: { select: { firstName: true, lastName: true, avatarUrl: true } } } },
+        assignedTo: { select: { id: true, email: true, role: true, profile: { select: { firstName: true, lastName: true, avatarUrl: true } } } },
+        messages: {
+          orderBy: { createdAt: 'asc' },
+          include: {
+            senderUser: { select: { id: true, role: true, profile: { select: { firstName: true, lastName: true, avatarUrl: true } } } },
+          },
+        },
+        _count: { select: { messages: true } },
+      },
+    });
+    if (!ticket) throw new NotFoundException('Ticket no encontrado');
+    return ticket;
   }
 
   async listVenueBlocks(venueId: string) {
@@ -1554,7 +1803,7 @@ export class AdminService {
         createdById: adminId,
       },
     });
-    this.realtime.toStaff('venue', 'block_created', { id: block.id, venueId });
+    this.realtime.toStaff('venue', 'block_created', { id: block.id, data: { venueId } });
     return block;
   }
 
@@ -1737,19 +1986,67 @@ export class AdminService {
   // prettier-ignore
   // (declared below)
 
-  async createLoyaltyLevel(data: {
-    name: string; nameEn?: string; slug: string;
-    minPoints: number; maxPoints?: number; color: string; icon: string;
-    benefits: string[]; sortOrder: number;
-  }) {
-    return this.prisma.loyaltyLevel.create({ data });
+  /** Every level, inactive ones included (the public endpoint only returns active). */
+  async listLoyaltyLevels() {
+    return this.prisma.loyaltyLevel.findMany({
+      orderBy: [{ sortOrder: 'asc' }, { minPoints: 'asc' }],
+      include: { _count: { select: { profiles: true } } },
+    });
   }
 
-  async updateLoyaltyLevel(id: string, data: any) {
+  async createLoyaltyLevel(data: {
+    name: string; nameEn?: string; slug: string;
+    minPoints: number; maxPoints?: number | null; color: string; icon: string;
+    benefits?: string[]; sortOrder?: number; isActive?: boolean;
+  }) {
+    const dup = await this.prisma.loyaltyLevel.findFirst({
+      where: { OR: [{ slug: data.slug }, { name: data.name }] },
+      select: { id: true },
+    });
+    if (dup) throw new ConflictException('Ya existe un nivel con ese nombre o slug');
+    return this.prisma.loyaltyLevel.create({
+      data: { ...data, benefits: data.benefits ?? [], sortOrder: data.sortOrder ?? 0 },
+    });
+  }
+
+  async updateLoyaltyLevel(
+    id: string,
+    data: {
+      name?: string; nameEn?: string | null; slug?: string;
+      minPoints?: number; maxPoints?: number | null; color?: string; icon?: string;
+      benefits?: string[]; sortOrder?: number; isActive?: boolean;
+    },
+  ) {
+    const existing = await this.prisma.loyaltyLevel.findUnique({ where: { id }, select: { id: true } });
+    if (!existing) throw new NotFoundException('Nivel no encontrado');
+    if (data.slug || data.name) {
+      const dup = await this.prisma.loyaltyLevel.findFirst({
+        where: {
+          id: { not: id },
+          OR: [
+            ...(data.slug ? [{ slug: data.slug }] : []),
+            ...(data.name ? [{ name: data.name }] : []),
+          ],
+        },
+        select: { id: true },
+      });
+      if (dup) throw new ConflictException('Ya existe un nivel con ese nombre o slug');
+    }
     return this.prisma.loyaltyLevel.update({ where: { id }, data });
   }
 
   async deleteLoyaltyLevel(id: string) {
+    const level = await this.prisma.loyaltyLevel.findUnique({
+      where: { id },
+      include: { _count: { select: { profiles: true } } },
+    });
+    if (!level) throw new NotFoundException('Nivel no encontrado');
+    if (level._count.profiles > 0) {
+      // Members still sit on this level — deactivate instead of orphaning them.
+      throw new ConflictException(
+        `No se puede eliminar: ${level._count.profiles} miembro(s) tienen este nivel. Desactívalo en su lugar.`,
+      );
+    }
     return this.prisma.loyaltyLevel.delete({ where: { id } });
   }
 
@@ -1763,7 +2060,7 @@ export class AdminService {
     const cleanKey = (key ?? '').trim();
     if (!cleanKey) throw new BadRequestException('Falta el key del flag');
     if (!/^[a-z][a-z0-9_]{2,49}$/.test(cleanKey)) {
-      throw new BadRequestException('Key inválido. Usá snake_case (3-50 caracteres, empieza con letra)');
+      throw new BadRequestException('Key inválido. Usa snake_case (3-50 caracteres, empieza con letra)');
     }
     const exists = await this.prisma.featureFlag.findUnique({ where: { key: cleanKey } });
     if (exists) throw new BadRequestException(`Ya existe un flag con key "${cleanKey}"`);

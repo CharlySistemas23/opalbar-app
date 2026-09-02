@@ -2,75 +2,156 @@
 //  Friends — Editorial Premium
 //
 //  Magazine roster (same shell as Followers/Following).
-//   · Owner: shows the local friend list; visitors get a "lista privada" empty.
-//   · Inline search shortcut routes to the global /search screen.
+//   · Any user's accepted friends via GET /users/:id/friends (paginated).
+//     Private accounts → backend 403 → ErrorState ("Cuenta privada").
+//   · Segments: Todos · En común (mutual=1) when viewing someone else.
+//   · Inline filter by name; tap → profile; "…" → remove friend (owner only,
+//     ConfirmSheet, optimistic with revert).
+//   · Realtime: friendship events involving me refresh the list.
 // ─────────────────────────────────────────────
-import { Image, StyleSheet, Text, View } from 'react-native';
-import { useEffect, useMemo, useState } from 'react';
+import { FlatList, Image, StyleSheet, Text, View, ActivityIndicator } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 
-import { friendshipsApi } from '@/api/client';
+import { friendshipsApi, usersApi } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { useAuthStore } from '@/stores/auth.store';
 import { useAppStore } from '@/stores/app.store';
 import { Colors, EditorialSpacing, Radius, Spacing, TypePresets } from '@/constants/tokens';
 import { HitSlop, Roles } from '@/constants/a11y';
 import {
+  Badge,
   Body,
   Caption,
-  FadeIn,
   Hairline,
   Heading,
+  Input,
   Kicker,
   Pressy,
+  SegmentedControl,
   SkeletonList,
 } from '@/components/ui';
+import type { SegmentOption } from '@/components/ui';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
+import { ConfirmSheet } from '@/components/ConfirmSheet';
+import { toast } from '@/components/Toast';
+import { useFeedback } from '@/hooks/useFeedback';
+import { useRealtime } from '@/hooks/useRealtime';
 
 interface UserRecord {
   id: string;
-  profile?: { firstName?: string; lastName?: string; avatarUrl?: string };
-  email?: string;
+  isPrivate?: boolean;
+  friendshipId?: string;
+  since?: string;
+  profile?: { firstName?: string; lastName?: string; avatarUrl?: string | null };
 }
 
+interface PageMeta {
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+  hasNextPage: boolean;
+}
+
+type Segment = 'all' | 'mutual';
+const PAGE_SIZE = 30;
+
 export default function Friends() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, tab } = useLocalSearchParams<{ id: string; tab?: string }>();
   const router = useRouter();
   const { user: me } = useAuthStore();
   const { language } = useAppStore();
   const t = language === 'es';
+  const fb = useFeedback();
 
-  const [items, setItems] = useState<UserRecord[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [query] = useState('');
-
-  // Backend exposes friends.list only for the authenticated user. Visiting
-  // another user's friends route therefore falls back to "private list".
   const isMe = me?.id === id;
 
-  const load = () => {
-    setError(null);
-    setLoading(true);
-    friendshipsApi
-      .list(200)
-      .then((r) => setItems(r.data?.data ?? []))
-      .catch((err) => setError(apiError(err)))
-      .finally(() => setLoading(false));
-  };
+  const [segment, setSegment] = useState<Segment>(tab === 'mutual' && !isMe ? 'mutual' : 'all');
+  const [items, setItems] = useState<UserRecord[]>([]);
+  const [meta, setMeta] = useState<PageMeta | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [pendingRemove, setPendingRemove] = useState<UserRecord | null>(null);
+  const [removing, setRemoving] = useState(false);
+
+  // Stale-response guard: only the latest request may write state.
+  const reqRef = useRef(0);
+
+  const fetchPage = useCallback(
+    async (page: number, seg: Segment) => {
+      const reqId = ++reqRef.current;
+      const r = await usersApi.friends(id, {
+        page,
+        limit: PAGE_SIZE,
+        ...(seg === 'mutual' ? { mutual: 1 as const } : {}),
+      });
+      if (reqId !== reqRef.current) return null;
+      const payload = r.data?.data ?? {};
+      const rows: UserRecord[] = Array.isArray(payload.data) ? payload.data : [];
+      const m: PageMeta | null = payload.meta ?? null;
+      return { rows, meta: m };
+    },
+    [id],
+  );
+
+  const load = useCallback(
+    async (seg: Segment, silent = false) => {
+      if (!silent) {
+        setLoading(true);
+        setError(null);
+      }
+      try {
+        const res = await fetchPage(1, seg);
+        if (!res) return;
+        setItems(res.rows);
+        setMeta(res.meta);
+        setError(null);
+      } catch (err) {
+        if (!silent) setError(apiError(err));
+        else toast(apiError(err), 'danger');
+      } finally {
+        setLoading(false);
+      }
+    },
+    [fetchPage],
+  );
+
+  const loadMore = useCallback(async () => {
+    if (loadingMore || loading || !meta?.hasNextPage) return;
+    setLoadingMore(true);
+    try {
+      const res = await fetchPage(meta.page + 1, segment);
+      if (!res) return;
+      setItems((prev) => {
+        const seen = new Set(prev.map((u) => u.id));
+        return [...prev, ...res.rows.filter((u) => !seen.has(u.id))];
+      });
+      setMeta(res.meta);
+    } catch (err) {
+      toast(apiError(err), 'danger');
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [fetchPage, loading, loadingMore, meta, segment]);
 
   useEffect(() => {
-    if (!isMe) {
-      setItems([]);
-      setLoading(false);
-      return;
-    }
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, isMe]);
+    void load(segment);
+  }, [id, segment, load]);
+
+  // Friendship changes involving me (accept/remove/block) → silent refresh.
+  useRealtime('user', (env) => {
+    const d: any = env?.data ?? {};
+    if (!d?.friendship) return;
+    const touchesList =
+      isMe || env?.id === id || d?.by === id || (Array.isArray(d?.userIds) && d.userIds.includes(id));
+    if (touchesList) void load(segment, true);
+  });
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -81,6 +162,40 @@ export default function Friends() {
     });
   }, [items, query]);
 
+  async function confirmRemove() {
+    const target = pendingRemove;
+    if (!target || removing) return;
+    setRemoving(true);
+    const snapshotItems = items;
+    const snapshotMeta = meta;
+    // Optimistic: drop the row and decrement the count.
+    setItems((prev) => prev.filter((u) => u.id !== target.id));
+    setMeta((m) => (m ? { ...m, total: Math.max(0, m.total - 1) } : m));
+    try {
+      await friendshipsApi.remove(target.id);
+      setPendingRemove(null);
+      fb.tap();
+      toast(t ? 'Amistad eliminada.' : 'Friend removed.', 'info');
+    } catch (err) {
+      setItems(snapshotItems);
+      setMeta(snapshotMeta);
+      fb.error();
+      toast(apiError(err), 'danger');
+    } finally {
+      setRemoving(false);
+    }
+  }
+
+  const total = meta?.total ?? items.length;
+  const segmentOptions: SegmentOption<Segment>[] = [
+    { value: 'all', label: t ? 'Todos' : 'All' },
+    { value: 'mutual', label: t ? 'En común' : 'Mutual' },
+  ];
+  const isPrivateError = !!error && /privad|private/i.test(error);
+  const pendingName = pendingRemove
+    ? `${pendingRemove.profile?.firstName ?? ''} ${pendingRemove.profile?.lastName ?? ''}`.trim()
+    : '';
+
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
       <View style={styles.header}>
@@ -89,93 +204,180 @@ export default function Friends() {
           haptic="select"
           hitSlop={HitSlop.expand}
           accessibilityRole={Roles.button}
-          accessibilityLabel="Volver"
+          accessibilityLabel={t ? 'Volver' : 'Back'}
           style={styles.backBtn}
         >
           <Feather name="arrow-left" size={22} color={Colors.textPrimary} />
         </Pressy>
         <View style={styles.headerTitleBlock}>
-          {items.length > 0 ? <Kicker tone="muted">{`${items.length}`}</Kicker> : null}
-          <Heading size="md" style={{ marginTop: items.length > 0 ? Spacing[1] : 0 }}>
-            {t ? 'Amigos' : 'Friends'}
+          {total > 0 ? <Kicker tone="muted">{`${total}`}</Kicker> : null}
+          <Heading size="md" style={{ marginTop: total > 0 ? Spacing[1] : 0 }}>
+            {segment === 'mutual' ? (t ? 'Amigos en común' : 'Mutual friends') : t ? 'Amigos' : 'Friends'}
           </Heading>
         </View>
         <View style={{ width: 40 }} />
       </View>
+
+      {!isMe ? (
+        <View style={styles.segmentWrap}>
+          <SegmentedControl value={segment} onChange={setSegment} options={segmentOptions} fullWidth />
+        </View>
+      ) : null}
 
       {loading ? (
         <View style={{ paddingHorizontal: EditorialSpacing.pageGutter, paddingTop: Spacing[4] }}>
           <SkeletonList count={6} itemHeight={64} />
         </View>
       ) : error && items.length === 0 ? (
-        <ErrorState
-          message={error}
-          retryLabel={t ? 'Reintentar' : 'Retry'}
-          onRetry={load}
-        />
-      ) : filtered.length === 0 ? (
-        <EmptyState
-          icon={isMe ? 'users' : 'lock'}
-          title={
-            isMe
-              ? t
-                ? 'Sin amigos aún'
-                : 'No friends yet'
-              : t
-                ? 'Lista privada'
-                : 'Private list'
-          }
-          message={
-            isMe
-              ? t
-                ? 'Cuando aceptes solicitudes, los amigos aparecerán aquí.'
-                : 'Once you accept requests, friends will appear here.'
-              : t
-                ? 'Solo tú puedes ver tus amigos por ahora.'
-                : 'Only you can see your friends list for now.'
-          }
-        />
+        isPrivateError ? (
+          <EmptyState
+            icon="lock"
+            title={t ? 'Cuenta privada' : 'Private account'}
+            message={
+              t
+                ? 'Sigue a esta persona o agrégala como amigo para ver su lista de amigos.'
+                : 'Follow this person or add them as a friend to see their friends list.'
+            }
+            actionLabel={t ? 'Ver perfil' : 'View profile'}
+            onAction={() => router.back()}
+          />
+        ) : (
+          <ErrorState
+            message={error}
+            retryLabel={t ? 'Reintentar' : 'Retry'}
+            onRetry={() => load(segment)}
+          />
+        )
       ) : (
-        <FadeIn style={styles.body}>
-          {isMe ? (
-            <Pressy
-              onPress={() => router.push('/(app)/search' as never)}
-              haptic="select"
-              accessibilityRole={Roles.button}
-              accessibilityLabel={t ? 'Buscar amigos' : 'Search friends'}
-              style={styles.searchShortcut}
-            >
-              <Feather name="search" size={16} color={Colors.textMuted} />
-              <Caption tone="muted" style={{ flex: 1 }}>
-                {t ? 'Buscar amigos' : 'Search friends'}
-              </Caption>
-            </Pressy>
-          ) : null}
-
-          <View style={styles.listShell}>
-            {filtered.map((u, idx) => (
-              <View key={u.id}>
-                <UserRow u={u} onPress={() => router.push(`/(app)/users/${u.id}` as never)} />
-                {idx < filtered.length - 1 ? (
-                  <Hairline variant="subtle" marginHorizontal={Spacing[5]} />
-                ) : null}
+        <FlatList
+          data={filtered}
+          keyExtractor={(u) => u.id}
+          contentContainerStyle={[styles.body, filtered.length === 0 && { flexGrow: 1 }]}
+          keyboardShouldPersistTaps="handled"
+          onEndReachedThreshold={0.4}
+          onEndReached={() => void loadMore()}
+          ListHeaderComponent={
+            items.length > 0 ? (
+              <View style={styles.searchWrap}>
+                <Input
+                  value={query}
+                  onChangeText={setQuery}
+                  placeholder={t ? 'Buscar entre amigos' : 'Search friends'}
+                  leftIcon={<Feather name="search" size={16} color={Colors.textMuted} />}
+                  rightIcon={
+                    query ? <Feather name="x" size={16} color={Colors.textMuted} /> : undefined
+                  }
+                  onRightIconPress={query ? () => setQuery('') : undefined}
+                  rightIconLabel={t ? 'Limpiar' : 'Clear'}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  returnKeyType="search"
+                />
               </View>
-            ))}
-          </View>
-        </FadeIn>
+            ) : null
+          }
+          ListEmptyComponent={
+            items.length > 0 ? (
+              <EmptyState
+                icon="search"
+                title={t ? 'Sin resultados' : 'No results'}
+                message={
+                  t
+                    ? 'Ningún amigo coincide con tu búsqueda.'
+                    : 'No friend matches your search.'
+                }
+              />
+            ) : segment === 'mutual' ? (
+              <EmptyState
+                icon="users"
+                title={t ? 'Sin amigos en común' : 'No mutual friends'}
+                message={
+                  t
+                    ? 'Aún no comparten amigos.'
+                    : "You don't share any friends yet."
+                }
+              />
+            ) : (
+              <EmptyState
+                icon="users"
+                title={isMe ? (t ? 'Sin amigos aún' : 'No friends yet') : t ? 'Sin amigos' : 'No friends'}
+                message={
+                  isMe
+                    ? t
+                      ? 'Busca personas y envía solicitudes para empezar tu círculo.'
+                      : 'Find people and send requests to start your circle.'
+                    : t
+                      ? 'Esta persona aún no tiene amigos.'
+                      : 'This person has no friends yet.'
+                }
+                actionLabel={isMe ? (t ? 'Buscar personas' : 'Find people') : undefined}
+                onAction={isMe ? () => router.push('/(app)/search' as never) : undefined}
+              />
+            )
+          }
+          renderItem={({ item, index }) => (
+            <View
+              style={[
+                styles.rowShell,
+                index === 0 && styles.rowShellFirst,
+                index === filtered.length - 1 && styles.rowShellLast,
+              ]}
+            >
+              <UserRow
+                u={item}
+                t={t}
+                onPress={() => router.push(`/(app)/users/${item.id}` as never)}
+                onMore={isMe ? () => setPendingRemove(item) : undefined}
+              />
+              {index < filtered.length - 1 ? (
+                <Hairline variant="subtle" marginHorizontal={Spacing[5]} />
+              ) : null}
+            </View>
+          )}
+          ListFooterComponent={
+            loadingMore ? (
+              <View style={styles.footer}>
+                <ActivityIndicator color={Colors.accentPrimary} />
+              </View>
+            ) : null
+          }
+        />
       )}
+
+      <ConfirmSheet
+        visible={!!pendingRemove}
+        onClose={() => (removing ? undefined : setPendingRemove(null))}
+        icon="user-minus"
+        variant="danger"
+        title={t ? 'Eliminar amistad' : 'Remove friend'}
+        message={
+          t
+            ? `¿Seguro que quieres dejar de ser amigo de ${pendingName || 'esta persona'}?`
+            : `Are you sure you want to remove ${pendingName || 'this person'} as a friend?`
+        }
+        confirmLabel={t ? 'Eliminar' : 'Remove'}
+        onConfirm={confirmRemove}
+        loading={removing}
+      />
     </SafeAreaView>
   );
 }
 
-function UserRow({ u, onPress }: { u: UserRecord; onPress: () => void }) {
+function UserRow({
+  u,
+  t,
+  onPress,
+  onMore,
+}: {
+  u: UserRecord;
+  t: boolean;
+  onPress: () => void;
+  onMore?: () => void;
+}) {
   const first = u?.profile?.firstName ?? '';
   const last = u?.profile?.lastName ?? '';
-  const fullName = `${first} ${last}`.trim() || (u.email?.split('@')[0] ?? 'Usuario');
-  const initials =
-    ((first[0] || '') + (last[0] || '')).toUpperCase() ||
-    (u.email?.[0] ?? 'U').toUpperCase();
-  const handle = (u.email || '').split('@')[0];
+  const fullName = `${first} ${last}`.trim() || (t ? 'Usuario' : 'User');
+  const initials = ((first[0] || '') + (last[0] || '')).toUpperCase() || 'U';
 
   return (
     <Pressy
@@ -196,15 +398,35 @@ function UserRow({ u, onPress }: { u: UserRecord; onPress: () => void }) {
         <Body weight="semiBold" numberOfLines={1}>
           {fullName}
         </Body>
-        {handle ? (
+        {u.since ? (
           <Caption tone="muted" numberOfLines={1} style={{ marginTop: 2 }}>
-            @{handle}
+            {t ? 'Amigos desde' : 'Friends since'} {formatSince(u.since, t)}
           </Caption>
         ) : null}
       </View>
-      <Feather name="chevron-right" size={18} color={Colors.textMuted} />
+      {u.isPrivate ? <Badge label={t ? 'Privado' : 'Private'} size="sm" outline /> : null}
+      {onMore ? (
+        <Pressy
+          onPress={onMore}
+          haptic="select"
+          hitSlop={HitSlop.expand}
+          accessibilityRole={Roles.button}
+          accessibilityLabel={t ? 'Más opciones' : 'More options'}
+          style={styles.moreBtn}
+        >
+          <Feather name="more-horizontal" size={18} color={Colors.textMuted} />
+        </Pressy>
+      ) : (
+        <Feather name="chevron-right" size={18} color={Colors.textMuted} />
+      )}
     </Pressy>
   );
+}
+
+function formatSince(iso: string, es: boolean) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleDateString(es ? 'es-MX' : 'en-US', { month: 'short', year: 'numeric' });
 }
 
 const styles = StyleSheet.create({
@@ -215,7 +437,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: EditorialSpacing.pageGutter,
     paddingTop: Spacing[2],
-    paddingBottom: Spacing[5],
+    paddingBottom: Spacing[4],
     gap: Spacing[3],
   },
   backBtn: {
@@ -227,32 +449,36 @@ const styles = StyleSheet.create({
   },
   headerTitleBlock: { flex: 1 },
 
+  segmentWrap: {
+    paddingHorizontal: EditorialSpacing.pageGutter,
+    paddingBottom: Spacing[3],
+  },
+
   body: {
     paddingHorizontal: EditorialSpacing.pageGutter,
     paddingBottom: Spacing[10],
-    gap: Spacing[4],
+  },
+  searchWrap: {
+    marginBottom: Spacing[4],
   },
 
-  searchShortcut: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing[2],
-    paddingHorizontal: Spacing[4],
-    minHeight: 44,
+  rowShell: {
     backgroundColor: Colors.bgCard,
-    borderRadius: Radius.lg,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderLeftWidth: StyleSheet.hairlineWidth,
+    borderRightWidth: StyleSheet.hairlineWidth,
     borderColor: Colors.border,
-    borderTopColor: Colors.highlightTop,
-  },
-
-  listShell: {
-    backgroundColor: Colors.bgCard,
-    borderRadius: Radius.lg,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: Colors.border,
-    borderTopColor: Colors.highlightTop,
     overflow: 'hidden',
+  },
+  rowShellFirst: {
+    borderTopLeftRadius: Radius.lg,
+    borderTopRightRadius: Radius.lg,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Colors.highlightTop,
+  },
+  rowShellLast: {
+    borderBottomLeftRadius: Radius.lg,
+    borderBottomRightRadius: Radius.lg,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   row: {
     flexDirection: 'row',
@@ -262,6 +488,13 @@ const styles = StyleSheet.create({
     minHeight: 64,
   },
   rowText: { flex: 1 },
+  moreBtn: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: Radius.full,
+  },
   avatar: {
     width: 44,
     height: 44,
@@ -277,5 +510,9 @@ const styles = StyleSheet.create({
     ...TypePresets.label,
     color: Colors.textPrimary,
     fontSize: 12,
+  },
+  footer: {
+    paddingVertical: Spacing[5],
+    alignItems: 'center',
   },
 });

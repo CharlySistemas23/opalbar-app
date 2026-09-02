@@ -24,6 +24,8 @@ import { useAuthStore } from '@/stores/auth.store';
 import { useAppStore } from '@/stores/app.store';
 import { apiError } from '@/api/errors';
 import { useFeedback } from '@/hooks/useFeedback';
+import { getDeviceMeta } from '@/lib/device';
+import { setPendingPassword } from '@/lib/pending-credentials';
 import {
   Body,
   Button,
@@ -59,15 +61,22 @@ export default function Login() {
       return;
     }
     try {
-      await login({ email: mail, password });
+      await login({ email: mail, password, ...getDeviceMeta() });
       fb.success();
       router.replace('/(tabs)/home' as never);
     } catch (err: any) {
       if (err?.code === 'EMAIL_NOT_VERIFIED') {
-        const verifyEmail: string = err.identifier || mail;
+        // Account exists but never verified. Backend already re-sent the
+        // OTP. Park the password in memory (never in route params) so the
+        // OTP screen can auto-login after verification.
+        const identifier: string = err.identifier || mail;
+        setPendingPassword(identifier, password);
+        const isPhone = !identifier.includes('@');
         router.push({
-          pathname: '/(auth)/otp-email',
-          params: { email: verifyEmail, password, purpose: 'EMAIL_VERIFICATION' },
+          pathname: isPhone ? '/(auth)/otp-phone' : '/(auth)/otp-email',
+          params: isPhone
+            ? { phone: identifier, purpose: 'PHONE_VERIFICATION' }
+            : { email: identifier, purpose: 'EMAIL_VERIFICATION' },
         } as never);
         return;
       }
@@ -80,7 +89,7 @@ export default function Login() {
         return;
       }
       fb.error();
-      setError(apiError(err, t ? 'Credenciales incorrectas.' : 'Invalid credentials.'));
+      setError(apiError(err, t ? 'Correo o contraseña incorrectos.' : 'Invalid email or password.'));
     }
   }
 

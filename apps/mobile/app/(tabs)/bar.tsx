@@ -8,6 +8,7 @@
 // ─────────────────────────────────────────────
 import { useCallback, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Image,
   Linking,
@@ -44,24 +45,35 @@ import {
   Pressy,
   Skeleton,
   SkeletonText,
+  Subhead,
 } from '@/components/ui';
 import { ErrorState } from '@/components/ErrorState';
 import { OpalbarRoutes } from '@/lib/website';
+import { isOpenNow } from '@/utils/date';
+import { shareVenue } from '@/utils/share';
+
+const REVIEWS_PAGE_SIZE = 5;
 
 // ── External actions ─────────────────────────
-async function openDirections(venue: {
-  lat?: number | string | null;
-  lng?: number | string | null;
-  address?: string | null;
-  name?: string;
-}) {
+async function openDirections(
+  venue: {
+    lat?: number | string | null;
+    lng?: number | string | null;
+    address?: string | null;
+    name?: string;
+  },
+  t: boolean,
+) {
   const lat = venue.lat != null ? Number(venue.lat) : null;
   const lng = venue.lng != null ? Number(venue.lng) : null;
   const name = venue.name ?? 'OPAL BAR';
   const hasCoords = lat != null && lng != null && !Number.isNaN(lat) && !Number.isNaN(lng);
 
   if (!hasCoords && !venue.address) {
-    Alert.alert('Sin ubicación', 'Este lugar aún no tiene ubicación registrada.');
+    Alert.alert(
+      t ? 'Sin ubicación' : 'No location',
+      t ? 'Este lugar aún no tiene ubicación registrada.' : "This venue doesn't have a location on file yet.",
+    );
     return;
   }
 
@@ -103,6 +115,11 @@ export default function BarTab() {
   const [summary, setSummary] = useState<any>(null);
   const [offers, setOffers] = useState<any[]>([]);
   const [events, setEvents] = useState<any[]>([]);
+  const [reviews, setReviews] = useState<any[]>([]);
+  const [reviewsTotal, setReviewsTotal] = useState<number | null>(null);
+  const [reviewsPage, setReviewsPage] = useState(1);
+  const [reviewsHasMore, setReviewsHasMore] = useState(false);
+  const [reviewsLoadingMore, setReviewsLoadingMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -123,19 +140,37 @@ export default function BarTab() {
         return;
       }
       const nowIso = new Date().toISOString();
-      const [vRes, rRes, oRes, eRes] = await Promise.all([
+      // A summary/offers/events/reviews hiccup must never blank the whole
+      // screen — only the venue fetch itself is load-bearing.
+      const [vRes, rRes, oRes, eRes, revRes] = await Promise.allSettled([
         venueApi.get(first.id),
-        reviewsApi.venueSummary(first.id).catch(() => null),
-        offersApi.list({ limit: 3, venueId: first.id }).catch(() => null),
-        eventsApi
-          .list({ limit: 4, venueId: first.id, startDate: nowIso })
-          .catch(() => null),
+        reviewsApi.venueSummary(first.id),
+        offersApi.list({ limit: 3, venueId: first.id }),
+        eventsApi.list({ limit: 4, venueId: first.id, startDate: nowIso }),
+        reviewsApi.byVenue(first.id, { page: 1, limit: REVIEWS_PAGE_SIZE }),
       ]);
-      setVenue(vRes.data?.data ?? first);
-      setSummary(rRes?.data?.data ?? null);
-      setOffers(oRes?.data?.data?.data ?? []);
-      setEvents(eRes?.data?.data?.data ?? []);
+
+      if (vRes.status === 'fulfilled') {
+        setVenue(vRes.value.data?.data ?? first);
+      } else {
+        setVenue(first);
+      }
+      setSummary(rRes.status === 'fulfilled' ? rRes.value.data?.data ?? null : null);
+      setOffers(oRes.status === 'fulfilled' ? oRes.value.data?.data?.data ?? [] : []);
+      setEvents(eRes.status === 'fulfilled' ? eRes.value.data?.data?.data ?? [] : []);
+      if (revRes.status === 'fulfilled') {
+        const rPayload = revRes.value.data?.data;
+        setReviews(rPayload?.data ?? []);
+        setReviewsTotal(rPayload?.meta?.total ?? rPayload?.data?.length ?? 0);
+        setReviewsHasMore(!!rPayload?.meta?.hasNextPage);
+        setReviewsPage(1);
+      } else {
+        setReviews([]);
+        setReviewsTotal(null);
+        setReviewsHasMore(false);
+      }
     } catch (err: any) {
+      setVenue(null);
       setError(err?.response?.data?.message || (t ? 'Error al cargar' : 'Load error'));
     } finally {
       setLoading(false);
@@ -148,6 +183,36 @@ export default function BarTab() {
       load();
     }, [load]),
   );
+
+  async function loadMoreReviews() {
+    if (!venue || reviewsLoadingMore || !reviewsHasMore) return;
+    setReviewsLoadingMore(true);
+    try {
+      const nextPage = reviewsPage + 1;
+      const r = await reviewsApi.byVenue(venue.id, { page: nextPage, limit: REVIEWS_PAGE_SIZE });
+      const rPayload = r.data?.data;
+      setReviews((prev) => [...prev, ...(rPayload?.data ?? [])]);
+      setReviewsPage(nextPage);
+      setReviewsHasMore(!!rPayload?.meta?.hasNextPage);
+    } catch {
+      // Keep what we have; the "cargar más" affordance simply stays put.
+    } finally {
+      setReviewsLoadingMore(false);
+    }
+  }
+
+  async function handleShareVenue() {
+    if (!venue) return;
+    await shareVenue({
+      id: venue.id,
+      name: venue.name,
+      description: venue.description,
+      imageUrl: venue.coverUrl || venue.imageUrl,
+      address: venue.address,
+      rating: Number(venue.ratingAvg ?? summary?.average ?? 0),
+      t,
+    });
+  }
 
   // ── Loading skeleton ───────────────────────
   if (loading) {
@@ -181,9 +246,10 @@ export default function BarTab() {
     );
   }
 
-  const rating = Number(venue.ratingAvg ?? summary?.averageRating ?? 0);
-  const reviewCount = Number(venue.ratingCount ?? summary?.totalReviews ?? 0);
+  const rating = Number(venue.ratingAvg ?? summary?.average ?? 0);
+  const reviewCount = Number(venue.ratingCount ?? summary?.total ?? reviewsTotal ?? 0);
   const heroImage = venue.coverUrl || venue.imageUrl || null;
+  const open = isOpenNow(venue.openTime, venue.closeTime);
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
@@ -212,6 +278,15 @@ export default function BarTab() {
                 <Feather name="image" size={28} color={Colors.textMuted} />
               </View>
             )}
+            <Pressy
+              onPress={handleShareVenue}
+              accessibilityRole={Roles.button}
+              accessibilityLabel={t ? 'Compartir lugar' : 'Share venue'}
+              hitSlop={HitSlop.expand}
+              style={styles.shareOverlay}
+            >
+              <Feather name="share-2" size={18} color={Colors.textPrimary} />
+            </Pressy>
           </View>
         </FadeIn>
 
@@ -219,13 +294,9 @@ export default function BarTab() {
         <View style={styles.identity}>
           <FadeIn delay={120}>
             <Kicker tone="champagne">
-              {venue.isActive
-                ? t
-                  ? 'ABIERTO AHORA'
-                  : 'OPEN NOW'
-                : t
-                  ? 'CERRADO'
-                  : 'CLOSED'}
+              {open
+                ? t ? 'ABIERTO AHORA' : 'OPEN NOW'
+                : t ? 'CERRADO' : 'CLOSED'}
             </Kicker>
           </FadeIn>
           <FadeIn delay={200} style={{ marginTop: Spacing[3] }}>
@@ -260,7 +331,12 @@ export default function BarTab() {
           <View style={styles.primaryCtaWrap}>
             <Button
               label={t ? 'Reservar mesa' : 'Reserve a table'}
-              onPress={() => router.push('/(app)/reservations/new' as never)}
+              onPress={() =>
+                router.push({
+                  pathname: '/(app)/reservations/new',
+                  params: { venueId: venue.id },
+                } as never)
+              }
               variant="primary"
               size="lg"
               fullWidth
@@ -275,7 +351,7 @@ export default function BarTab() {
             <ActionTile
               icon="navigation"
               label={t ? 'Cómo llegar' : 'Directions'}
-              onPress={() => openDirections(venue)}
+              onPress={() => openDirections(venue, t)}
             />
             {venue.phone ? (
               <ActionTile
@@ -303,7 +379,7 @@ export default function BarTab() {
                   title={venue.address}
                   subtitle={t ? 'Dirección' : 'Address'}
                   leftIcon={<Feather name="map-pin" size={18} color={Colors.textMuted} />}
-                  onPress={() => openDirections(venue)}
+                  onPress={() => openDirections(venue, t)}
                   accessibilityHint={t ? 'Abre en el mapa' : 'Opens in maps'}
                 />
                 <Hairline variant="subtle" />
@@ -465,7 +541,7 @@ export default function BarTab() {
                 <View key={o.id}>
                   <ListItem
                     title={o.title}
-                    subtitle={o.validWhen ?? undefined}
+                    subtitle={o.description ?? undefined}
                     leftIcon={
                       o.imageUrl ? (
                         <Image source={{ uri: o.imageUrl }} style={styles.offerImg} />
@@ -478,6 +554,48 @@ export default function BarTab() {
                   {idx < offers.length - 1 ? <Hairline variant="subtle" /> : null}
                 </View>
               ))}
+            </View>
+          )}
+        </Section>
+
+        <Hairline style={styles.sectionDivider} />
+
+        {/* ── Reviews ────────────────────────── */}
+        <Section
+          title={t ? 'Reseñas' : 'Reviews'}
+          actionLabel={t ? 'Escribir reseña' : 'Write a review'}
+          onAction={() => router.push(`/(app)/venue/${venue.id}/review` as never)}
+        >
+          {reviews.length === 0 ? (
+            <Body size="sm" tone="muted">
+              {t ? 'Sé el primero en dejar una reseña.' : 'Be the first to leave a review.'}
+            </Body>
+          ) : (
+            <View style={{ gap: Spacing[4] }}>
+              {reviews.map((r, idx) => (
+                <View key={r.id}>
+                  <ReviewRow review={r} language={language} t={t} />
+                  {idx < reviews.length - 1 ? <Hairline variant="subtle" style={{ marginTop: Spacing[4] }} /> : null}
+                </View>
+              ))}
+              {reviewsHasMore ? (
+                <Pressy
+                  onPress={loadMoreReviews}
+                  disabled={reviewsLoadingMore}
+                  accessibilityRole={Roles.button}
+                  accessibilityLabel={t ? 'Cargar más reseñas' : 'Load more reviews'}
+                  haptic="select"
+                  style={styles.loadMoreBtn}
+                >
+                  {reviewsLoadingMore ? (
+                    <ActivityIndicator color={Colors.accentPrimary} />
+                  ) : (
+                    <Body size="sm" tone="accent" weight="semiBold">
+                      {t ? 'Cargar más' : 'Load more'}
+                    </Body>
+                  )}
+                </Pressy>
+              ) : null}
             </View>
           )}
         </Section>
@@ -515,6 +633,54 @@ export default function BarTab() {
         </View>
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+// ─────────────────────────────────────────────
+//  ReviewRow — rating stars + body + author + date
+// ─────────────────────────────────────────────
+function ReviewRow({
+  review,
+  language,
+  t,
+}: {
+  review: any;
+  language: 'es' | 'en';
+  t: boolean;
+}) {
+  const author = review.user?.profile
+    ? `${review.user.profile.firstName ?? ''} ${review.user.profile.lastName ?? ''}`.trim()
+    : null;
+  const dateLabel = review.createdAt
+    ? new Date(review.createdAt).toLocaleDateString(t ? 'es-MX' : 'en-US', { day: 'numeric', month: 'short' })
+    : '';
+  return (
+    <View>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing[2] }}>
+        <View style={{ flexDirection: 'row' }}>
+          {[1, 2, 3, 4, 5].map((n) => (
+            <Feather
+              key={n}
+              name="star"
+              size={12}
+              color={n <= review.rating ? Colors.accentChampagne : Colors.border}
+              style={{ marginRight: 1 }}
+            />
+          ))}
+        </View>
+        <Caption tone="muted">
+          {[author, dateLabel].filter(Boolean).join(' · ')}
+        </Caption>
+      </View>
+      {review.title ? (
+        <Subhead style={{ marginTop: Spacing[2] }}>{review.title}</Subhead>
+      ) : null}
+      {review.body ? (
+        <Body size="sm" tone="secondary" style={{ marginTop: Spacing[1] }}>
+          {review.body}
+        </Body>
+      ) : null}
+    </View>
   );
 }
 
@@ -591,6 +757,17 @@ const styles = StyleSheet.create({
   hero: { width: '100%', height: 260, backgroundColor: Colors.bgCard },
   heroImg: { width: '100%', height: '100%' },
   heroPlaceholder: { alignItems: 'center', justifyContent: 'center' },
+  shareOverlay: {
+    position: 'absolute',
+    top: Spacing[2],
+    right: EditorialSpacing.pageGutter,
+    width: 40,
+    height: 40,
+    borderRadius: Radius.full,
+    backgroundColor: 'rgba(8,7,6,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
   // Loading skeleton content
   content: {
@@ -714,6 +891,13 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: Radius.sm,
+  },
+
+  // Reviews
+  loadMoreBtn: {
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   // Bottom actions

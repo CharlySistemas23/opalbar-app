@@ -91,6 +91,18 @@ export class WalletService {
     return tx;
   }
 
+  /**
+   * Re-syncs `profile.loyaltyLevelId` with the user's current balance.
+   * For callers that changed `User.points` outside `addPoints`/`deductPoints`
+   * (admin adjustments, legacy increments) so the tier never drifts.
+   */
+  async recomputeLoyaltyLevel(userId: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { points: true } });
+    if (!user) throw new NotFoundException('User not found');
+    await this.updateLoyaltyLevel(userId, user.points);
+    return { points: user.points };
+  }
+
   async deductPoints(userId: string, points: number, description: string, referenceId?: string) {
     if (points <= 0) throw new BadRequestException('Points to deduct must be positive');
 

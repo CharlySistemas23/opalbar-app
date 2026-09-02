@@ -11,18 +11,17 @@
 //
 //  Lógica intacta: eventsApi.categories + usersApi.updateInterests + flow.
 // ─────────────────────────────────────────────
-import { useEffect, useMemo, useState } from 'react';
-import {
-  ActivityIndicator,
-  ScrollView,
-  StyleSheet,
-  View,
-} from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 
 import { usersApi, eventsApi } from '@/api/client';
+import { apiError } from '@/api/errors';
+import { toast } from '@/components/Toast';
+import { ErrorState } from '@/components/ErrorState';
+import { EmptyState } from '@/components/EmptyState';
 import { useAppStore } from '@/stores/app.store';
 import {
   Colors,
@@ -41,6 +40,7 @@ import {
   Label,
   Lead,
   Pressy,
+  Skeleton,
   Subhead,
 } from '@/components/ui';
 
@@ -100,17 +100,29 @@ export default function Step2Interests() {
   const [selected, setSelected] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingCats, setLoadingCats] = useState(true);
+  const [catsError, setCatsError] = useState<string | null>(null);
+
+  const loadCategories = useCallback(async () => {
+    setLoadingCats(true);
+    setCatsError(null);
+    try {
+      const r = await eventsApi.categories();
+      const body = r.data?.data;
+      const rows: Category[] = Array.isArray(body) ? body : body?.data ?? [];
+      setCategories(rows);
+    } catch (err: any) {
+      setCatsError(
+        apiError(err, t ? 'No pudimos cargar las categorías.' : 'Could not load categories.'),
+      );
+    } finally {
+      setLoadingCats(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [t]);
 
   useEffect(() => {
-    eventsApi
-      .categories()
-      .then((r) => {
-        const rows = r.data?.data ?? r.data?.data?.data ?? [];
-        setCategories(rows);
-      })
-      .catch(() => {})
-      .finally(() => setLoadingCats(false));
-  }, []);
+    loadCategories();
+  }, [loadCategories]);
 
   const groups = useMemo(() => {
     const copeo: Category[] = [];
@@ -137,21 +149,32 @@ export default function Step2Interests() {
   }
 
   async function handleDone() {
+    if (loading) return;
     fb.tap();
+    if (selected.length === 0) {
+      router.replace('/(auth)/onboarding/permissions' as never);
+      return;
+    }
     setLoading(true);
     try {
-      if (selected.length > 0) {
-        await usersApi.updateInterests({ categoryIds: selected });
-      }
-    } catch {
-      /* non-blocking */
+      await usersApi.updateInterests({ categoryIds: selected });
+      fb.success();
+      router.replace('/(auth)/onboarding/permissions' as never);
+    } catch (err: any) {
+      // Stay here: the selection is preserved and the user can retry or
+      // deselect everything to skip.
+      fb.error();
+      toast(
+        apiError(err, t ? 'No pudimos guardar tus intereses.' : 'Could not save your interests.'),
+        'danger',
+      );
     } finally {
       setLoading(false);
-      router.replace('/(auth)/onboarding/permissions' as never);
     }
   }
 
   const meetsMin = selected.length >= MIN_SUGGESTED;
+  const noCategories = !loadingCats && !catsError && categories.length === 0;
   const ctaLabel = selected.length > 0
     ? t ? 'Continuar' : 'Continue'
     : t ? 'Omitir' : 'Skip';
@@ -188,7 +211,35 @@ export default function Step2Interests() {
 
         {loadingCats ? (
           <View style={styles.loader}>
-            <ActivityIndicator color={Colors.accentPrimary} />
+            <Skeleton width={140} height={12} />
+            <View style={styles.grid}>
+              {Array.from({ length: 6 }).map((_, i) => (
+                <View key={i} style={styles.skeletonCard}>
+                  <Skeleton width="100%" height={112} radius={Radius.lg} />
+                </View>
+              ))}
+            </View>
+          </View>
+        ) : catsError ? (
+          <View style={styles.loader}>
+            <ErrorState
+              title={t ? 'No pudimos cargar tus intereses' : 'Could not load interests'}
+              message={catsError}
+              retryLabel={t ? 'Reintentar' : 'Retry'}
+              onRetry={loadCategories}
+            />
+          </View>
+        ) : noCategories ? (
+          <View style={styles.loader}>
+            <EmptyState
+              icon="tag"
+              title={t ? 'Aún no hay categorías' : 'No categories yet'}
+              message={
+                t
+                  ? 'Puedes continuar y elegir tus intereses más tarde desde tu perfil.'
+                  : 'You can continue and pick your interests later from your profile.'
+              }
+            />
           </View>
         ) : (
           <>
@@ -361,8 +412,11 @@ const styles = StyleSheet.create({
   },
 
   loader: {
-    marginTop: Spacing[10],
-    alignItems: 'center',
+    marginTop: Spacing[8],
+    gap: Spacing[3],
+  },
+  skeletonCard: {
+    width: '48.5%',
   },
 
   groupBlock: {

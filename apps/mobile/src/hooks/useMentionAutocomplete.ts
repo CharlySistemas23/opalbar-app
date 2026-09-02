@@ -117,7 +117,12 @@ export function useMentionAutocomplete() {
 
   const pickSuggestion = useCallback(
     (s: MentionSuggestion) => {
-      const handle = buildHandle(s);
+      // Collision: a different user already owns this handle in this text
+      // ("Ana García" ×2). Suffix a short id so both resolve — MentionText
+      // builds the same `handle.xxxx` variant on render.
+      let handle = buildHandle(s);
+      const owner = pickedRef.current.get(handle);
+      if (owner && owner.id !== s.id) handle = `${handle}.${s.id.slice(0, 4).toLowerCase()}`;
       const caret = selection.end;
       const upto = text.slice(0, caret);
       const after = text.slice(caret);

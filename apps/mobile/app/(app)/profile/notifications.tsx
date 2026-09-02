@@ -5,8 +5,11 @@
 //   · Kicker + Heading header + "Marcar todo" ghost action
 //   · SectionList grouped by bucket (HOY / AYER / ESTA SEMANA / ANTERIORES)
 //   · Typed row renderers: actor avatar OR icon, unread amber dot,
-//     stacked avatars for aggregation, inline Follow button.
-//   · Loading: SkeletonList. Empty: EmptyState. Reuses existing logic.
+//     stacked avatars for aggregation.
+//   · Loading: SkeletonList. Error: ErrorState. Empty: EmptyState.
+//   · Live: useRealtime('notification') prepends new rows and mirrors
+//     mark-read/delete done elsewhere (push tap, another session).
+//   · Routing: shared routeForNotifData (same table as push taps / banner).
 // ─────────────────────────────────────────────
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Image, Pressable, SectionList, StyleSheet, View } from 'react-native';
@@ -14,7 +17,11 @@ import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 
-import { notificationsApi, usersApi } from '@/api/client';
+import { notificationsApi } from '@/api/client';
+import { apiError } from '@/api/errors';
+import { routeForNotifData } from '@/lib/notif-routing';
+import { useRealtime } from '@/hooks/useRealtime';
+import { clearOsBadge } from '@/hooks/usePushRegistration';
 import { useAppStore } from '@/stores/app.store';
 import { Colors, EditorialSpacing, Radius, Spacing } from '@/constants/tokens';
 import { HitSlop, Roles } from '@/constants/a11y';
@@ -29,6 +36,8 @@ import {
   Subhead,
 } from '@/components/ui';
 import { EmptyState } from '@/components/EmptyState';
+import { ErrorState } from '@/components/ErrorState';
+import { toast } from '@/components/Toast';
 
 type FeatherIcon = React.ComponentProps<typeof Feather>['name'];
 
@@ -42,7 +51,9 @@ type Notif = {
   id: string;
   type?: string;
   title?: string;
+  titleEn?: string;
   body?: string;
+  bodyEn?: string;
   message?: string;
   read?: boolean;
   isRead?: boolean;
@@ -55,7 +66,6 @@ type Notif = {
     actorName?: string;
     actors?: NotifActor[];
     aggregatedCount?: number;
-    isFollowing?: boolean;
     postId?: string;
     eventId?: string;
     offerId?: string;
@@ -64,6 +74,7 @@ type Notif = {
     venueId?: string;
     reservationId?: string;
     commentId?: string;
+    deepLink?: string;
   };
 };
 
@@ -130,21 +141,26 @@ export default function Notifications() {
   const [items, setItems] = useState<Notif[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const PAGE_SIZE = 50;
 
   const load = useCallback(async () => {
+    setError(null);
     try {
       const r = await notificationsApi.list({ page: 1, limit: PAGE_SIZE });
       const payload = r.data?.data ?? r.data ?? {};
       const rows: Notif[] = payload.data ?? payload.items ?? payload ?? [];
       setItems(rows);
+      if (typeof payload.unreadCount === 'number') setUnreadCount(payload.unreadCount);
       setPage(1);
       setHasMore(rows.length >= PAGE_SIZE);
-    } catch {}
-    finally {
+    } catch (err) {
+      setError(apiError(err));
+    } finally {
       setLoading(false);
       setRefreshing(false);
     }
@@ -168,90 +184,77 @@ export default function Notifications() {
         setPage(next);
         if (rows.length < PAGE_SIZE) setHasMore(false);
       }
-    } catch {}
-    finally {
+    } catch (err) {
+      toast(apiError(err), 'danger');
+    } finally {
       setLoadingMore(false);
     }
   }, [page, hasMore, loadingMore]);
 
   useEffect(() => { load(); }, [load]);
+  // The OS badge is a "you have unread pushes" signal — once the inbox is
+  // open the in-app unread count is the source of truth, so clear it.
+  useEffect(() => { clearOsBadge(); }, []);
 
   const isRead = (n: Notif) => !!(n.read ?? n.isRead);
 
-  async function markAll() {
-    try {
-      await notificationsApi.markAllRead();
-      setItems((prev) => prev.map((n) => ({ ...n, read: true, isRead: true })));
-    } catch {}
-  }
-
-  async function markReadLocal(id: string) {
-    try { await notificationsApi.markRead(id); } catch {}
-    setItems((prev) => prev.map((x) => (x.id === id ? { ...x, read: true, isRead: true } : x)));
-  }
-
-  async function openNotif(n: Notif) {
-    if (!isRead(n)) await markReadLocal(n.id);
-
-    const type = (n.type || '').toUpperCase();
-    const d = n.data || {};
-    const postId = d.postId;
-    const target = n.targetId || d.targetId || d.eventId || postId;
-
-    if (
-      type.includes('REACTION') ||
-      type.includes('REPLY') ||
-      type.includes('MENTION') ||
-      type.includes('COMMENT') ||
-      type.includes('POST')
-    ) {
-      if (postId) {
-        const commentId = d.commentId;
-        const path = commentId
-          ? `/(app)/community/posts/${postId}?focusComment=${encodeURIComponent(commentId)}`
-          : `/(app)/community/posts/${postId}`;
-        return router.push(path as never);
+  // Live: prepend brand-new notifications, mirror mark-read/delete done from
+  // another device (push tap, another session) into this list. `items` here
+  // is always the latest render's state (useRealtime re-subscribes with a
+  // fresh callback every render), which lets us tell a self-echo of an
+  // action we already applied optimistically from a genuine external change.
+  useRealtime('notification', (env) => {
+    if (env.action === 'created' && env.data?.id) {
+      const created = env.data as Notif;
+      if (items.some((x) => x.id === created.id)) return;
+      setItems((prev) => [created, ...prev]);
+      setUnreadCount((c) => c + 1);
+      return;
+    }
+    if (env.action === 'read') {
+      if (env.id) {
+        const target = items.find((x) => x.id === env.id);
+        if (!target || isRead(target)) return;
+        setItems((prev) =>
+          prev.map((x) => (x.id === env.id ? { ...x, read: true, isRead: true } : x)),
+        );
+        setUnreadCount((c) => Math.max(0, c - 1));
+      } else {
+        setItems((prev) => prev.map((n) => ({ ...n, read: true, isRead: true })));
+        setUnreadCount(0);
       }
+      return;
     }
-    if (type.includes('EVENT') && target) return router.push(`/(app)/events/${target}` as never);
-    if (type.includes('OFFER') && target) return router.push(`/(app)/offers/${target}` as never);
-    if ((type.includes('FOLLOW') || type.includes('MESSAGE')) && target) {
-      return router.push(`/(app)/users/${target}` as never);
+    if (env.action === 'deleted' && env.id) {
+      setItems((prev) => prev.filter((x) => x.id !== env.id));
     }
-    if (type.includes('MESSAGE') && d.threadId) {
-      return router.push(`/(app)/messages/${d.threadId}` as never);
-    }
+  });
+
+  function markAll() {
+    setItems((prev) => prev.map((n) => ({ ...n, read: true, isRead: true })));
+    setUnreadCount(0);
+    // Fire-and-forget: the row state already reflects "read" locally.
+    notificationsApi.markAllRead().catch(() => {});
   }
 
-  async function openActor(n: Notif) {
+  function markReadLocal(id: string) {
+    setItems((prev) => prev.map((x) => (x.id === id ? { ...x, read: true, isRead: true } : x)));
+    setUnreadCount((c) => Math.max(0, c - 1));
+    notificationsApi.markRead(id).catch(() => {});
+  }
+
+  function openNotif(n: Notif) {
+    if (!isRead(n)) markReadLocal(n.id);
+    const route = routeForNotifData({ type: n.type, ...(n.data ?? {}) });
+    router.push(route as never);
+  }
+
+  function openActor(n: Notif) {
     const actorId = n.data?.actorId;
     if (!actorId) return;
-    if (!isRead(n)) await markReadLocal(n.id);
+    if (!isRead(n)) markReadLocal(n.id);
     router.push(`/(app)/users/${actorId}` as never);
   }
-
-  async function toggleFollow(n: Notif) {
-    const actorId = n.data?.actorId;
-    if (!actorId) return;
-    const wasFollowing = !!n.data?.isFollowing;
-    setItems((prev) =>
-      prev.map((x) =>
-        x.id === n.id ? { ...x, data: { ...x.data, isFollowing: !wasFollowing } } : x,
-      ),
-    );
-    try {
-      if (wasFollowing) await usersApi.unfollow(actorId);
-      else await usersApi.follow(actorId);
-    } catch {
-      setItems((prev) =>
-        prev.map((x) =>
-          x.id === n.id ? { ...x, data: { ...x.data, isFollowing: wasFollowing } } : x,
-        ),
-      );
-    }
-  }
-
-  const unreadCount = items.filter((n) => !isRead(n)).length;
 
   const sections = useMemo(() => {
     const groups: Record<Bucket, Notif[]> = { today: [], yesterday: [], week: [], older: [] };
@@ -310,6 +313,12 @@ export default function Notifications() {
         <View style={{ paddingHorizontal: EditorialSpacing.pageGutter, marginTop: Spacing[6] }}>
           <SkeletonList count={6} itemHeight={72} />
         </View>
+      ) : error && items.length === 0 ? (
+        <ErrorState
+          message={error}
+          retryLabel={es ? 'Reintentar' : 'Retry'}
+          onRetry={() => { setLoading(true); load(); }}
+        />
       ) : (
         <SectionList
           sections={sections}
@@ -345,7 +354,6 @@ export default function Notifications() {
               unread={!isRead(item)}
               onOpen={() => openNotif(item)}
               onActor={() => openActor(item)}
-              onFollow={() => toggleFollow(item)}
             />
           )}
           ListEmptyComponent={
@@ -373,29 +381,27 @@ function NotifRow({
   unread,
   onOpen,
   onActor,
-  onFollow,
 }: {
   n: Notif;
   es: boolean;
   unread: boolean;
   onOpen: () => void;
   onActor: () => void;
-  onFollow: () => void;
 }) {
   const { icon, color } = iconForType(n.type || '');
   const actors = n.data?.actors ?? [];
   const isAggregated = actors.length > 1;
   const primaryActorId = n.data?.actorId;
   const primaryAvatar = n.data?.actorAvatarUrl;
-  const showFollowBtn = (n.type || '').toUpperCase().includes('FOLLOW') && !!primaryActorId;
-  const isFollowing = !!n.data?.isFollowing;
+  const title = (es ? n.title : n.titleEn || n.title) || n.type || (es ? 'Notificación' : 'Notification');
+  const body = (es ? n.body : n.bodyEn || n.body) || n.message;
 
   return (
     <Pressy
       onPress={onOpen}
       haptic="select"
       accessibilityRole={Roles.button}
-      accessibilityLabel={n.title || n.type || (es ? 'Notificación' : 'Notification')}
+      accessibilityLabel={title}
       style={styles.row}
     >
       {/* Avatar / icon */}
@@ -432,11 +438,11 @@ function NotifRow({
       {/* Body */}
       <View style={{ flex: 1, gap: 2 }}>
         <Subhead tone={unread ? 'primary' : 'secondary'} numberOfLines={2}>
-          {n.title || n.type || (es ? 'Notificación' : 'Notification')}
+          {title}
         </Subhead>
-        {n.body || n.message ? (
+        {body ? (
           <Body size="sm" tone="muted" numberOfLines={2}>
-            {n.body || n.message}
+            {body}
           </Body>
         ) : null}
         <Caption tone="muted" style={{ marginTop: 2 }}>
@@ -445,26 +451,7 @@ function NotifRow({
       </View>
 
       {/* Trailing */}
-      {showFollowBtn ? (
-        <Pressy
-          onPress={onFollow}
-          haptic="select"
-          accessibilityRole={Roles.button}
-          accessibilityLabel={
-            isFollowing ? (es ? 'Siguiendo' : 'Following') : (es ? 'Seguir' : 'Follow')
-          }
-          style={[
-            styles.followBtn,
-            isFollowing ? styles.followBtnActive : styles.followBtnIdle,
-          ]}
-        >
-          <Caption tone={isFollowing ? 'secondary' : 'inverse'}>
-            {isFollowing ? (es ? 'Siguiendo' : 'Following') : (es ? 'Seguir' : 'Follow')}
-          </Caption>
-        </Pressy>
-      ) : unread ? (
-        <View style={styles.unreadDot} />
-      ) : null}
+      {unread ? <View style={styles.unreadDot} /> : null}
     </Pressy>
   );
 }
@@ -603,22 +590,5 @@ const styles = StyleSheet.create({
     height: 8,
     borderRadius: 4,
     backgroundColor: Colors.accentPrimary,
-  },
-
-  followBtn: {
-    paddingHorizontal: Spacing[3],
-    minHeight: 32,
-    borderRadius: Radius.full,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minWidth: 84,
-  },
-  followBtnIdle: {
-    backgroundColor: Colors.accentPrimary,
-  },
-  followBtnActive: {
-    backgroundColor: Colors.transparent,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: Colors.borderStrong,
   },
 });

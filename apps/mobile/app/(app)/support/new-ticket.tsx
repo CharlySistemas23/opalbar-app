@@ -18,7 +18,9 @@ import { useAppStore } from '@/stores/app.store';
 import { Colors, EditorialSpacing, Radius, Spacing } from '@/constants/tokens';
 import { HitSlop, Roles } from '@/constants/a11y';
 import {
+  Body,
   Button,
+  Caption,
   FadeIn,
   Hairline,
   Heading,
@@ -29,23 +31,39 @@ import {
 } from '@/components/ui';
 import { toast } from '@/components/Toast';
 
+// Mirrors `TicketCategory` in prisma/schema.prisma.
+const CATEGORIES: { value: string; label: { es: string; en: string } }[] = [
+  { value: 'RESERVATION', label: { es: 'Reservación', en: 'Reservation' } },
+  { value: 'ACCOUNT', label: { es: 'Cuenta', en: 'Account' } },
+  { value: 'BILLING', label: { es: 'Pagos', en: 'Billing' } },
+  { value: 'TECHNICAL', label: { es: 'Problema técnico', en: 'Technical issue' } },
+  { value: 'OFFER', label: { es: 'Ofertas', en: 'Offers' } },
+  { value: 'COMMUNITY', label: { es: 'Comunidad', en: 'Community' } },
+  { value: 'OTHER', label: { es: 'Otro', en: 'Other' } },
+];
+
+const MESSAGE_MAX = 2000;
+
 export default function NewTicket() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { language } = useAppStore();
   const t = language === 'es';
 
+  const [category, setCategory] = useState<string | null>(null);
   const [subject, setSubject] = useState('');
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const canSubmit = subject.trim().length > 0 && message.trim().length > 0 && !loading;
+  const canSubmit =
+    !!category && subject.trim().length > 0 && message.trim().length > 0 && !loading;
 
   async function handleSubmit() {
-    if (!canSubmit) return;
+    if (!canSubmit || !category) return;
     setLoading(true);
     try {
       const res = await supportApi.createTicket({
+        category,
         subject: subject.trim(),
         initialMessage: message.trim(),
       });
@@ -107,6 +125,35 @@ export default function NewTicket() {
           </FadeIn>
 
           <FadeIn delay={120} style={{ marginTop: Spacing[8], gap: Spacing[5] }}>
+            <View style={{ gap: Spacing[2] }}>
+              <View style={styles.categoryLabelRow}>
+                <Caption style={{ letterSpacing: 0.4 }} tone="secondary">
+                  {t ? 'CATEGORÍA' : 'CATEGORY'}
+                </Caption>
+                <View style={styles.requiredDot} />
+              </View>
+              <View style={styles.categoryWrap}>
+                {CATEGORIES.map((c) => {
+                  const active = category === c.value;
+                  return (
+                    <Pressy
+                      key={c.value}
+                      onPress={() => setCategory(c.value)}
+                      accessibilityRole={Roles.button}
+                      accessibilityLabel={t ? c.label.es : c.label.en}
+                      accessibilityState={{ selected: active }}
+                      haptic="select"
+                      style={[styles.chip, active && styles.chipActive]}
+                    >
+                      <Body size="sm" tone={active ? 'inverse' : 'secondary'} weight={active ? 'semiBold' : 'regular'}>
+                        {t ? c.label.es : c.label.en}
+                      </Body>
+                    </Pressy>
+                  );
+                })}
+              </View>
+            </View>
+
             <Input
               label={t ? 'ASUNTO' : 'SUBJECT'}
               placeholder={t ? 'Breve resumen del problema' : 'Short summary of the issue'}
@@ -119,10 +166,12 @@ export default function NewTicket() {
               label={t ? 'DESCRIPCIÓN' : 'DESCRIPTION'}
               placeholder={t ? 'Explica con detalle qué pasó' : 'Explain in detail what happened'}
               value={message}
-              onChangeText={setMessage}
+              onChangeText={(v) => setMessage(v.slice(0, MESSAGE_MAX))}
               multiline
               numberOfLines={6}
+              maxLength={MESSAGE_MAX}
               style={{ minHeight: 140, textAlignVertical: 'top' }}
+              helper={`${message.length}/${MESSAGE_MAX}`}
               required
             />
           </FadeIn>
@@ -173,5 +222,36 @@ const styles = StyleSheet.create({
 
   footer: {
     backgroundColor: Colors.bgPrimary,
+  },
+
+  categoryLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing[1],
+  },
+  requiredDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: Colors.accentPrimary,
+  },
+  categoryWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing[2],
+  },
+  chip: {
+    minHeight: 40,
+    paddingHorizontal: Spacing[4],
+    borderRadius: Radius.full,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.bgCard,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chipActive: {
+    backgroundColor: Colors.accentPrimary,
+    borderColor: Colors.accentPrimary,
   },
 });

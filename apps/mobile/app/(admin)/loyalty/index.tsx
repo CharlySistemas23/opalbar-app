@@ -1,9 +1,9 @@
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, RefreshControl, Modal, TextInput, ScrollView, Alert } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, RefreshControl, Modal, TextInput, ScrollView, Alert, Switch } from 'react-native';
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
-import { loyaltyApi, adminApi } from '@/api/client';
+import { adminApi } from '@/api/client';
 import { useAuthStore } from '@/stores/auth.store';
 import { apiError } from '@/api/errors';
 import { Colors, Radius } from '@/constants/tokens';
@@ -20,11 +20,13 @@ interface Level {
   minPoints: number;
   maxPoints?: number | null;
   benefits?: string[] | null;
-  discountPercent?: number;
   sortOrder?: number;
+  isActive?: boolean;
 }
 
-const PALETTE = [Colors.accentPrimary, Colors.accentInfo, Colors.accentChampagne, Colors.accentSuccess, Colors.accentChampagne, Colors.accentPrimary];
+// LoyaltyLevel has no `discountPercent` column — the form used to send one,
+// which 400'd every save under the global forbidNonWhitelisted ValidationPipe.
+const PALETTE = [Colors.accentPrimary, Colors.accentInfo, Colors.accentChampagne, Colors.accentSuccess];
 const ICON_CHOICES: FeatherIcon[] = ['star', 'award', 'gift', 'shield', 'zap', 'heart'];
 
 export default function AdminLoyalty() {
@@ -43,8 +45,10 @@ export default function AdminLoyalty() {
   const load = useCallback(async () => {
     try {
       setError(null);
-      const r = await loyaltyApi.levels();
-      const rows = r.data?.data?.data ?? r.data?.data ?? [];
+      // Admin endpoint — includes inactive tiers, unlike the public
+      // /wallet/levels list this screen used to read from.
+      const r = await adminApi.loyaltyLevels();
+      const rows = r.data?.data ?? r.data ?? [];
       const sorted = [...rows].sort((a: Level, b: Level) =>
         (a.sortOrder ?? a.minPoints) - (b.sortOrder ?? b.minPoints));
       setLevels(sorted);
@@ -80,7 +84,7 @@ export default function AdminLoyalty() {
       icon: editor.icon ?? 'star',
       benefits: benefitsText.split('\n').map((s) => s.trim()).filter(Boolean),
       sortOrder: Number(editor.sortOrder) || 0,
-      discountPercent: editor.discountPercent != null ? Number(editor.discountPercent) : undefined,
+      isActive: editor.isActive ?? true,
     };
     setSaving(true);
     try {
@@ -94,7 +98,13 @@ export default function AdminLoyalty() {
   }
 
   async function remove(l: Level) {
-    Alert.alert('Eliminar nivel', `¿Eliminar "${l.name}"? Los usuarios caerán al nivel inferior.`, [
+    // The relation is SetNull, not a cascade to "the level below" — and the
+    // backend actively blocks the delete while any user still holds this
+    // level, so the copy shouldn't promise a reassignment that never happens.
+    Alert.alert(
+      'Eliminar nivel',
+      `¿Eliminar "${l.name}"? Solo es posible si ningún usuario tiene este nivel asignado. Si tiene miembros, desactívalo en su lugar.`,
+      [
       { text: 'Cancelar', style: 'cancel' },
       { text: 'Eliminar', style: 'destructive', onPress: async () => {
           try { await adminApi.deleteLoyaltyLevel(l.id); await load(); }
@@ -175,9 +185,9 @@ export default function AdminLoyalty() {
                     <Text style={styles.cardName}>{item.name}</Text>
                     <Text style={styles.cardRange}>{range}</Text>
                   </View>
-                  {item.discountPercent ? (
-                    <View style={[styles.discountBadge, { backgroundColor: color + '20' }]}>
-                      <Text style={[styles.discountText, { color }]}>-{item.discountPercent}%</Text>
+                  {item.isActive === false ? (
+                    <View style={[styles.discountBadge, { backgroundColor: Colors.textMuted + '20' }]}>
+                      <Text style={[styles.discountText, { color: Colors.textMuted }]}>INACTIVO</Text>
                     </View>
                   ) : null}
                   {canEdit && (
@@ -237,13 +247,6 @@ export default function AdminLoyalty() {
                   />
                 </View>
               </View>
-              <Field label="Descuento %"
-                value={editor?.discountPercent != null ? String(editor.discountPercent) : ''}
-                keyboardType="numeric"
-                placeholder="0"
-                onChangeText={(v) => setEditor((p) => ({ ...p, discountPercent: v ? Number(v) : undefined }))}
-              />
-
               <Text style={styles.fieldLbl}>COLOR</Text>
               <View style={styles.palette}>
                 {PALETTE.map((c) => (
@@ -280,6 +283,21 @@ export default function AdminLoyalty() {
                 placeholder={'10% descuento en ofertas\nEntrada prioritaria'}
                 placeholderTextColor={Colors.textMuted}
               />
+
+              {editor?.id ? (
+                <View style={styles.activeRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.fieldLbl}>ACTIVO</Text>
+                    <Text style={styles.activeHint}>Si está apagado, no se asigna a nuevos usuarios.</Text>
+                  </View>
+                  <Switch
+                    value={editor?.isActive ?? true}
+                    onValueChange={(v) => setEditor((p) => ({ ...p, isActive: v }))}
+                    trackColor={{ false: Colors.border, true: Colors.accentPrimary }}
+                    thumbColor="#fff"
+                  />
+                </View>
+              ) : null}
 
               <TouchableOpacity
                 style={[styles.saveBtn, saving && { opacity: 0.6 }]}
@@ -393,6 +411,13 @@ const styles = StyleSheet.create({
   sheetTitle: { color: Colors.textPrimary, fontSize: 17, fontWeight: '800' },
 
   fieldLbl: { color: Colors.textMuted, fontSize: 10, fontWeight: '800', letterSpacing: 1 },
+  activeRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    backgroundColor: Colors.bgCard,
+    borderRadius: 12, padding: 14,
+    borderWidth: 1, borderColor: Colors.border,
+  },
+  activeHint: { color: Colors.textMuted, fontSize: 11, marginTop: 4 },
   input: {
     backgroundColor: Colors.bgCard,
     borderRadius: 12, borderWidth: 1, borderColor: Colors.border,

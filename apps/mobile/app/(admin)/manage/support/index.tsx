@@ -5,26 +5,31 @@ import {
   ActivityIndicator,
   RefreshControl,
   Pressable,
+  ScrollView,
 } from 'react-native';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { adminApi } from '@/api/client';
+import { apiError } from '@/api/errors';
 import { useSafeBack } from '@/hooks/useSafeBack';
 import { Colors, Radius, Spacing } from '@/constants/tokens';
-import { Body, Caption, Kicker, SegmentedControl, Subhead } from '@/components/ui';
+import { Body, Caption, SegmentedControl, Subhead } from '@/components/ui';
+import { ErrorState } from '@/components/ErrorState';
+import { EmptyState } from '@/components/EmptyState';
 import { AdminHeader, StatusPill } from '@/components/admin';
 import type { SegmentOption } from '@/components/ui';
 
-type Filter = 'all' | 'OPEN' | 'IN_REVIEW' | 'RESOLVED';
+type Filter = 'all' | 'OPEN' | 'IN_REVIEW' | 'WAITING_USER' | 'RESOLVED' | 'CLOSED';
+type PriorityFilter = 'all' | 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
 
 const STATUS_TONE: Record<
   string,
   { tone: 'accent' | 'info' | 'success' | 'neutral'; label: string }
 > = {
   OPEN: { tone: 'accent', label: 'ABIERTO' },
-  IN_REVIEW: { tone: 'info', label: 'EN REVISION' },
+  IN_REVIEW: { tone: 'info', label: 'EN REVISIÓN' },
   WAITING_USER: { tone: 'neutral', label: 'ESPERANDO' },
   RESOLVED: { tone: 'success', label: 'RESUELTO' },
   CLOSED: { tone: 'neutral', label: 'CERRADO' },
@@ -44,34 +49,98 @@ const PRIORITY_LABEL: Record<string, string> = {
   URGENT: 'Urgente',
 };
 
+const PAGE = 20;
+
 export default function SupportTicketsAdmin() {
   const router = useRouter();
   const goBack = useSafeBack('/(admin)/manage');
   const [tickets, setTickets] = useState<any[]>([]);
+  const [meta, setMeta] = useState<{ page: number; hasNextPage: boolean; total: number }>({ page: 1, hasNextPage: false, total: 0 });
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>('all');
+  const [priority, setPriority] = useState<PriorityFilter>('all');
+  const reqId = useRef(0);
 
-  const load = useCallback(async () => {
-    try {
-      const r = await adminApi.tickets({ limit: 100 });
-      setTickets(r.data?.data?.data ?? r.data?.data ?? []);
-    } catch {}
-    finally { setLoading(false); setRefreshing(false); }
-  }, []);
+  const params = useCallback(
+    (page: number) => ({
+      page,
+      limit: PAGE,
+      ...(filter !== 'all' ? { status: filter } : {}),
+      ...(priority !== 'all' ? { priority } : {}),
+    }),
+    [filter, priority],
+  );
+
+  const load = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      const id = ++reqId.current;
+      if (!opts?.silent) { setLoading(true); setError(null); }
+      try {
+        const r = await adminApi.tickets(params(1));
+        if (id !== reqId.current) return;
+        const payload = r.data?.data;
+        setTickets(payload?.data ?? []);
+        setMeta({
+          page: payload?.meta?.page ?? 1,
+          hasNextPage: !!payload?.meta?.hasNextPage,
+          total: payload?.meta?.total ?? payload?.data?.length ?? 0,
+        });
+        setError(null);
+      } catch (err) {
+        if (id !== reqId.current) return;
+        setError(apiError(err));
+      } finally {
+        if (id === reqId.current) { setLoading(false); setRefreshing(false); }
+      }
+    },
+    [params],
+  );
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  const shown = useMemo(() => {
-    if (filter === 'all') return tickets;
-    return tickets.filter((t) => t.status === filter);
-  }, [tickets, filter]);
+  async function loadMore() {
+    if (loadingMore || loading || !meta.hasNextPage) return;
+    setLoadingMore(true);
+    try {
+      const r = await adminApi.tickets(params(meta.page + 1));
+      const payload = r.data?.data;
+      const next: any[] = payload?.data ?? [];
+      setTickets((prev) => {
+        const seen = new Set(prev.map((t) => t.id));
+        return [...prev, ...next.filter((t) => !seen.has(t.id))];
+      });
+      setMeta({
+        page: payload?.meta?.page ?? meta.page + 1,
+        hasNextPage: !!payload?.meta?.hasNextPage,
+        total: payload?.meta?.total ?? meta.total,
+      });
+    } catch (err) {
+      setError(apiError(err));
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+
+  const shown = tickets;
 
   const segments: SegmentOption<Filter>[] = [
-    { value: 'all', label: `Todos (${tickets.length})` },
+    { value: 'all', label: `Todos (${meta.total})` },
     { value: 'OPEN', label: 'Abiertos' },
     { value: 'IN_REVIEW', label: 'En proceso' },
+    { value: 'WAITING_USER', label: 'Esperando' },
     { value: 'RESOLVED', label: 'Resueltos' },
+    { value: 'CLOSED', label: 'Cerrados' },
+  ];
+
+  const priorities: { value: PriorityFilter; label: string }[] = [
+    { value: 'all', label: 'Toda prioridad' },
+    { value: 'URGENT', label: PRIORITY_LABEL.URGENT },
+    { value: 'HIGH', label: PRIORITY_LABEL.HIGH },
+    { value: 'MEDIUM', label: PRIORITY_LABEL.MEDIUM },
+    { value: 'LOW', label: PRIORITY_LABEL.LOW },
   ];
 
   return (
@@ -94,13 +163,40 @@ export default function SupportTicketsAdmin() {
       />
 
       <View style={styles.tabsWrap}>
-        <SegmentedControl<Filter> value={filter} onChange={setFilter} options={segments} />
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} bounces={false} style={{ marginHorizontal: -Spacing[5] }} contentContainerStyle={{ paddingHorizontal: Spacing[5] }}>
+          <SegmentedControl<Filter> value={filter} onChange={setFilter} options={segments} fullWidth={false} />
+        </ScrollView>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} bounces={false} style={{ marginHorizontal: -Spacing[5], marginTop: Spacing[2] }} contentContainerStyle={{ paddingHorizontal: Spacing[5], gap: 6 }}>
+          {priorities.map((p) => {
+            const active = priority === p.value;
+            const color = p.value === 'all' ? Colors.textSecondary : PRIORITY_COLOR[p.value] ?? Colors.textSecondary;
+            return (
+              <Pressable
+                key={p.value}
+                onPress={() => setPriority(p.value)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                style={({ pressed }) => [
+                  styles.priorityChip,
+                  active && { borderColor: color, backgroundColor: color + '18' },
+                  pressed && { opacity: 0.7 },
+                ]}
+              >
+                <Caption size="sm" style={{ color: active ? color : Colors.textMuted, fontWeight: '700' }}>
+                  {p.label}
+                </Caption>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
       </View>
 
       {loading ? (
         <View style={styles.center}>
           <ActivityIndicator color={Colors.accentPrimary} />
         </View>
+      ) : error ? (
+        <ErrorState message={error} onRetry={() => load()} />
       ) : (
         <FlatList
           data={shown}
@@ -113,13 +209,21 @@ export default function SupportTicketsAdmin() {
               tintColor={Colors.accentPrimary}
             />
           }
+          onEndReachedThreshold={0.4}
+          onEndReached={loadMore}
           ListEmptyComponent={
-            <View style={styles.empty}>
-              <Feather name="inbox" size={36} color={Colors.textMuted} />
-              <Caption tone="muted" style={{ marginTop: Spacing[2] }}>
-                {filter === 'all' ? 'Sin mensajes todavia.' : 'Sin tickets en este estado.'}
-              </Caption>
-            </View>
+            <EmptyState
+              icon="inbox"
+              title="Sin tickets"
+              message={filter === 'all' && priority === 'all' ? 'Sin mensajes todavía.' : 'Sin tickets que coincidan con este filtro.'}
+            />
+          }
+          ListFooterComponent={
+            loadingMore ? (
+              <View style={{ paddingVertical: Spacing[4] }}>
+                <ActivityIndicator color={Colors.accentPrimary} />
+              </View>
+            ) : null
           }
           renderItem={({ item }) => {
             const user = item.user;
@@ -149,9 +253,9 @@ export default function SupportTicketsAdmin() {
                   </View>
                   <StatusPill label={st.label} tone={st.tone} />
                 </View>
-                {item.description ? (
+                {item.messages?.[0]?.content ? (
                   <Caption tone="secondary" numberOfLines={2}>
-                    {item.description}
+                    {item.messages[0].content}
                   </Caption>
                 ) : null}
                 <View style={styles.cardFoot}>
@@ -207,6 +311,14 @@ const styles = StyleSheet.create({
   },
 
   tabsWrap: { paddingHorizontal: Spacing[5], paddingVertical: Spacing[3] },
+  priorityChip: {
+    paddingHorizontal: Spacing[3],
+    paddingVertical: 6,
+    borderRadius: Radius.full,
+    backgroundColor: Colors.bgElevated,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+  },
 
   card: {
     backgroundColor: Colors.bgCard,

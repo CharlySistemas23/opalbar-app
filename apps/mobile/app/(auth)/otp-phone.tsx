@@ -23,6 +23,10 @@ import { otpApi } from '@/api/client';
 import { useAuthStore } from '@/stores/auth.store';
 import { useAppStore } from '@/stores/app.store';
 import { apiError } from '@/api/errors';
+import { toast } from '@/components/Toast';
+import { useFeedback } from '@/hooks/useFeedback';
+import { getDeviceMeta } from '@/lib/device';
+import { hasPendingPassword, takePendingPassword } from '@/lib/pending-credentials';
 import {
   Colors,
   EditorialSpacing,
@@ -46,15 +50,14 @@ const OTP_LEN = 6;
 
 export default function OtpPhone() {
   const router = useRouter();
-  const { phone, password, purpose } = useLocalSearchParams<{
+  const { phone, purpose } = useLocalSearchParams<{
     phone: string;
-    email?: string;
-    password?: string;
     purpose?: string;
   }>();
   const { language } = useAppStore();
   const { login } = useAuthStore();
   const t = language === 'es';
+  const fb = useFeedback();
 
   const otpType = (purpose as string) || 'PHONE_VERIFICATION';
 
@@ -105,36 +108,68 @@ export default function OtpPhone() {
 
   async function handleVerify(code?: string) {
     const otp = code || digits.join('');
-    if (otp.length < OTP_LEN) return;
+    if (otp.length < OTP_LEN || loading) return;
     setError('');
     setLoading(true);
+
+    // 1) Verify — failure = wrong/expired code, stay here.
     try {
       await otpApi.verify({ identifier: phone, code: otp, type: otpType });
-
-      if (otpType === 'PHONE_VERIFICATION' && password) {
-        // User was just marked ACTIVE on the backend — log in now.
-        await login({ phone, password });
-        router.replace('/(auth)/register/step1-profile' as never);
-      } else {
-        router.replace('/(auth)/login' as never);
-      }
     } catch (err: any) {
-      setError(apiError(err, t ? 'Código incorrecto' : 'Invalid code'));
+      fb.error();
+      setError(apiError(err, t ? 'Código incorrecto.' : 'Invalid code.'));
       setDigits(Array(OTP_LEN).fill(''));
       refs.current[0]?.focus();
-    } finally {
       setLoading(false);
+      return;
     }
+
+    // 2) Auto-login with the parked password (never a route param).
+    if (otpType === 'PHONE_VERIFICATION' && hasPendingPassword(phone)) {
+      const password = takePendingPassword(phone);
+      try {
+        await login({ phone, password: password!, ...getDeviceMeta() });
+        fb.success();
+        setLoading(false);
+        router.replace('/(auth)/registration-complete' as never);
+      } catch (err: any) {
+        setLoading(false);
+        toast(
+          t
+            ? `Tu teléfono quedó verificado, pero no pudimos iniciar sesión: ${apiError(err)}`
+            : `Your phone is verified, but we could not sign you in: ${apiError(err)}`,
+          'warning',
+          5000,
+        );
+        router.replace('/(auth)/login' as never);
+      }
+      return;
+    }
+
+    fb.success();
+    setLoading(false);
+    toast(
+      t ? 'Teléfono verificado. Inicia sesión para continuar.' : 'Phone verified. Sign in to continue.',
+      'success',
+    );
+    router.replace('/(auth)/login' as never);
   }
 
   async function resend() {
     if (resendIn > 0 || resending) return;
     setResending(true);
+    setError('');
     try {
       await otpApi.send({ phone, type: otpType });
+      fb.select();
+      toast(t ? 'Te enviamos un nuevo SMS.' : 'We sent you a new SMS.', 'success');
       setResendIn(60);
-    } catch {
-      /* swallow — UX: stay quiet if resend fails, user can retry */
+    } catch (err: any) {
+      fb.error();
+      toast(
+        apiError(err, t ? 'No pudimos reenviar el SMS.' : 'Could not resend the SMS.'),
+        'danger',
+      );
     } finally {
       setResending(false);
     }

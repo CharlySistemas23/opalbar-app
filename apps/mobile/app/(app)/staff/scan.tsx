@@ -25,6 +25,7 @@ import { apiError } from '@/api/errors';
 import { useAppStore } from '@/stores/app.store';
 import { Colors, EditorialSpacing, Radius, Spacing } from '@/constants/tokens';
 import { HitSlop, Roles } from '@/constants/a11y';
+import { formatDateOnly } from '@/utils/date';
 import {
   Body,
   Button,
@@ -74,12 +75,18 @@ export default function StaffScan() {
         const r = await checkinApi.lookupReservation(code);
         setResult({ kind: 'reservation', data: r.data?.data });
         return;
-      } catch {}
+      } catch (err: any) {
+        // Not a reservation code → try redemption next. Any other failure
+        // (network, 500) must surface, not be silently swallowed as "no match".
+        if (err?.response?.status !== 404) throw err;
+      }
       try {
         const r = await checkinApi.lookupRedemption(code);
         setResult({ kind: 'redemption', data: r.data?.data });
         return;
-      } catch {}
+      } catch (err: any) {
+        if (err?.response?.status !== 404) throw err;
+      }
       setResult({ kind: 'not_found' });
     } catch (err: any) {
       setResult({ kind: 'error', message: apiError(err) });
@@ -202,7 +209,7 @@ export default function StaffScan() {
           setCode={setManualCode}
           onSubmit={() => {
             setManualMode(false);
-            resolveCode(manualCode.trim());
+            resolveCode(manualCode.trim().toLowerCase());
             setScanned(true);
             lockRef.current = true;
           }}
@@ -283,6 +290,7 @@ export default function StaffScan() {
         visible={!!result}
         result={result}
         t={t}
+        language={language}
         confirming={confirming}
         onConfirm={confirm}
         onCancel={reset}
@@ -354,10 +362,38 @@ function Header({
 }
 
 // ── Result sheet (Sheet primitive) ───────────
+// `seatBlockedReason` comes straight from the backend as an English sentence
+// (it's payload data, not an HTTP error, so `apiError()` never touches it).
+// Map the fixed set the service can return so staff in Spanish mode never
+// sees raw English.
+const SEAT_BLOCKED_REASON_ES: Record<string, string> = {
+  'Reservation was cancelled': 'La reserva fue cancelada',
+  'Reservation already completed': 'La reserva ya fue completada',
+  'Reservation was marked as no-show': 'El cliente no se presentó',
+  'Reservation already seated': 'Ya fue marcado como presente',
+  'Reservation date has passed': 'La fecha de la reserva ya pasó',
+  'Reservation is not for today': 'La reserva no es para hoy',
+};
+
+function translateBlockedReason(reason: string | undefined, t: boolean): string | undefined {
+  if (!reason) return undefined;
+  return t ? SEAT_BLOCKED_REASON_ES[reason] ?? reason : reason;
+}
+
+const RESERVATION_STATUS_LABEL: Record<string, { es: string; en: string }> = {
+  PENDING: { es: 'Pendiente', en: 'Pending' },
+  CONFIRMED: { es: 'Confirmada', en: 'Confirmed' },
+  SEATED: { es: 'En mesa', en: 'Seated' },
+  COMPLETED: { es: 'Completada', en: 'Completed' },
+  CANCELLED: { es: 'Cancelada', en: 'Cancelled' },
+  NO_SHOW: { es: 'No asistió', en: 'No-show' },
+};
+
 function ResultSheet({
   visible,
   result,
   t,
+  language,
   confirming,
   onConfirm,
   onCancel,
@@ -365,6 +401,7 @@ function ResultSheet({
   visible: boolean;
   result: ScanResult | null;
   t: boolean;
+  language: 'es' | 'en';
   confirming: boolean;
   onConfirm: () => void;
   onCancel: () => void;
@@ -417,7 +454,16 @@ function ResultSheet({
   const d = result.data || {};
   const user = d.user;
   const name = `${user?.profile?.firstName ?? ''} ${user?.profile?.lastName ?? ''}`.trim() || 'Usuario';
-  const isUsed = isReservation ? !!d.seatedAt : !!d.isUsed;
+  const isUsed = isReservation ? !!d.seatedAt || d.status === 'SEATED' : !!d.isUsed;
+  // Backend's lookup already evaluated whether this can be actioned right
+  // now (status, expiry, "is it today") — trust it instead of re-deriving.
+  const canAction = isReservation ? !!d.canSeat : !!d.canUse;
+  const blockedReason: string | undefined = isReservation
+    ? translateBlockedReason(d.seatBlockedReason ?? undefined, t)
+    : d.expired
+      ? (t ? 'El canje expiró' : 'Redemption expired')
+      : undefined;
+  const statusBadge = isReservation && d.status ? RESERVATION_STATUS_LABEL[d.status] : null;
 
   return (
     <Sheet open={visible} onClose={onCancel}>
@@ -434,13 +480,18 @@ function ResultSheet({
         <Heading size="md" align="center" style={{ marginTop: Spacing[2] }}>
           {name}
         </Heading>
+        {statusBadge ? (
+          <Caption tone="muted" align="center" style={{ marginTop: Spacing[1] }}>
+            {t ? statusBadge.es : statusBadge.en}
+          </Caption>
+        ) : null}
 
         <Hairline variant="subtle" style={{ marginVertical: Spacing[5] }} />
 
         <View style={{ gap: Spacing[3] }}>
           {isReservation ? (
             <>
-              {d.date ? <MetaRow icon="calendar" label={new Date(d.date).toLocaleDateString()} /> : null}
+              {d.date ? <MetaRow icon="calendar" label={formatDateOnly(d.date, language, { weekday: 'long', month: 'long' })} /> : null}
               {d.timeSlot ? <MetaRow icon="clock" label={d.timeSlot} /> : null}
               {d.partySize ? (
                 <MetaRow
@@ -461,7 +512,7 @@ function ResultSheet({
               {d.expiresAt ? (
                 <MetaRow
                   icon="clock"
-                  label={`${t ? 'Expira' : 'Expires'} · ${new Date(d.expiresAt).toLocaleString()}`}
+                  label={`${t ? 'Expira' : 'Expires'} · ${new Date(d.expiresAt).toLocaleString(language)}`}
                 />
               ) : null}
             </>
@@ -480,6 +531,11 @@ function ResultSheet({
                   ? 'Ya fue canjeado'
                   : 'Already redeemed'}
             </Caption>
+          </View>
+        ) : !canAction && blockedReason ? (
+          <View style={styles.warnBlock}>
+            <Feather name="alert-triangle" size={14} color={Colors.accentWarning} />
+            <Caption tone="warning">{blockedReason}</Caption>
           </View>
         ) : null}
 
@@ -507,7 +563,7 @@ function ResultSheet({
               onPress={onConfirm}
               variant="primary"
               loading={confirming}
-              disabled={isUsed}
+              disabled={isUsed || !canAction}
               fullWidth
             />
           </View>

@@ -9,7 +9,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { EventsService } from './events.service';
-import { CreateEventDto, UpdateEventDto, EventFilterDto } from './dto/event.dto';
+import { CreateCategoryDto, CreateEventDto, UpdateEventDto, EventFilterDto } from './dto/event.dto';
 
 @ApiTags('Events')
 @ApiBearerAuth()
@@ -44,8 +44,8 @@ export class EventsController {
   @Post('categories')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.MODERATOR)
   @ApiOperation({ summary: 'Create event category (Admin only)' })
-  createCategory(@Body() body: { name: string; nameEn?: string; icon?: string; color?: string }) {
-    return this.eventsService.createCategory(body);
+  createCategory(@Body() dto: CreateCategoryDto) {
+    return this.eventsService.createCategory(dto);
   }
 
   @Delete('categories/:id')

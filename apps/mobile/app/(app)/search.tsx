@@ -17,7 +17,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
@@ -28,6 +28,7 @@ import { useAppStore } from '@/stores/app.store';
 import { Colors, EditorialSpacing, Radius, Spacing, TypePresets } from '@/constants/tokens';
 import { HitSlop, Roles } from '@/constants/a11y';
 import {
+  Badge,
   Body,
   Caption,
   Hairline,
@@ -40,6 +41,9 @@ import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 
 type Tab = 'people' | 'bars' | 'events';
+
+/** Backend requires ≥ 2 chars for people search (anti-scraping). */
+const MIN_QUERY = 2;
 
 export default function Search() {
   const router = useRouter();
@@ -58,30 +62,41 @@ export default function Search() {
   const [results, setResults] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
 
+  // Stale-response guard: a slow earlier request must never overwrite the
+  // results of a newer one (typing "ma" → "mar" → "ma" race).
+  const reqRef = useRef(0);
+
   const runSearch = useCallback(async (query: string, which: Tab) => {
-    if (!query.trim()) {
+    const trimmed = query.trim();
+    const reqId = ++reqRef.current;
+    if (trimmed.length < MIN_QUERY) {
       setResults([]);
       setError(null);
+      setLoading(false);
       return;
     }
     setLoading(true);
     setError(null);
     try {
+      let next: any[] = [];
       if (which === 'people') {
-        const r = await usersApi.search(query);
-        setResults(r.data?.data ?? []);
+        const r = await usersApi.search(trimmed);
+        next = r.data?.data ?? [];
       } else if (which === 'bars') {
-        const r = await venueApi.list({ search: query });
-        setResults(r.data?.data?.data ?? r.data?.data ?? []);
+        const r = await venueApi.list({ search: trimmed });
+        next = r.data?.data?.data ?? r.data?.data ?? [];
       } else {
-        const r = await eventsApi.list({ search: query });
-        setResults(r.data?.data?.data ?? []);
+        const r = await eventsApi.list({ search: trimmed });
+        next = r.data?.data?.data ?? [];
       }
+      if (reqId !== reqRef.current) return;
+      setResults(Array.isArray(next) ? next : []);
     } catch (err) {
+      if (reqId !== reqRef.current) return;
       setResults([]);
       setError(apiError(err));
     } finally {
-      setLoading(false);
+      if (reqId === reqRef.current) setLoading(false);
     }
   }, []);
 
@@ -99,7 +114,7 @@ export default function Search() {
           haptic="select"
           hitSlop={HitSlop.expand}
           accessibilityRole={Roles.button}
-          accessibilityLabel="Volver"
+          accessibilityLabel={t ? 'Volver' : 'Back'}
           style={styles.backBtn}
         >
           <Feather name="arrow-left" size={22} color={Colors.textPrimary} />
@@ -147,6 +162,16 @@ export default function Search() {
           title={t ? 'Empieza a buscar' : 'Start searching'}
           message={t ? 'Personas, bares o eventos.' : 'People, bars or events.'}
         />
+      ) : q.trim().length < MIN_QUERY ? (
+        <EmptyState
+          icon="type"
+          title={t ? 'Escribe un poco más' : 'Keep typing'}
+          message={
+            t
+              ? `Necesitamos al menos ${MIN_QUERY} letras para buscar.`
+              : `We need at least ${MIN_QUERY} characters to search.`
+          }
+        />
       ) : error ? (
         <ErrorState
           message={error}
@@ -172,6 +197,7 @@ export default function Search() {
               return (
                 <PersonRow
                   u={item}
+                  t={t}
                   onPress={() => router.push(`/(app)/users/${item.id}` as never)}
                 />
               );
@@ -197,14 +223,13 @@ export default function Search() {
 }
 
 // ── Person row ──────────────────────────────
-function PersonRow({ u, onPress }: { u: any; onPress: () => void }) {
+// Backend returns { id, isPrivate, profile{firstName,lastName,avatarUrl} } —
+// no counts (anti-scraping), so the row shows name + optional "Privado" chip.
+function PersonRow({ u, t, onPress }: { u: any; t: boolean; onPress: () => void }) {
   const first = u?.profile?.firstName ?? '';
   const last = u?.profile?.lastName ?? '';
-  const name = `${first} ${last}`.trim() || (u.email?.split('@')[0] ?? 'Usuario');
-  const initials =
-    ((first[0] || '') + (last[0] || '')).toUpperCase() || (u.email?.[0] ?? 'U').toUpperCase();
-  const followers = u?._count?.followers ?? 0;
-  const posts = u?._count?.posts ?? 0;
+  const name = `${first} ${last}`.trim() || (t ? 'Usuario' : 'User');
+  const initials = ((first[0] || '') + (last[0] || '')).toUpperCase() || 'U';
   return (
     <Pressy
       onPress={onPress}
@@ -229,10 +254,8 @@ function PersonRow({ u, onPress }: { u: any; onPress: () => void }) {
             {u.profile.bio}
           </Caption>
         ) : null}
-        <Caption tone="muted" style={{ marginTop: 2 }}>
-          {`${followers} · ${posts}`}
-        </Caption>
       </View>
+      {u?.isPrivate ? <Badge label={t ? 'Privado' : 'Private'} size="sm" outline /> : null}
       <Feather name="chevron-right" size={18} color={Colors.textMuted} />
     </Pressy>
   );

@@ -14,7 +14,7 @@
 //  Confirmations use <ConfirmDialog> (replaces legacy ConfirmSheet).
 //  Delete still asks for an explicit "ELIMINAR" type via Input.
 // ─────────────────────────────────────────────
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -23,11 +23,14 @@ import { Feather } from '@expo/vector-icons';
 import { Colors, EditorialSpacing, Radius, Spacing } from '@/constants/tokens';
 import { Roles } from '@/constants/a11y';
 import { useAuthStore } from '@/stores/auth.store';
+import { useUnreadStore } from '@/stores/unread.store';
 import { useAppStore } from '@/stores/app.store';
-import { usersApi } from '@/api/client';
+import { friendshipsApi, usersApi } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { useFeedback } from '@/hooks/useFeedback';
+import { useRealtime } from '@/hooks/useRealtime';
 import {
+  Badge,
   Body,
   Button,
   Caption,
@@ -86,11 +89,51 @@ export default function Profile() {
   const t = language === 'es';
   const fb = useFeedback();
 
+  // Social counters: pending friend requests badge + friends total.
+  // Followers/following/posts come from usersApi.me()._count via refreshUser.
+  const [pendingRequests, setPendingRequests] = useState(0);
+  const [friendsCount, setFriendsCount] = useState<number | null>(null);
+
+  const refreshSocial = useCallback(() => {
+    if (!user?.id) return;
+    friendshipsApi
+      .requestsCounts()
+      .then((r) => setPendingRequests(Number(r.data?.data?.total ?? 0)))
+      .catch((err) => toast(apiError(err), 'danger'));
+    usersApi
+      .friends(user.id, { page: 1, limit: 1 })
+      .then((r) => setFriendsCount(Number(r.data?.data?.meta?.total ?? 0)))
+      .catch((err) => toast(apiError(err), 'danger'));
+  }, [user?.id]);
+
   useFocusEffect(
     useCallback(() => {
       refreshUser();
-    }, [refreshUser]),
+      refreshSocial();
+    }, [refreshUser, refreshSocial]),
   );
+
+  // Friend request / follow events → keep badge + counters fresh.
+  useRealtime('user', (env) => {
+    const d: any = env?.data ?? {};
+    if (d?.friendship || typeof d?.follow === 'boolean') {
+      refreshSocial();
+      refreshUser();
+    }
+  });
+
+  // Unread badges (mensajes / notificaciones) — el contador vive en el store
+  // global que el layout de tabs mantiene fresco por socket.
+  const unreadMessages = useUnreadStore((s) => s.messages);
+  const unreadNotifications = useUnreadStore((s) => s.notifications);
+
+  const accountBadges = useMemo(() => {
+    const map: Record<string, number> = {};
+    if (pendingRequests > 0) map['/(app)/profile/friend-requests'] = pendingRequests;
+    if (unreadMessages > 0) map['/(app)/messages'] = unreadMessages;
+    if (unreadNotifications > 0) map['/(app)/profile/notifications'] = unreadNotifications;
+    return Object.keys(map).length ? map : undefined;
+  }, [pendingRequests, unreadMessages, unreadNotifications]);
 
   const firstName = user?.profile?.firstName ?? '';
   const lastName = user?.profile?.lastName ?? '';
@@ -102,11 +145,12 @@ export default function Profile() {
   const points = user?.points ?? 0;
   const bookings = (user as any)?._count?.reservations ?? 0;
   const redemptions = (user as any)?._count?.offerRedemptions ?? 0;
+  const followers = (user as any)?._count?.followers ?? 0;
+  const following = (user as any)?._count?.following ?? 0;
+  const posts = (user as any)?._count?.posts ?? 0;
   const memberYear = user?.createdAt ? new Date(user.createdAt).getFullYear() : new Date().getFullYear();
 
   const [showLogout, setShowLogout] = useState(false);
-  const [showDelete, setShowDelete] = useState(false);
-  const [deleteConfirmText, setDeleteConfirmText] = useState('');
 
   async function confirmLogout() {
     try {
@@ -117,27 +161,6 @@ export default function Profile() {
     } catch (err) {
       fb.error();
       toast(apiError(err, t ? 'Error al cerrar sesión.' : 'Logout failed.'), 'danger');
-    }
-  }
-
-  async function confirmDelete() {
-    const expected = t ? 'ELIMINAR' : 'DELETE';
-    if (deleteConfirmText.trim().toUpperCase() !== expected) {
-      toast(
-        t ? `Escribe ${expected} para confirmar.` : `Type ${expected} to confirm.`,
-        'warning',
-      );
-      return;
-    }
-    try {
-      await usersApi.deleteAccount(deleteConfirmText);
-      fb.destructive();
-      setShowDelete(false);
-      await logout();
-      router.replace('/(auth)/welcome' as never);
-    } catch (err) {
-      fb.error();
-      toast(apiError(err), 'danger');
     }
   }
 
@@ -192,6 +215,33 @@ export default function Profile() {
             <StatCell value={String(memberYear)} label={t ? 'DESDE' : 'SINCE'} />
           </View>
           <Hairline variant="subtle" />
+          {/* Social counters — tappable → rosters */}
+          <View style={styles.stats}>
+            <StatCell
+              value={String(followers)}
+              label={t ? 'SEGUIDORES' : 'FOLLOWERS'}
+              onPress={user?.id ? () => router.push(`/(app)/users/${user.id}/followers` as never) : undefined}
+            />
+            <View style={styles.statsDivider} />
+            <StatCell
+              value={String(following)}
+              label={t ? 'SIGUIENDO' : 'FOLLOWING'}
+              onPress={user?.id ? () => router.push(`/(app)/users/${user.id}/following` as never) : undefined}
+            />
+            <View style={styles.statsDivider} />
+            <StatCell
+              value={friendsCount === null ? '—' : String(friendsCount)}
+              label={t ? 'AMIGOS' : 'FRIENDS'}
+              onPress={user?.id ? () => router.push(`/(app)/users/${user.id}/friends` as never) : undefined}
+            />
+            <View style={styles.statsDivider} />
+            <StatCell
+              value={String(posts)}
+              label={t ? 'POSTS' : 'POSTS'}
+              onPress={user?.id ? () => router.push(`/(app)/users/${user.id}` as never) : undefined}
+            />
+          </View>
+          <Hairline variant="subtle" />
         </FadeIn>
 
         {/* ── Mi muro ── */}
@@ -235,6 +285,7 @@ export default function Profile() {
           language={language}
           onPress={(path) => router.push(path as never)}
           delay={440}
+          badges={accountBadges}
         />
 
         {/* ── Staff (condicional) ── */}
@@ -262,10 +313,7 @@ export default function Profile() {
             leftIcon={<Feather name="log-out" size={16} color={Colors.accentDanger} />}
           />
           <Pressy
-            onPress={() => {
-              setDeleteConfirmText('');
-              setShowDelete(true);
-            }}
+            onPress={() => router.push('/(app)/profile/delete-account' as never)}
             accessibilityRole={Roles.button}
             accessibilityLabel={t ? 'Eliminar mi cuenta' : 'Delete my account'}
             style={styles.deleteLink}
@@ -291,47 +339,44 @@ export default function Profile() {
         confirmVariant="danger"
       />
 
-      <ConfirmDialog
-        open={showDelete}
-        onClose={() => setShowDelete(false)}
-        onConfirm={confirmDelete}
-        title={t ? 'Eliminar cuenta permanente' : 'Delete account permanently'}
-        confirmLabel={t ? 'Eliminar mi cuenta' : 'Delete my account'}
-        confirmVariant="danger"
-        description={
-          <View style={{ gap: Spacing[4] }}>
-            <Body tone="secondary">
-              {t
-                ? 'Perderás todos tus puntos, reservas, canjes y posts. Esta acción no se puede deshacer.'
-                : 'You will lose all your points, reservations, redemptions and posts. This cannot be undone.'}
-            </Body>
-            <Input
-              label={t ? 'CONFIRMACIÓN' : 'CONFIRMATION'}
-              placeholder={t ? 'Escribe ELIMINAR' : 'Type DELETE'}
-              value={deleteConfirmText}
-              onChangeText={setDeleteConfirmText}
-              autoCapitalize="characters"
-              autoCorrect={false}
-            />
-          </View>
-        }
-      />
     </SafeAreaView>
   );
 }
 
 // ── Stat cell ────────────────────────────────
-function StatCell({ value, label }: { value: string; label: string }) {
-  return (
-    <View style={styles.statCell}>
+function StatCell({
+  value,
+  label,
+  onPress,
+}: {
+  value: string;
+  label: string;
+  onPress?: () => void;
+}) {
+  const inner = (
+    <>
       <Numeric size="sm" align="center">
         {value}
       </Numeric>
       <Kicker tone="muted" align="center" style={{ marginTop: Spacing[1] }}>
         {label}
       </Kicker>
-    </View>
+    </>
   );
+  if (onPress) {
+    return (
+      <Pressy
+        onPress={onPress}
+        haptic="select"
+        accessibilityRole={Roles.button}
+        accessibilityLabel={`${label} ${value}`}
+        style={styles.statCell}
+      >
+        {inner}
+      </Pressy>
+    );
+  }
+  return <View style={styles.statCell}>{inner}</View>;
 }
 
 // ── Wall tile ────────────────────────────────
@@ -377,12 +422,15 @@ function MenuSection({
   language,
   onPress,
   delay,
+  badges,
 }: {
   kicker: string;
   entries: MenuEntry[];
   language: 'es' | 'en';
   onPress: (path: string) => void;
   delay?: number;
+  /** path → pending count; renders a count pill before the chevron. */
+  badges?: Record<string, number>;
 }) {
   return (
     <FadeIn delay={delay} style={styles.menuSection}>
@@ -390,17 +438,28 @@ function MenuSection({
         {kicker}
       </Kicker>
       <View style={styles.listShell}>
-        {entries.map((m, idx) => (
-          <View key={m.path}>
-            <ListItem
-              title={m.label[language]}
-              leftIcon={<Feather name={m.icon} size={18} color={Colors.textSecondary} />}
-              onPress={() => onPress(m.path)}
-              showChevron
-            />
-            {idx < entries.length - 1 ? <ListItem.Separator /> : null}
-          </View>
-        ))}
+        {entries.map((m, idx) => {
+          const count = badges?.[m.path] ?? 0;
+          return (
+            <View key={m.path}>
+              <ListItem
+                title={m.label[language]}
+                leftIcon={<Feather name={m.icon} size={18} color={Colors.textSecondary} />}
+                onPress={() => onPress(m.path)}
+                showChevron={count === 0}
+                rightSlot={
+                  count > 0 ? (
+                    <View style={styles.badgeSlot}>
+                      <Badge label={count > 99 ? '99+' : String(count)} variant="accent" size="sm" />
+                      <Feather name="chevron-right" size={16} color={Colors.textMuted} />
+                    </View>
+                  ) : undefined
+                }
+              />
+              {idx < entries.length - 1 ? <ListItem.Separator /> : null}
+            </View>
+          );
+        })}
       </View>
     </FadeIn>
   );
@@ -470,6 +529,11 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
     borderTopColor: Colors.highlightTop,
     overflow: 'hidden',
+  },
+  badgeSlot: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing[2],
   },
 
   dangerZone: {

@@ -14,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { adminApi, offersApi } from '@/api/client';
 import { apiError } from '@/api/errors';
+import { useAuthStore } from '@/stores/auth.store';
 import { useSafeBack } from '@/hooks/useSafeBack';
 import { Colors, Radius, Spacing } from '@/constants/tokens';
 import {
@@ -24,10 +25,11 @@ import {
   SegmentedControl,
   Subhead,
 } from '@/components/ui';
+import { ErrorState } from '@/components/ErrorState';
 import { AdminHeader, StatusPill } from '@/components/admin';
 import type { SegmentOption } from '@/components/ui';
 
-type Filter = 'all' | 'ACTIVE' | 'DRAFT' | 'EXPIRED';
+type Filter = 'all' | 'ACTIVE' | 'DRAFT' | 'PAUSED' | 'EXPIRED';
 
 const STATUS_TONE: Record<
   string,
@@ -35,6 +37,7 @@ const STATUS_TONE: Record<
 > = {
   ACTIVE: { tone: 'success', label: 'ACTIVA' },
   DRAFT: { tone: 'neutral', label: 'BORRADOR' },
+  PAUSED: { tone: 'info', label: 'PAUSADA' },
   EXPIRED: { tone: 'danger', label: 'ARCHIVADA' },
   DEPLETED: { tone: 'info', label: 'AGOTADA' },
 };
@@ -42,18 +45,25 @@ const STATUS_TONE: Record<
 export default function AdminOffersList() {
   const router = useRouter();
   const goBack = useSafeBack('/(admin)/manage');
+  const me = useAuthStore((s) => s.user);
+  // Backend: offers create/update/delete are ADMIN/SUPER_ADMIN only.
+  const canWrite = me?.role === 'ADMIN' || me?.role === 'SUPER_ADMIN';
   const [offers, setOffers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState<Filter>('all');
   const [search, setSearch] = useState('');
   const [confirmDel, setConfirmDel] = useState<{ id: string; title: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    setError(null);
     try {
       const r = await offersApi.list({ limit: 100, includeAll: true });
       setOffers(r.data?.data?.data ?? r.data?.data ?? []);
-    } catch {}
+    } catch (err) {
+      setError(apiError(err));
+    }
     finally { setLoading(false); setRefreshing(false); }
   }, []);
 
@@ -87,6 +97,7 @@ export default function AdminOffersList() {
     { value: 'all', label: `Todas (${offers.length})` },
     { value: 'ACTIVE', label: 'Activas' },
     { value: 'DRAFT', label: 'Borrador' },
+    { value: 'PAUSED', label: 'Pausadas' },
     { value: 'EXPIRED', label: 'Archivadas' },
   ];
 
@@ -94,18 +105,20 @@ export default function AdminOffersList() {
     <SafeAreaView style={styles.root} edges={['top']}>
       <AdminHeader
         title="Ofertas"
-        kicker="Gestion"
+        kicker="Gestión"
         onBack={goBack}
         right={
-          <Pressable
-            onPress={() => router.push('/(admin)/manage/offers/new' as never)}
-            hitSlop={10}
-            accessibilityRole="button"
-            accessibilityLabel="Nueva oferta"
-            style={({ pressed }) => [styles.addBtn, pressed && styles.pressed]}
-          >
-            <Feather name="plus" size={18} color={Colors.textInverse} />
-          </Pressable>
+          canWrite ? (
+            <Pressable
+              onPress={() => router.push('/(admin)/manage/offers/new' as never)}
+              hitSlop={10}
+              accessibilityRole="button"
+              accessibilityLabel="Nueva oferta"
+              style={({ pressed }) => [styles.addBtn, pressed && styles.pressed]}
+            >
+              <Feather name="plus" size={18} color={Colors.textInverse} />
+            </Pressable>
+          ) : undefined
         }
       />
 
@@ -124,6 +137,8 @@ export default function AdminOffersList() {
 
       {loading ? (
         <View style={styles.center}><ActivityIndicator color={Colors.accentPrimary} /></View>
+      ) : error ? (
+        <ErrorState message={error} onRetry={load} />
       ) : (
         <FlatList
           data={shown}
@@ -183,15 +198,17 @@ export default function AdminOffersList() {
                     <Feather name="edit-2" size={12} color={Colors.accentPrimary} />
                     <Kicker style={{ color: Colors.accentPrimary, fontSize: 10 }}>Editar</Kicker>
                   </Pressable>
-                  <Pressable
-                    style={({ pressed }) => [styles.chip, styles.chipDanger, pressed && styles.pressed]}
-                    onPress={() => setConfirmDel({ id: item.id, title: item.title })}
-                    accessibilityRole="button"
-                    accessibilityLabel="Eliminar"
-                  >
-                    <Feather name="trash-2" size={12} color={Colors.accentDanger} />
-                    <Kicker style={{ color: Colors.accentDanger, fontSize: 10 }}>Eliminar</Kicker>
-                  </Pressable>
+                  {canWrite ? (
+                    <Pressable
+                      style={({ pressed }) => [styles.chip, styles.chipDanger, pressed && styles.pressed]}
+                      onPress={() => setConfirmDel({ id: item.id, title: item.title })}
+                      accessibilityRole="button"
+                      accessibilityLabel="Eliminar"
+                    >
+                      <Feather name="trash-2" size={12} color={Colors.accentDanger} />
+                      <Kicker style={{ color: Colors.accentDanger, fontSize: 10 }}>Eliminar</Kicker>
+                    </Pressable>
+                  ) : null}
                 </View>
               </View>
             );
@@ -204,7 +221,7 @@ export default function AdminOffersList() {
         onClose={() => setConfirmDel(null)}
         onConfirm={performDelete}
         title="Eliminar oferta"
-        description={`Eliminar "${confirmDel?.title ?? ''}" permanentemente? Esta accion no se puede deshacer.`}
+        description={`¿Eliminar "${confirmDel?.title ?? ''}" permanentemente? Esta acción no se puede deshacer.`}
         confirmLabel="Eliminar"
         confirmVariant="danger"
       />

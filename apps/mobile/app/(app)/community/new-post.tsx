@@ -2,19 +2,22 @@
 //  New Post — Editorial Premium
 //
 //  Composer for wall + community posts.
-//   · Header: close (X) + Kicker "NUEVO" + primary "Publicar" button
-//   · Surface toggle: SegmentedControl ("Mi muro" / "Comunidad")
+//   · Header: close (X) + Kicker "NUEVO"/"EDITAR" + primary publish button
+//   · Surface toggle: SegmentedControl ("Mi muro" / "Comunidad") — hidden
+//     when launched with a fixed ?surface= or in edit mode
 //   · Author row: avatar + name + scope hint
-//   · Body: editorial multi-line input (no card)
-//   · Image preview with edit chips (Tagger + remove)
-//   · Bottom action bar: Camera + Galería buttons + aspect ratio chips
+//   · Body: editorial multi-line input (no card), 2000 char cap
+//   · Up to 4 image thumbnails with remove buttons + "add" tile
+//   · Bottom action bar: Camera + Galería buttons
 //   · Toast (no Alert) for non-critical info
+//   · ?editId= loads an existing post and PATCHes instead of creating
+//   · ?openPicker=1 auto-opens the gallery picker on mount
 // ─────────────────────────────────────────────
 import {
+  ActivityIndicator,
   Image,
   KeyboardAvoidingView,
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -49,24 +52,24 @@ import { useMentionAutocomplete } from '@/hooks/useMentionAutocomplete';
 import { MentionSuggestions } from '@/components/MentionSuggestions';
 import { PhotoTagger, type PhotoTag } from '@/components/PhotoTagger';
 
-const MAX_LEN = 1000;
-
-type AspectRatioKey = '4:5' | '1:1' | '9:16';
-const RATIOS: { key: AspectRatioKey; label: string; aspect: [number, number]; ratio: number }[] = [
-  { key: '4:5', label: '4:5', aspect: [4, 5], ratio: 4 / 5 },
-  { key: '1:1', label: '1:1', aspect: [1, 1], ratio: 1 },
-  { key: '9:16', label: '9:16', aspect: [9, 16], ratio: 9 / 16 },
-];
+const MAX_LEN = 2000;
+const MAX_IMAGES = 4;
 
 type Surface = 'wall' | 'community';
 
 export default function NewPost() {
   const router = useRouter();
   const fb = useFeedback();
-  const { surface: surfaceParam, autoPick: autoPickParam } = useLocalSearchParams<{
+  const {
+    surface: surfaceParam,
+    openPicker: openPickerParam,
+    editId,
+  } = useLocalSearchParams<{
     surface?: string;
-    autoPick?: string;
+    openPicker?: string;
+    editId?: string;
   }>();
+  const isEditMode = !!editId;
   const { user, refreshUser } = useAuthStore();
   const { language } = useAppStore();
   const t = language === 'es';
@@ -75,80 +78,129 @@ export default function NewPost() {
     surfaceParam === 'wall' ? 'wall' : 'community',
   );
   const isWallPost = surfaceChoice === 'wall';
-  const canChangeSurface = !surfaceParam;
+  const canChangeSurface = !surfaceParam && !isEditMode;
 
   const mention = useMentionAutocomplete();
   const content = mention.text;
-  const [localImage, setLocalImage] = useState<string | null>(null);
+  const [images, setImages] = useState<string[]>([]);
   const [photoTags, setPhotoTags] = useState<PhotoTag[]>([]);
   const [taggerOpen, setTaggerOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [loadingPost, setLoadingPost] = useState(isEditMode);
   const [pickingImage, setPickingImage] = useState(false);
-  const [selectedRatio, setSelectedRatio] = useState<AspectRatioKey>('1:1');
 
   const surfaceOptions: SegmentOption<Surface>[] = [
     { value: 'wall', label: t ? 'Mi muro' : 'My wall' },
     { value: 'community', label: t ? 'Comunidad' : 'Community' },
   ];
 
-  // When launched with ?autoPick=gallery|camera, open the picker once on mount
-  const autoPickFired = useRef(false);
+  // ── Edit mode: load the existing post and prefill ─────────
   useEffect(() => {
-    if (autoPickFired.current || !autoPickParam) return;
-    autoPickFired.current = true;
-    if (autoPickParam === 'gallery') pickFromGallery();
-    else if (autoPickParam === 'camera') takePhoto();
+    if (!editId) return;
+    let alive = true;
+    (async () => {
+      try {
+        const r = await communityApi.post(editId);
+        const p = r.data?.data;
+        if (!alive || !p) return;
+        mention.setText(p.content ?? '');
+        const media: string[] =
+          Array.isArray(p.mediaUrls) && p.mediaUrls.length > 0
+            ? p.mediaUrls
+            : p.imageUrl
+              ? [p.imageUrl]
+              : [];
+        setImages(media);
+        if (p.surface === 'wall') setSurfaceChoice('wall');
+      } catch (err) {
+        toast(
+          apiError(err, t ? 'No se pudo cargar la publicación.' : 'Could not load the post.'),
+          'danger',
+        );
+        router.back();
+      } finally {
+        if (alive) setLoadingPost(false);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoPickParam]);
+  }, [editId]);
+
+  // ── ?openPicker=1 → open the gallery picker once on mount ──
+  const openPickerFired = useRef(false);
+  useEffect(() => {
+    if (openPickerFired.current || openPickerParam !== '1' || isEditMode) return;
+    openPickerFired.current = true;
+    pickFromGallery();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openPickerParam, isEditMode]);
 
   async function pickFromGallery() {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
+    const remaining = MAX_IMAGES - images.length;
+    if (remaining <= 0) {
       toast(
-        t ? 'Necesitamos acceso a tu galería.' : 'We need photo library access.',
+        t ? `Puedes agregar hasta ${MAX_IMAGES} fotos.` : `You can add up to ${MAX_IMAGES} photos.`,
         'warning',
       );
       return;
     }
-    setPickingImage(true);
     try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        toast(t ? 'Necesitamos acceso a tu galería.' : 'We need photo library access.', 'warning');
+        return;
+      }
+      setPickingImage(true);
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: RATIOS.find((r) => r.key === selectedRatio)!.aspect,
+        mediaTypes: ['images'],
+        allowsMultipleSelection: true,
+        selectionLimit: remaining,
         quality: 0.9,
       });
-      if (!result.canceled && result.assets[0]) {
-        setLocalImage(result.assets[0].uri);
+      if (!result.canceled && result.assets.length > 0) {
+        setImages((prev) => [...prev, ...result.assets.map((a) => a.uri)].slice(0, MAX_IMAGES));
       }
+    } catch (err) {
+      toast(t ? 'No se pudo abrir la galería.' : 'Could not open the photo library.', 'danger');
     } finally {
       setPickingImage(false);
     }
   }
 
   async function takePhoto() {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== 'granted') {
+    if (images.length >= MAX_IMAGES) {
       toast(
-        t ? 'Necesitamos acceso a la cámara.' : 'We need camera access.',
+        t ? `Puedes agregar hasta ${MAX_IMAGES} fotos.` : `You can add up to ${MAX_IMAGES} photos.`,
         'warning',
       );
       return;
     }
-    setPickingImage(true);
     try {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== 'granted') {
+        toast(t ? 'Necesitamos acceso a la cámara.' : 'We need camera access.', 'warning');
+        return;
+      }
+      setPickingImage(true);
       const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: RATIOS.find((r) => r.key === selectedRatio)!.aspect,
+        mediaTypes: ['images'],
         quality: 0.9,
       });
       if (!result.canceled && result.assets[0]) {
-        setLocalImage(result.assets[0].uri);
+        setImages((prev) => [...prev, result.assets[0].uri].slice(0, MAX_IMAGES));
       }
+    } catch (err) {
+      toast(t ? 'No se pudo abrir la cámara.' : 'Could not open the camera.', 'danger');
     } finally {
       setPickingImage(false);
     }
+  }
+
+  function removeImage(index: number) {
+    setImages((prev) => prev.filter((_, i) => i !== index));
+    if (index === 0) setPhotoTags([]);
   }
 
   const firstName = user?.profile?.firstName ?? '';
@@ -160,13 +212,15 @@ export default function NewPost() {
     (user?.email?.[0]?.toUpperCase() ?? 'U');
 
   async function handleSubmit() {
-    if (!content.trim() && !localImage) return;
+    if (!content.trim() && images.length === 0) return;
     setLoading(true);
     try {
-      let uploadedUrl: string | undefined;
-      if (localImage) {
+      let uploadedUrls: string[] = [];
+      if (images.length > 0) {
         try {
-          uploadedUrl = await uploadImage(localImage, { kind: 'post' });
+          uploadedUrls = await Promise.all(
+            images.map((uri) => uploadImage(uri, { kind: 'post' })),
+          );
         } catch (err) {
           const msg = err instanceof UploadError ? err.message : 'upload failed';
           toast(
@@ -177,6 +231,28 @@ export default function NewPost() {
           return;
         }
       }
+
+      if (editId) {
+        const editRes = await communityApi.updatePost(editId, {
+          content: content.trim() || '',
+          mediaUrls: uploadedUrls,
+        });
+        fb.success();
+        if (editRes.data?.data?.status === 'PENDING_REVIEW') {
+          toast(
+            t
+              ? 'Tu publicación está en revisión tras el cambio.'
+              : 'Your post is in review after this change.',
+            'info',
+            3600,
+          );
+        } else {
+          toast(t ? 'Publicación actualizada.' : 'Post updated.', 'success');
+        }
+        router.back();
+        return;
+      }
+
       const coordsByUserId = new Map(
         photoTags.map((tag) => [tag.userId, { x: tag.x, y: tag.y }] as const),
       );
@@ -188,7 +264,7 @@ export default function NewPost() {
       }
       const res = await communityApi.createPost({
         content: content.trim() || '',
-        imageUrl: uploadedUrl,
+        mediaUrls: uploadedUrls.length > 0 ? uploadedUrls : undefined,
         surface: isWallPost ? 'wall' : 'community',
         mentions: mentions.length > 0 ? mentions : undefined,
       });
@@ -198,9 +274,10 @@ export default function NewPost() {
       if (status === 'PENDING_REVIEW') {
         toast(
           t
-            ? 'Publicación en revisión. Recibirás puntos cuando sea aprobada.'
-            : 'Pending review. You will get points when approved.',
+            ? 'Tu publicación está en revisión. Recibirás tus puntos cuando sea aprobada.'
+            : 'Your post is in review. You will get your points once approved.',
           'info',
+          3600,
         );
       }
       router.back();
@@ -212,7 +289,17 @@ export default function NewPost() {
     }
   }
 
-  const canPublish = (content.trim().length > 0 || !!localImage) && !loading;
+  const canPublish = (content.trim().length > 0 || images.length > 0) && !loading && !loadingPost;
+
+  if (loadingPost) {
+    return (
+      <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
+        <View style={styles.center}>
+          <ActivityIndicator color={Colors.accentPrimary} />
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
@@ -234,18 +321,30 @@ export default function NewPost() {
           </Pressy>
           <View style={{ flex: 1 }}>
             <Kicker tone="muted" align="center">
-              {isWallPost
+              {isEditMode
                 ? t
-                  ? 'NUEVO · MURO'
-                  : 'NEW · WALL'
-                : t
-                  ? 'NUEVO · COMUNIDAD'
-                  : 'NEW · COMMUNITY'}
+                  ? 'EDITAR PUBLICACIÓN'
+                  : 'EDIT POST'
+                : isWallPost
+                  ? t
+                    ? 'NUEVO · MURO'
+                    : 'NEW · WALL'
+                  : t
+                    ? 'NUEVO · COMUNIDAD'
+                    : 'NEW · COMMUNITY'}
             </Kicker>
           </View>
           <View style={styles.publishSlot}>
             <Button
-              label={t ? 'Publicar' : 'Share'}
+              label={
+                isEditMode
+                  ? t
+                    ? 'Guardar cambios'
+                    : 'Save changes'
+                  : t
+                    ? 'Publicar'
+                    : 'Share'
+              }
               onPress={handleSubmit}
               variant="primary"
               size="sm"
@@ -316,7 +415,7 @@ export default function NewPost() {
             onSelectionChange={mention.onSelectionChange}
             multiline
             maxLength={MAX_LEN}
-            autoFocus={!localImage}
+            autoFocus={images.length === 0 && !isEditMode}
             accessibilityLabel={t ? 'Texto de la publicación' : 'Post text'}
           />
 
@@ -337,48 +436,59 @@ export default function NewPost() {
             </View>
           ) : null}
 
-          {/* ── Image preview ─────────────── */}
-          {localImage ? (
-            <View style={styles.previewWrap}>
-              <Image
-                source={{ uri: localImage }}
-                style={[
-                  styles.preview,
-                  { aspectRatio: RATIOS.find((r) => r.key === selectedRatio)!.ratio },
-                ]}
-                resizeMode="cover"
-              />
-              <Pressy
-                onPress={() => {
-                  setLocalImage(null);
-                  setPhotoTags([]);
-                }}
-                haptic="tap"
-                hitSlop={HitSlop.expand}
-                accessibilityRole={Roles.button}
-                accessibilityLabel={t ? 'Quitar imagen' : 'Remove image'}
-                style={styles.removeBtn}
+          {/* ── Image thumbnails ──────────── */}
+          {images.length > 0 ? (
+            <View style={styles.thumbsWrap}>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.thumbsRow}
               >
-                <Feather name="x" size={16} color="#fff" />
-              </Pressy>
-              <Pressy
-                onPress={() => setTaggerOpen(true)}
-                haptic="select"
-                accessibilityRole={Roles.button}
-                accessibilityLabel={t ? 'Etiquetar personas' : 'Tag people'}
-                style={styles.tagBtn}
-              >
-                <Feather name="user-plus" size={14} color="#fff" />
-                <Text style={styles.tagBtnText}>
-                  {photoTags.length > 0
-                    ? t
-                      ? `${photoTags.length} etiquetad${photoTags.length === 1 ? 'o' : 'os'}`
-                      : `${photoTags.length} tagged`
-                    : t
-                      ? 'Etiquetar'
-                      : 'Tag'}
-                </Text>
-              </Pressy>
+                {images.map((uri, i) => (
+                  <View key={`${i}-${uri}`} style={styles.thumbBox}>
+                    <Image source={{ uri }} style={styles.thumb} resizeMode="cover" />
+                    <Pressy
+                      onPress={() => removeImage(i)}
+                      haptic="tap"
+                      hitSlop={HitSlop.expand}
+                      accessibilityRole={Roles.button}
+                      accessibilityLabel={t ? 'Quitar imagen' : 'Remove image'}
+                      style={styles.thumbRemove}
+                    >
+                      <Feather name="x" size={13} color="#fff" />
+                    </Pressy>
+                    {i === 0 ? (
+                      <Pressy
+                        onPress={() => setTaggerOpen(true)}
+                        haptic="select"
+                        accessibilityRole={Roles.button}
+                        accessibilityLabel={t ? 'Etiquetar personas' : 'Tag people'}
+                        style={styles.thumbTag}
+                      >
+                        <Feather name="user-plus" size={11} color="#fff" />
+                        {photoTags.length > 0 ? (
+                          <Text style={styles.thumbTagText}>{photoTags.length}</Text>
+                        ) : null}
+                      </Pressy>
+                    ) : null}
+                  </View>
+                ))}
+                {images.length < MAX_IMAGES ? (
+                  <Pressy
+                    onPress={pickFromGallery}
+                    disabled={pickingImage}
+                    haptic="select"
+                    accessibilityRole={Roles.button}
+                    accessibilityLabel={t ? 'Agregar foto' : 'Add photo'}
+                    style={[styles.thumbAdd, pickingImage && { opacity: 0.5 }]}
+                  >
+                    <Feather name="plus" size={22} color={Colors.textSecondary} />
+                  </Pressy>
+                ) : null}
+              </ScrollView>
+              <Caption tone="muted" style={{ marginTop: Spacing[2] }}>
+                {t ? `${images.length}/${MAX_IMAGES} fotos` : `${images.length}/${MAX_IMAGES} photos`}
+              </Caption>
             </View>
           ) : null}
 
@@ -393,61 +503,43 @@ export default function NewPost() {
           <View style={styles.actionRow}>
             <Pressy
               onPress={takePhoto}
-              disabled={pickingImage}
+              disabled={pickingImage || images.length >= MAX_IMAGES}
               haptic="select"
               accessibilityRole={Roles.button}
               accessibilityLabel={t ? 'Cámara' : 'Camera'}
-              style={[styles.actionBtn, pickingImage && { opacity: 0.5 }]}
+              style={[
+                styles.actionBtn,
+                (pickingImage || images.length >= MAX_IMAGES) && { opacity: 0.5 },
+              ]}
             >
               <Feather name="camera" size={18} color={Colors.textPrimary} />
               <Text style={styles.actionLabel}>{t ? 'Cámara' : 'Camera'}</Text>
             </Pressy>
             <Pressy
               onPress={pickFromGallery}
-              disabled={pickingImage}
+              disabled={pickingImage || images.length >= MAX_IMAGES}
               haptic="select"
               accessibilityRole={Roles.button}
               accessibilityLabel={t ? 'Galería' : 'Gallery'}
-              style={[styles.actionBtn, pickingImage && { opacity: 0.5 }]}
+              style={[
+                styles.actionBtn,
+                (pickingImage || images.length >= MAX_IMAGES) && { opacity: 0.5 },
+              ]}
             >
               <Feather name="image" size={18} color={Colors.textPrimary} />
               <Text style={styles.actionLabel}>{t ? 'Galería' : 'Gallery'}</Text>
             </Pressy>
           </View>
-
-          {!localImage ? (
-            <View style={styles.ratioRow}>
-              {RATIOS.map((r) => {
-                const active = selectedRatio === r.key;
-                return (
-                  <Pressable
-                    key={r.key}
-                    onPress={() => setSelectedRatio(r.key)}
-                    accessibilityRole={Roles.button}
-                    accessibilityLabel={`${t ? 'Proporción' : 'Ratio'} ${r.label}`}
-                    accessibilityState={{ selected: active }}
-                    hitSlop={HitSlop.expand}
-                    style={[styles.ratioBtn, active && styles.ratioBtnActive]}
-                  >
-                    <Text
-                      style={[styles.ratioLabel, active && styles.ratioLabelActive]}
-                    >
-                      {r.label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          ) : null}
         </View>
       </KeyboardAvoidingView>
 
       <PhotoTagger
         visible={taggerOpen}
-        imageUri={localImage}
+        imageUri={images[0] ?? null}
         initialTags={photoTags}
         onClose={() => setTaggerOpen(false)}
         onSubmit={setPhotoTags}
+        t={t}
       />
     </SafeAreaView>
   );
@@ -455,6 +547,7 @@ export default function NewPost() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
   header: {
     flexDirection: 'row',
@@ -516,41 +609,60 @@ const styles = StyleSheet.create({
     padding: 0,
   },
 
-  previewWrap: {
+  // Thumbnails
+  thumbsWrap: {
     marginTop: Spacing[5],
-    borderRadius: Radius.card,
+  },
+  thumbsRow: {
+    gap: Spacing[3],
+  },
+  thumbBox: {
+    width: 88,
+    height: 88,
+    borderRadius: Radius.md,
     overflow: 'hidden',
     backgroundColor: Colors.bgElevated,
     position: 'relative',
   },
-  preview: { width: '100%' },
-  removeBtn: {
+  thumb: { width: '100%', height: '100%' },
+  thumbRemove: {
     position: 'absolute',
-    top: Spacing[3],
-    right: Spacing[3],
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+    top: 4,
+    right: 4,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     backgroundColor: 'rgba(0,0,0,0.6)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  tagBtn: {
+  thumbTag: {
     position: 'absolute',
-    bottom: Spacing[3],
-    left: Spacing[3],
+    bottom: 4,
+    left: 4,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing[2],
-    paddingHorizontal: Spacing[3],
-    paddingVertical: Spacing[2],
+    gap: 3,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
     borderRadius: Radius.full,
     backgroundColor: 'rgba(0,0,0,0.6)',
   },
-  tagBtnText: {
+  thumbTagText: {
     ...TypePresets.label,
     color: '#fff',
-    fontSize: 11,
+    fontSize: 10,
+  },
+  thumbAdd: {
+    width: 88,
+    height: 88,
+    borderRadius: Radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.bgCard,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+    borderStyle: 'dashed',
   },
 
   // Bottom action bar
@@ -581,33 +693,5 @@ const styles = StyleSheet.create({
   actionLabel: {
     ...TypePresets.subhead,
     color: Colors.textPrimary,
-  },
-  ratioRow: {
-    flexDirection: 'row',
-    gap: Spacing[2],
-    justifyContent: 'center',
-  },
-  ratioBtn: {
-    minWidth: 56,
-    minHeight: 30,
-    paddingHorizontal: Spacing[3],
-    borderRadius: Radius.full,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: Colors.border,
-    backgroundColor: Colors.bgCard,
-  },
-  ratioBtnActive: {
-    backgroundColor: Colors.textPrimary,
-    borderColor: Colors.textPrimary,
-  },
-  ratioLabel: {
-    ...TypePresets.label,
-    color: Colors.textSecondary,
-    fontSize: 11,
-  },
-  ratioLabelActive: {
-    color: Colors.textInverse,
   },
 });

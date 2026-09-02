@@ -1,8 +1,9 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { PrismaService } from '../../database/prisma.service';
 import { RedisService } from '../../database/redis.service';
 import { paginate, getPaginationOffset } from '../../common/dto/pagination.dto';
+import { CreateVenueDto, UpdateVenueConfigDto } from './dto/venue-config.dto';
 
 // Venues change rarely (name/address/hours), so we cache aggressively.
 // Ratings live in denormalized ratingAvg/ratingCount, updated by ReviewsService
@@ -67,13 +68,7 @@ export class VenuesService {
     });
   }
 
-  async updateConfig(id: string, data: {
-    openTime?: string;
-    closeTime?: string;
-    reservationCapacity?: number;
-    reservationsEnabled?: boolean;
-    slotMinutes?: number;
-  }) {
+  async updateConfig(id: string, data: UpdateVenueConfigDto) {
     const existing = await this.prisma.venue.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Venue not found');
     const updated = await this.prisma.venue.update({
@@ -84,17 +79,9 @@ export class VenuesService {
     return updated;
   }
 
-  async create(data: {
-    name: string;
-    address?: string;
-    city?: string;
-    description?: string;
-    phone?: string;
-    imageUrl?: string;
-    coverUrl?: string;
-  }) {
+  async create(data: CreateVenueDto) {
     const name = (data.name ?? '').trim();
-    if (!name) throw new NotFoundException('Falta el nombre del venue');
+    if (!name) throw new BadRequestException('Venue name is required');
     // Slug auto-generado a partir del nombre, garantizado único
     const baseSlug = name.toLowerCase()
       .normalize('NFD').replace(/[̀-ͯ]/g, '')

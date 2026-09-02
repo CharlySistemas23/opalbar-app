@@ -1,6 +1,6 @@
 import {
   BadRequestException, ForbiddenException,
-  Injectable, NotFoundException,
+  Injectable, Logger, NotFoundException,
 } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { MentionTargetType, NotificationType, PostStatus, ReportTargetType, StoryScope, UserRole } from '@prisma/client';
@@ -30,6 +30,44 @@ const ADMIN_ROLES: UserRole[] = [UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.
 const CACHE_TTL_FEED = 20;
 const CACHE_TTL_POST = 30;
 const WALL_MARKER = '__WALL__';
+// Canonical "like" — the legacy Reaction(LIKE) table is no longer the source
+// of truth; likes are the ❤️ emoji reaction so the feed has ONE counter.
+export const LIKE_EMOJI = '❤️';
+
+/** Strip the internal wall marker from a stored mediaUrls array. */
+function publicMediaUrls(mediaUrls: string[] | null | undefined): string[] {
+  if (!Array.isArray(mediaUrls)) return [];
+  return mediaUrls.filter((u) => u && u !== WALL_MARKER);
+}
+
+/** Build the stored mediaUrls array (marker first for wall posts). */
+function storedMediaUrls(urls: string[], isWall: boolean): string[] {
+  const clean = urls.filter((u) => typeof u === 'string' && u.trim().length > 0 && u !== WALL_MARKER);
+  return isWall ? [WALL_MARKER, ...clean] : clean;
+}
+
+const POST_SELECT_BASE = {
+  id: true,
+  userId: true,
+  content: true,
+  imageUrl: true,
+  mediaUrls: true,
+  commentsCount: true,
+  status: true,
+  rejectionReason: true,
+  isPinned: true,
+  createdAt: true,
+  updatedAt: true,
+  user: {
+    select: {
+      id: true,
+      isPrivate: true,
+      profile: { select: { firstName: true, lastName: true, avatarUrl: true } },
+    },
+  },
+  _count: { select: { comments: { where: { deletedAt: null, status: PostStatus.PUBLISHED } } } },
+  emojiReactions: { select: { emoji: true, userId: true } },
+} as const;
 
 function aggregateEmojiReactions(
   rows: Array<{ emoji: string; userId: string }> | undefined | null,
@@ -51,6 +89,8 @@ function aggregateEmojiReactions(
 
 @Injectable()
 export class CommunityService {
+  private readonly logger = new Logger(CommunityService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
@@ -72,6 +112,87 @@ export class CommunityService {
    * (20 s TTL) doesn't return stale data right after a post is approved. */
   async invalidateFeedCache(): Promise<void> {
     return this.invalidateFeed();
+  }
+
+  /**
+   * Shape every post the same way for the feed + detail endpoints:
+   *  · ONE like counter (`likesCount` = total emoji reactions, `hasLiked` = viewer ❤️)
+   *  · `emojiReactions[{emoji,count,mine}]`
+   *  · `commentsCount` (published, non-deleted comments)
+   *  · `isSaved` for the viewer, `status`, `mediaUrls` (marker stripped),
+   *    `author.isPrivate`, hydrated `mentions` (APPROVED) like comments.
+   */
+  private async decoratePosts(rows: any[], viewerId?: string): Promise<any[]> {
+    if (rows.length === 0) return [];
+    const ids = rows.map((p) => p.id);
+
+    const [savedRows, mentionRows] = await Promise.all([
+      viewerId
+        ? this.prisma.savedItem.findMany({
+            where: { userId: viewerId, type: 'POST', targetId: { in: ids } },
+            select: { targetId: true },
+          })
+        : Promise.resolve([] as { targetId: string }[]),
+      this.prisma.mention.findMany({
+        where: { targetType: MentionTargetType.POST, targetId: { in: ids }, status: 'APPROVED' },
+        select: {
+          targetId: true,
+          targetUserId: true,
+          x: true,
+          y: true,
+          targetUser: { select: { profile: { select: { firstName: true, lastName: true, avatarUrl: true } } } },
+        },
+      }),
+    ]);
+    const savedSet = new Set(savedRows.map((s) => s.targetId));
+    const mentionsByPost = new Map<string, any[]>();
+    for (const m of mentionRows) {
+      const arr = mentionsByPost.get(m.targetId) ?? [];
+      arr.push({
+        userId: m.targetUserId,
+        firstName: m.targetUser?.profile?.firstName ?? null,
+        lastName: m.targetUser?.profile?.lastName ?? null,
+        avatarUrl: m.targetUser?.profile?.avatarUrl ?? null,
+        x: m.x,
+        y: m.y,
+      });
+      mentionsByPost.set(m.targetId, arr);
+    }
+
+    return rows.map((p) => {
+      const emojiRows: Array<{ emoji: string; userId: string }> = Array.isArray(p.emojiReactions)
+        ? p.emojiReactions
+        : [];
+      const emojiReactions = aggregateEmojiReactions(emojiRows, viewerId);
+      const likesCount = emojiRows.length;
+      const hasLiked = !!viewerId && emojiRows.some((r) => r.userId === viewerId && r.emoji === LIKE_EMOJI);
+      const myEmoji = viewerId ? emojiRows.find((r) => r.userId === viewerId)?.emoji ?? null : null;
+      const mediaUrls = publicMediaUrls(p.mediaUrls);
+      // `moderationScore` / `deletedAt` are selected so the caller can run its
+      // own visibility check — they must never reach a public response.
+      const { _count, reactions: _r, moderationScore: _ms, deletedAt: _da, ...rest } = p;
+      return {
+        ...rest,
+        imageUrl: p.imageUrl ?? mediaUrls[0] ?? null,
+        mediaUrls,
+        surface: Array.isArray(p.mediaUrls) && p.mediaUrls.includes(WALL_MARKER) ? PostSurface.WALL : PostSurface.COMMUNITY,
+        likesCount,
+        hasLiked,
+        hasReacted: hasLiked,
+        myEmoji,
+        emojiReactions,
+        commentsCount: typeof _count?.comments === 'number' ? _count.comments : p.commentsCount ?? 0,
+        isSaved: savedSet.has(p.id),
+        author: {
+          id: p.user?.id ?? p.userId,
+          isPrivate: !!p.user?.isPrivate,
+          firstName: p.user?.profile?.firstName ?? null,
+          lastName: p.user?.profile?.lastName ?? null,
+          avatarUrl: p.user?.profile?.avatarUrl ?? null,
+        },
+        mentions: mentionsByPost.get(p.id) ?? [],
+      };
+    });
   }
 
   // ── POSTS ──────────────────────────────────
@@ -135,28 +256,13 @@ export class CommunityService {
           where,
           skip,
           take: limit,
-          include: {
-            user: { select: { id: true, profile: { select: { firstName: true, lastName: true, avatarUrl: true } } } },
-            _count: { select: { reactions: true, comments: true } },
-            // Only hydrate the viewer's reaction to compute hasReacted cheaply
-            reactions: currentUserId
-              ? { where: { userId: currentUserId }, select: { id: true }, take: 1 }
-              : false,
-            emojiReactions: { select: { emoji: true, userId: true } },
-          },
+          select: POST_SELECT_BASE,
           orderBy: [{ isPinned: 'desc' }, { createdAt: 'desc' }],
         }),
         this.prisma.post.count({ where }),
       ]);
 
-      // Decorate hasReacted + strip the raw reactions array (front doesn't need it)
-      const decorated = data.map((p: any) => ({
-        ...p,
-        hasReacted: Array.isArray(p.reactions) && p.reactions.length > 0,
-        reactions: undefined,
-        emojiReactions: aggregateEmojiReactions(p.emojiReactions, currentUserId),
-      }));
-
+      const decorated = await this.decoratePosts(data as any[], currentUserId);
       return paginate(decorated, total, page, limit);
     });
   }
@@ -167,19 +273,16 @@ export class CommunityService {
     return this.redis.cacheWrap(key, CACHE_TTL_POST, async () => {
       const post = await this.prisma.post.findUnique({
         where: { id },
-        include: {
-          // Audit fix: traer isPrivate del autor para chequear acceso antes de
-          // devolver el detalle. Antes el endpoint @Public devolvia cualquier
-          // post si conocias el id (enumeracion).
-          user: { select: { id: true, isPrivate: true, profile: { select: { firstName: true, lastName: true, avatarUrl: true } } } },
-          _count: { select: { reactions: true, comments: true } },
-          reactions: currentUserId
-            ? { where: { userId: currentUserId }, select: { id: true }, take: 1 }
-            : false,
-          emojiReactions: { select: { emoji: true, userId: true } },
-        },
+        // Audit fix: traer isPrivate del autor para chequear acceso antes de
+        // devolver el detalle. Antes el endpoint @Public devolvia cualquier
+        // post si conocias el id (enumeracion).
+        select: { ...POST_SELECT_BASE, deletedAt: true, moderationScore: true },
       });
       if (!post || post.deletedAt) throw new NotFoundException('Post not found');
+      // Non-published posts are only visible to their owner (and staff via admin).
+      if (post.status !== PostStatus.PUBLISHED && post.userId !== currentUserId) {
+        throw new NotFoundException('Post not found');
+      }
 
       // Privacy check: si el author es privado y el viewer no es el dueno
       // ni un follower, devolver 404 (mismo shape de "no existe" para no
@@ -193,14 +296,8 @@ export class CommunityService {
         });
         if (!follow) throw new NotFoundException('Post not found');
       }
-      const hasReacted =
-        Array.isArray((post as any).reactions) && (post as any).reactions.length > 0;
-      return {
-        ...post,
-        reactions: undefined,
-        hasReacted,
-        emojiReactions: aggregateEmojiReactions((post as any).emojiReactions, currentUserId),
-      };
+      const [decorated] = await this.decoratePosts([post], currentUserId);
+      return decorated;
     });
   }
 
@@ -210,22 +307,36 @@ export class CommunityService {
     // potencialmente objetable (score alto). El admin puede verificar, ocultar o
     // eliminar cualquier post después desde el panel. Esto cumple la 1.2 de Apple
     // (filtro de contenido objetable + moderación) sin bloquear la experiencia.
-    const moderationScore = this.basicModerationCheck(dto.content);
+    const content = typeof dto.content === 'string' ? dto.content.trim() : '';
+    // Media: prefer the explicit array; fall back to the legacy single imageUrl.
+    const media = Array.isArray(dto.mediaUrls) && dto.mediaUrls.length > 0
+      ? dto.mediaUrls
+      : dto.imageUrl
+        ? [dto.imageUrl]
+        : [];
+    const cleanMedia = media.filter((u) => typeof u === 'string' && u.trim().length > 0 && u !== WALL_MARKER);
+    if (!content && cleanMedia.length === 0) {
+      throw new BadRequestException('Post needs text or at least one image');
+    }
+
+    const moderationScore = this.basicModerationCheck(content);
     const status =
       moderationScore >= 0.5 ? PostStatus.PENDING_REVIEW : PostStatus.PUBLISHED;
 
     const isWallPost = dto.surface === PostSurface.WALL;
 
-    const post = await this.prisma.post.create({
+    const created = await this.prisma.post.create({
       data: {
         userId,
-        content: dto.content,
-        imageUrl: dto.imageUrl,
-        mediaUrls: isWallPost ? [WALL_MARKER] : [],
+        content,
+        // Backward compat: imageUrl mirrors the first media item.
+        imageUrl: cleanMedia[0] ?? null,
+        mediaUrls: storedMediaUrls(cleanMedia, isWallPost),
         status,
         moderationScore,
       },
     });
+    const post = { ...created, mediaUrls: publicMediaUrls(created.mediaUrls) };
 
     // Award points for posting (only when auto-published — pending posts don't earn).
     if (status === PostStatus.PUBLISHED) {
@@ -258,7 +369,7 @@ export class CommunityService {
           targetId: post.id,
           mentions: dto.mentions,
         })
-        .catch(() => {});
+        .catch((err) => this.logger.warn(`applyMentions failed for post ${post.id}: ${err?.message ?? err}`));
     }
 
     await this.invalidateFeed();
@@ -271,26 +382,78 @@ export class CommunityService {
     const post = await this.prisma.post.findUnique({ where: { id: postId } });
     if (!post || post.deletedAt) throw new NotFoundException('Post not found');
     if (post.userId !== userId) throw new ForbiddenException('Not authorized');
-    const updated = await this.prisma.post.update({ where: { id: postId }, data: dto });
+
+    const isWallPost = post.mediaUrls.includes(WALL_MARKER);
+    const nextContent = dto.content !== undefined ? dto.content.trim() : post.content;
+    let nextMedia = publicMediaUrls(post.mediaUrls);
+    if (dto.mediaUrls !== undefined) {
+      nextMedia = dto.mediaUrls.filter((u) => typeof u === 'string' && u.trim().length > 0 && u !== WALL_MARKER);
+    } else if (dto.imageUrl !== undefined) {
+      nextMedia = dto.imageUrl ? [dto.imageUrl, ...nextMedia.slice(1)] : nextMedia.slice(1);
+    }
+    if (!nextContent && nextMedia.length === 0) {
+      throw new BadRequestException('Post needs text or at least one image');
+    }
+
+    // Re-run moderation on the edited text. A previously rejected/hidden post
+    // stays that way (only staff can lift it); otherwise the new score decides.
+    const moderationScore = this.basicModerationCheck(nextContent);
+    const locked = post.status === PostStatus.REJECTED || post.status === PostStatus.HIDDEN || post.status === PostStatus.DELETED;
+    const status = locked
+      ? post.status
+      : moderationScore >= 0.5
+        ? PostStatus.PENDING_REVIEW
+        : PostStatus.PUBLISHED;
+
+    const updated = await this.prisma.post.update({
+      where: { id: postId },
+      data: {
+        content: nextContent,
+        imageUrl: nextMedia[0] ?? null,
+        mediaUrls: storedMediaUrls(nextMedia, isWallPost),
+        moderationScore,
+        status,
+      },
+    });
+
+    if (dto.mentions !== undefined) {
+      // Replace the mention set: drop the ones no longer present, add new ones
+      // (applyMentions skips duplicates, so existing approvals are preserved).
+      const keep = new Set(dto.mentions.map((m) => m.userId));
+      await this.prisma.mention.deleteMany({
+        where: {
+          targetType: MentionTargetType.POST,
+          targetId: postId,
+          ...(keep.size > 0 ? { targetUserId: { notIn: Array.from(keep) } } : {}),
+        },
+      });
+      if (dto.mentions.length > 0) {
+        this.mentions
+          .applyMentions({
+            authorId: userId,
+            targetType: MentionTargetType.POST,
+            targetId: postId,
+            mentions: dto.mentions,
+          })
+          .catch((err) => this.logger.warn(`applyMentions failed for post ${postId}: ${err?.message ?? err}`));
+      }
+    }
+
     await this.invalidateFeed();
     this.communityGateway.emitChanged({ type: 'post_updated', postId });
     this.realtime.broadcast('post', 'updated', { id: postId });
-    return updated;
+    return { ...updated, mediaUrls: publicMediaUrls(updated.mediaUrls) };
   }
 
   async deletePost(postId: string, userId: string, role?: UserRole) {
-    // Politica de moderacion: los usuarios no pueden eliminar publicaciones.
-    // EXCEPCION: el equipo (ADMIN/SUPER_ADMIN/MODERATOR) puede borrar
-    // (sus propios posts o cualquiera) directamente desde la app — el
-    // mismo endpoint que usa el cliente.
+    // Owners can delete their own posts; staff (ADMIN/SUPER_ADMIN/MODERATOR)
+    // can delete any post from the same endpoint the client uses.
     const isStaff = role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'MODERATOR';
-    if (!isStaff) {
-      throw new ForbiddenException(
-        'Los usuarios no pueden eliminar publicaciones. Si esta publicación viola las normas, usa la opción Reportar.',
-      );
-    }
     const post = await this.prisma.post.findUnique({ where: { id: postId } });
     if (!post || post.deletedAt) throw new NotFoundException('Post no encontrado');
+    if (!isStaff && post.userId !== userId) {
+      throw new ForbiddenException('Not authorized');
+    }
     await this.prisma.post.update({
       where: { id: postId },
       data: { deletedAt: new Date() },
@@ -537,15 +700,33 @@ export class CommunityService {
       if (!parent) throw new NotFoundException('Parent comment not found');
     }
 
+    // Same auto-moderation as posts: flagged comments are held for review
+    // (hidden from the thread) instead of being published.
+    const moderationScore = this.basicModerationCheck(dto.content);
+    const flagged = moderationScore >= 0.5;
+    const commentStatus = flagged ? PostStatus.PENDING_REVIEW : PostStatus.PUBLISHED;
+
     const [comment] = await this.prisma.$transaction([
       this.prisma.comment.create({
-        data: { postId, userId, content: dto.content, parentId: dto.parentId },
+        data: { postId, userId, content: dto.content, parentId: dto.parentId, status: commentStatus },
       }),
-      this.prisma.post.update({
-        where: { id: postId },
-        data: { commentsCount: { increment: 1 } },
-      }),
+      ...(flagged
+        ? []
+        : [
+            this.prisma.post.update({
+              where: { id: postId },
+              data: { commentsCount: { increment: 1 } },
+            }),
+          ]),
     ]);
+
+    await this.invalidatePostCache(postId);
+
+    if (flagged) {
+      // Don't fan out notifications / realtime for held comments; the author
+      // gets the status back so the client can explain "en revisión".
+      return comment;
+    }
 
     this.communityGateway.emitChanged({
       type: 'comment_created',
@@ -605,7 +786,7 @@ export class CommunityService {
           mentions: dto.mentions,
           preview: dto.content,
         })
-        .catch(() => {});
+        .catch((err) => this.logger.warn(`applyMentions failed for comment ${comment.id}: ${err?.message ?? err}`));
     }
 
     return comment;
@@ -615,32 +796,42 @@ export class CommunityService {
     const comment = await this.prisma.comment.findUnique({ where: { id: commentId } });
     if (!comment || comment.deletedAt) throw new NotFoundException('Comment not found');
     if (comment.userId !== userId) throw new ForbiddenException('Not authorized');
+    const moderationScore = this.basicModerationCheck(content);
+    const locked = comment.status === PostStatus.REJECTED || comment.status === PostStatus.HIDDEN;
+    const status = locked
+      ? comment.status
+      : moderationScore >= 0.5
+        ? PostStatus.PENDING_REVIEW
+        : PostStatus.PUBLISHED;
     const updated = await this.prisma.comment.update({
       where: { id: commentId },
-      data: { content },
+      data: { content, status },
     });
+    await this.invalidatePostCache(comment.postId);
     this.communityGateway.emitChanged({
       type: 'comment_updated',
       postId: comment.postId,
       commentId,
     });
+    this.realtime.broadcast('comment', 'updated', { id: commentId, data: { postId: comment.postId } });
     return updated;
   }
 
   async deleteComment(commentId: string, userId: string, role?: UserRole) {
-    // Misma logica que deletePost: bloqueado para usuarios, abierto para staff.
+    // Same policy as deletePost: owner or staff.
     const isStaff = role === 'ADMIN' || role === 'SUPER_ADMIN' || role === 'MODERATOR';
-    if (!isStaff) {
-      throw new ForbiddenException(
-        'Los usuarios no pueden eliminar comentarios. Si este comentario viola las normas, usa la opción Reportar.',
-      );
-    }
     const comment = await this.prisma.comment.findUnique({ where: { id: commentId } });
     if (!comment || comment.deletedAt) throw new NotFoundException('Comentario no encontrado');
+    if (!isStaff && comment.userId !== userId) {
+      throw new ForbiddenException('Not authorized');
+    }
     await this.prisma.$transaction([
       this.prisma.comment.update({ where: { id: commentId }, data: { deletedAt: new Date() } }),
-      this.prisma.post.update({ where: { id: comment.postId }, data: { commentsCount: { decrement: 1 } } }),
+      ...(comment.status === PostStatus.PUBLISHED
+        ? [this.prisma.post.update({ where: { id: comment.postId }, data: { commentsCount: { decrement: 1 } } })]
+        : []),
     ]);
+    await this.invalidatePostCache(comment.postId);
     this.communityGateway.emitChanged({
       type: 'comment_deleted',
       postId: comment.postId,
@@ -651,67 +842,21 @@ export class CommunityService {
 
   // ── REACTIONS ─────────────────────────────
 
+  /**
+   * Legacy typed reaction endpoint. The like system is unified: every type
+   * maps to an emoji reaction (LIKE → ❤️) so the feed has ONE counter.
+   */
   async reactToPost(postId: string, userId: string, dto: ReactDto) {
-    const post = await this.prisma.post.findUnique({ where: { id: postId } });
-    if (!post) throw new NotFoundException('Post not found');
-
-    const existing = await this.prisma.reaction.findUnique({
-      where: { userId_postId: { userId, postId } },
-    });
-
-    if (existing) {
-      if (existing.type === dto.type) {
-        // Toggle off
-        await this.prisma.$transaction([
-          this.prisma.reaction.delete({ where: { userId_postId: { userId, postId } } }),
-          this.prisma.post.update({ where: { id: postId }, data: { likesCount: { decrement: 1 } } }),
-        ]);
-        await this.invalidatePostCache(postId);
-        this.communityGateway.emitChanged({ type: 'post_reacted', postId });
-    this.realtime.broadcast('post', 'reacted', { id: postId });
-        return { reacted: false };
-      }
-      // Change type
-      await this.prisma.reaction.update({
-        where: { userId_postId: { userId, postId } },
-        data: { type: dto.type },
-      });
-      await this.invalidatePostCache(postId);
-      this.communityGateway.emitChanged({ type: 'post_reacted', postId });
-    this.realtime.broadcast('post', 'reacted', { id: postId });
-      return { reacted: true, type: dto.type };
-    }
-
-    await this.prisma.$transaction([
-      this.prisma.reaction.create({ data: { userId, postId, type: dto.type } }),
-      this.prisma.post.update({ where: { id: postId }, data: { likesCount: { increment: 1 } } }),
-    ]);
-    await this.invalidatePostCache(postId);
-    this.communityGateway.emitChanged({ type: 'post_reacted', postId });
-    this.realtime.broadcast('post', 'reacted', { id: postId });
-
-    if (post.userId !== userId) {
-      const actor = await this.prisma.userProfile.findUnique({
-        where: { userId },
-        select: { firstName: true, lastName: true, avatarUrl: true },
-      });
-      const actorName =
-        `${actor?.firstName ?? ''} ${actor?.lastName ?? ''}`.trim() || 'Alguien';
-      const actorAvatarUrl = actor?.avatarUrl ?? null;
-      this.notifications
-        .createNotification({
-          userId: post.userId,
-          type: NotificationType.COMMUNITY_REACTION,
-          title: 'Nueva reacción',
-          titleEn: 'New reaction',
-          body: `${actorName} le dio like a tu publicación.`,
-          bodyEn: `${actorName} liked your post.`,
-          data: { postId, actorId: userId, actorName, actorAvatarUrl },
-        })
-        .catch(() => {});
-    }
-
-    return { reacted: true, type: dto.type };
+    const emojiByType: Record<string, string> = {
+      LIKE: LIKE_EMOJI,
+      LOVE: LIKE_EMOJI,
+      FIRE: '🔥',
+      CHEER: '🥂',
+      SAD: '😢',
+    };
+    const emoji = emojiByType[dto.type] ?? LIKE_EMOJI;
+    const res = await this.togglePostEmojiReaction(postId, userId, emoji);
+    return { reacted: res.reacted, type: dto.type, emoji: res.emoji, likesCount: res.likesCount };
   }
 
   async togglePostEmojiReaction(postId: string, userId: string, emoji: string) {
@@ -729,9 +874,11 @@ export class CommunityService {
 
     if (sameEmoji) {
       await this.prisma.postEmojiReaction.delete({ where: { id: sameEmoji.id } });
+      const likesCount = await this.syncLikesCount(postId);
       await this.invalidatePostCache(postId);
       this.communityGateway.emitChanged({ type: 'post_reacted', postId });
-      return { reacted: false, emoji: clean };
+      this.realtime.broadcast('post', 'reacted', { id: postId, data: { userId, emoji: clean, reacted: false, likesCount } });
+      return { reacted: false, emoji: clean, likesCount };
     }
 
     // Drop any prior emoji from this user, then add the new one.
@@ -742,10 +889,13 @@ export class CommunityService {
     }
 
     await this.prisma.postEmojiReaction.create({ data: { postId, userId, emoji: clean } });
+    const likesCount = await this.syncLikesCount(postId);
     await this.invalidatePostCache(postId);
     this.communityGateway.emitChanged({ type: 'post_reacted', postId });
+    this.realtime.broadcast('post', 'reacted', { id: postId, data: { userId, emoji: clean, reacted: true, likesCount } });
 
-    if (post.userId !== userId) {
+    // Swapping emoji shouldn't re-notify the author.
+    if (post.userId !== userId && mine.length === 0) {
       const actor = await this.prisma.userProfile.findUnique({
         where: { userId },
         select: { firstName: true, lastName: true, avatarUrl: true },
@@ -772,7 +922,15 @@ export class CommunityService {
         .catch(() => {});
     }
 
-    return { reacted: true, emoji: clean };
+    return { reacted: true, emoji: clean, likesCount };
+  }
+
+  /** Keep the denormalised Post.likesCount in sync with emoji reactions
+   * (admin panel + ranking still read the column). */
+  private async syncLikesCount(postId: string): Promise<number> {
+    const likesCount = await this.prisma.postEmojiReaction.count({ where: { postId } });
+    await this.prisma.post.update({ where: { id: postId }, data: { likesCount } }).catch(() => undefined);
+    return likesCount;
   }
 
   async getPostReactors(postId: string, currentUserId?: string) {
@@ -820,7 +978,17 @@ export class CommunityService {
     dto: CreateReportDto,
   ) {
     return this.prisma.report.create({
-      data: { reporterId, targetType, targetId, reason: dto.reason, description: dto.description },
+      data: {
+        reporterId,
+        targetType,
+        targetId,
+        reason: dto.reason,
+        description: dto.description,
+        // Typed FK column matching the target kind (see Report in schema.prisma).
+        ...(targetType === ReportTargetType.POST ? { reportedPostId: targetId } : {}),
+        ...(targetType === ReportTargetType.COMMENT ? { reportedCommentId: targetId } : {}),
+        ...(targetType === ReportTargetType.USER ? { reportedUserId: targetId } : {}),
+      },
     });
   }
 
@@ -855,15 +1023,12 @@ export class CommunityService {
       followingUserIds = [currentUserId, ...follows.map((f) => f.followingId)];
     }
 
+    const viewerInclude = this.storyViewerInclude(currentUserId);
     const [venueRows, personalRows] = await Promise.all([
       this.prisma.story.findMany({
         where: { scope: StoryScope.VENUE, expiresAt: { gt: now } },
         orderBy: { createdAt: 'asc' },
-        include: {
-          views: currentUserId
-            ? { where: { userId: currentUserId }, select: { id: true } }
-            : false,
-        },
+        include: viewerInclude,
       }),
       isFollowing && followingUserIds.length > 0
         ? this.prisma.story.findMany({
@@ -880,9 +1045,7 @@ export class CommunityService {
                   profile: { select: { firstName: true, lastName: true, avatarUrl: true } },
                 },
               },
-              views: currentUserId
-                ? { where: { userId: currentUserId }, select: { id: true } }
-                : false,
+              ...viewerInclude,
             },
           })
         : Promise.resolve([]),
@@ -895,19 +1058,7 @@ export class CommunityService {
       hasUnseen: boolean;
     } = null;
     if (venueRows.length > 0) {
-      const stories = venueRows.map((s) => {
-        const seen = Array.isArray(s.views) && s.views.length > 0;
-        return {
-          id: s.id,
-          mediaUrl: s.mediaUrl,
-          caption: s.caption,
-          viewsCount: s.viewsCount,
-          createdAt: s.createdAt,
-          expiresAt: s.expiresAt,
-          scope: s.scope,
-          seen,
-        };
-      });
+      const stories = venueRows.map((s) => this.shapeStory(s));
       venue = {
         user: { id: VENUE_STORY_AUTHOR.id, name: VENUE_STORY_AUTHOR.name, avatarUrl: null },
         stories,
@@ -919,18 +1070,9 @@ export class CommunityService {
     const byAuthor = new Map<string, { user: any; stories: any[]; hasUnseen: boolean }>();
     for (const s of personalRows) {
       const entry = byAuthor.get(s.userId) ?? { user: s.user, stories: [], hasUnseen: false };
-      const seen = Array.isArray(s.views) && s.views.length > 0;
-      entry.stories.push({
-        id: s.id,
-        mediaUrl: s.mediaUrl,
-        caption: s.caption,
-        viewsCount: s.viewsCount,
-        createdAt: s.createdAt,
-        expiresAt: s.expiresAt,
-        scope: s.scope,
-        seen,
-      });
-      if (!seen) entry.hasUnseen = true;
+      const shaped = this.shapeStory(s);
+      entry.stories.push(shaped);
+      if (!shaped.seen) entry.hasUnseen = true;
       byAuthor.set(s.userId, entry);
     }
     const personal = Array.from(byAuthor.values()).sort((a, b) => {
@@ -939,6 +1081,49 @@ export class CommunityService {
     });
 
     return { venue, personal };
+  }
+
+  /**
+   * Viewer-relative relations for a story row: whether the viewer has seen it
+   * and which emojis they reacted with. Anonymous viewers get neither.
+   */
+  private storyViewerInclude(currentUserId?: string) {
+    return {
+      views: currentUserId
+        ? { where: { userId: currentUserId }, select: { id: true } }
+        : false,
+      reactions: currentUserId
+        ? { where: { userId: currentUserId }, select: { emoji: true } }
+        : false,
+    } as const;
+  }
+
+  private shapeStory(s: {
+    id: string;
+    userId: string;
+    mediaUrl: string;
+    caption: string | null;
+    viewsCount: number;
+    createdAt: Date;
+    expiresAt: Date;
+    scope: StoryScope;
+    views?: { id: string }[] | false;
+    reactions?: { emoji: string }[] | false;
+  }) {
+    const seen = Array.isArray(s.views) && s.views.length > 0;
+    const myReactions = Array.isArray(s.reactions) ? s.reactions.map((r) => r.emoji) : [];
+    return {
+      id: s.id,
+      userId: s.userId,
+      mediaUrl: s.mediaUrl,
+      caption: s.caption,
+      viewsCount: s.viewsCount,
+      createdAt: s.createdAt,
+      expiresAt: s.expiresAt,
+      scope: s.scope,
+      seen,
+      myReactions,
+    };
   }
 
   /** Active stories for a single user (used when tapping a profile avatar). */
@@ -970,26 +1155,66 @@ export class CommunityService {
             profile: { select: { firstName: true, lastName: true, avatarUrl: true } },
           },
         },
-        views: currentUserId
-          ? { where: { userId: currentUserId }, select: { id: true } }
-          : false,
+        ...this.storyViewerInclude(currentUserId),
       },
     });
     if (rows.length === 0) return { user: null, stories: [], hasUnseen: false };
-    const stories = rows.map((s) => {
-      const seen = Array.isArray(s.views) && s.views.length > 0;
-      return {
-        id: s.id,
-        mediaUrl: s.mediaUrl,
-        caption: s.caption,
-        viewsCount: s.viewsCount,
-        createdAt: s.createdAt,
-        expiresAt: s.expiresAt,
-        scope: s.scope,
-        seen,
-      };
-    });
+    const stories = rows.map((s) => this.shapeStory(s));
     return { user: rows[0].user, stories, hasUnseen: stories.some((s) => !s.seen) };
+  }
+
+  /**
+   * Who has seen a story. Owner only (like Instagram) — venue stories are
+   * readable by staff since they're the de-facto owners.
+   */
+  async getStoryViewers(storyId: string, requester: { id: string; role: UserRole }) {
+    const story = await this.prisma.story.findUnique({
+      where: { id: storyId },
+      select: { id: true, userId: true, scope: true, viewsCount: true },
+    });
+    if (!story) throw new NotFoundException('Story not found');
+    const isOwner = story.userId === requester.id;
+    const isStaff = ADMIN_ROLES.includes(requester.role);
+    if (!isOwner && !(story.scope === StoryScope.VENUE && isStaff)) {
+      throw new ForbiddenException('Not your story');
+    }
+    const [views, reactions] = await Promise.all([
+      this.prisma.storyView.findMany({
+        where: { storyId },
+        orderBy: { viewedAt: 'desc' },
+        take: 500,
+        select: {
+          viewedAt: true,
+          user: {
+            select: {
+              id: true,
+              profile: { select: { firstName: true, lastName: true, avatarUrl: true } },
+            },
+          },
+        },
+      }),
+      this.prisma.storyReaction.findMany({
+        where: { storyId },
+        select: { userId: true, emoji: true },
+      }),
+    ]);
+    const reactionsByUser = new Map<string, string[]>();
+    for (const r of reactions) {
+      const list = reactionsByUser.get(r.userId) ?? [];
+      list.push(r.emoji);
+      reactionsByUser.set(r.userId, list);
+    }
+    return {
+      total: story.viewsCount,
+      viewers: views.map((v) => ({
+        id: v.user.id,
+        firstName: v.user.profile?.firstName ?? null,
+        lastName: v.user.profile?.lastName ?? null,
+        avatarUrl: v.user.profile?.avatarUrl ?? null,
+        viewedAt: v.viewedAt,
+        reactions: reactionsByUser.get(v.user.id) ?? [],
+      })),
+    };
   }
 
   async createStory(
@@ -998,13 +1223,19 @@ export class CommunityService {
     scope: StoryScope = StoryScope.PERSONAL,
   ) {
     if (!dto.mediaUrl) throw new BadRequestException('mediaUrl is required');
+    // Stories have no review queue (24h lifetime), so a flagged caption is
+    // rejected outright instead of being held.
+    const caption = dto.caption?.trim() || null;
+    if (caption && this.basicModerationCheck(caption) >= 0.5) {
+      throw new BadRequestException('Caption violates community guidelines');
+    }
     const now = new Date();
     const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000);
     const story = await this.prisma.story.create({
       data: {
         userId,
         mediaUrl: dto.mediaUrl,
-        caption: dto.caption,
+        caption,
         expiresAt,
         scope,
       },
@@ -1022,7 +1253,7 @@ export class CommunityService {
           targetId: story.id,
           mentions: dto.mentions,
         })
-        .catch(() => {});
+        .catch((err) => this.logger.warn(`applyMentions(story ${story.id}) failed: ${err?.message ?? err}`));
     }
 
     // Venue stories are house announcements — push to every active user.
@@ -1128,19 +1359,35 @@ export class CommunityService {
   }
 
   async markStoryViewed(storyId: string, userId: string) {
-    const story = await this.prisma.story.findUnique({ where: { id: storyId } });
+    const story = await this.prisma.story.findUnique({
+      where: { id: storyId },
+      select: { id: true, userId: true, expiresAt: true },
+    });
     if (!story) throw new NotFoundException('Story not found');
-    // Idempotent — unique constraint on (storyId, userId)
+    // Own views and views of expired stories don't count (would inflate
+    // viewsCount every time the owner previews their own story).
+    if (story.userId === userId) return { success: true, counted: false };
+    if (story.expiresAt.getTime() <= Date.now()) return { success: true, counted: false };
+
+    // Idempotent — unique constraint on (storyId, userId). Only the first
+    // insert bumps the counter.
+    const existing = await this.prisma.storyView.findUnique({
+      where: { storyId_userId: { storyId, userId } },
+      select: { id: true },
+    });
+    if (existing) return { success: true, counted: false };
     try {
       await this.prisma.storyView.create({ data: { storyId, userId } });
-      await this.prisma.story.update({
-        where: { id: storyId },
-        data: { viewsCount: { increment: 1 } },
-      });
-    } catch {
-      // Already viewed — ignore
+    } catch (err: any) {
+      // P2002 = concurrent duplicate insert (double-tap) — already counted.
+      if (err?.code === 'P2002') return { success: true, counted: false };
+      throw err;
     }
-    return { success: true };
+    await this.prisma.story.update({
+      where: { id: storyId },
+      data: { viewsCount: { increment: 1 } },
+    });
+    return { success: true, counted: true };
   }
 
   async getCommunityRanking() {
@@ -1158,24 +1405,41 @@ export class CommunityService {
 
   // ── HELPERS ───────────────────────────────
 
-  private basicModerationCheck(content: string): number {
+  private basicModerationCheck(content: string | null | undefined): number {
     // Primera línea de moderación automática. Lo que caiga aquí se RETIENE para
     // revisión manual (PENDING_REVIEW); el resto se publica directo.
+    // Word-boundary matching (no substring hits: "disputa" ≠ "puta",
+    // "computadora" ≠ "puta", "bombardeo" ≠ "bomba").
     // TODO: reemplazar por OpenAI Moderation API para score real (ML).
-    const blocked = [
-      // odio / discriminación / acoso (es + en)
-      'maricon', 'marica', 'joto', 'puto', 'puta', 'pendejo', 'faggot', 'nigger',
-      'retrasado', 'discapacitado de mierda',
-      // violencia / amenazas
-      'te voy a matar', 'matarte', 'violar', 'violarte', 'kill you', 'rape',
-      'terrorismo', 'bomba',
-      // ilegal / drogas / menores
-      'vendo droga', 'cocaina', 'child porn', 'pornografia infantil', 'sexo con menores',
-      // spam
-      'spam', 'offensive',
-    ];
-    const lower = content.toLowerCase();
-    const hit = blocked.some((w) => lower.includes(w));
+    if (!content) return 0.1;
+    const normalized = content
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(COMBINING_MARKS, '');
+    const hit = BLOCKED_TERMS.some((re) => re.test(normalized));
     return hit ? 0.9 : 0.1;
   }
 }
+
+const BLOCKED_PHRASES = [
+  // odio / discriminación / acoso (es + en)
+  'maricon', 'marica', 'joto', 'puto', 'puta', 'pendejo', 'faggot', 'nigger',
+  'retrasado', 'discapacitado de mierda',
+  // violencia / amenazas
+  'te voy a matar', 'matarte', 'violar', 'violarte', 'kill you', 'rape',
+  'terrorismo', 'bomba',
+  // ilegal / drogas / menores
+  'vendo droga', 'cocaina', 'child porn', 'pornografia infantil', 'sexo con menores',
+  // spam
+  'spam', 'offensive',
+];
+
+// U+0300..U+036F = combining diacritical marks (left after NFD decomposition).
+const COMBINING_MARKS = new RegExp('[\\u0300-\\u036f]', 'g');
+
+// Pre-compiled once. `\b` doesn't understand accented letters, so the input is
+// stripped of diacritics before matching (see basicModerationCheck).
+const BLOCKED_TERMS: RegExp[] = BLOCKED_PHRASES.map((p) => {
+  const escaped = p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
+  return new RegExp(`(^|[^a-z0-9])${escaped}(?=$|[^a-z0-9])`, 'i');
+});

@@ -8,13 +8,14 @@ import {
   Pressable,
   Alert,
 } from 'react-native';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
-import { adminApi, venueApi } from '@/api/client';
+import { adminApi } from '@/api/client';
+import { apiError } from '@/api/errors';
 import { useSafeBack } from '@/hooks/useSafeBack';
-import { Colors, Radius, Spacing, TypePresets } from '@/constants/tokens';
+import { Colors, Radius, Spacing } from '@/constants/tokens';
 import {
   Body,
   Button,
@@ -24,10 +25,12 @@ import {
   Sheet,
   Subhead,
 } from '@/components/ui';
+import { ErrorState } from '@/components/ErrorState';
+import { EmptyState } from '@/components/EmptyState';
 import { AdminHeader, StatusPill } from '@/components/admin';
 import { UserPicker, type PickedUser } from '@/components/admin/UserPicker';
 
-type Filter = 'all' | 'PENDING' | 'CONFIRMED' | 'SEATED' | 'COMPLETED' | 'CANCELLED';
+type Filter = 'all' | 'PENDING' | 'CONFIRMED' | 'SEATED' | 'COMPLETED' | 'CANCELLED' | 'NO_SHOW';
 
 const STATUS_TONE: Record<
   string,
@@ -38,7 +41,10 @@ const STATUS_TONE: Record<
   SEATED: { tone: 'info', label: 'EN MESA' },
   COMPLETED: { tone: 'neutral', label: 'COMPLETADA' },
   CANCELLED: { tone: 'danger', label: 'CANCELADA' },
+  NO_SHOW: { tone: 'danger', label: 'NO SE PRESENTÓ' },
 };
+
+const PAGE = 20;
 
 export default function AdminReservationsList() {
   const router = useRouter();
@@ -64,11 +70,15 @@ export default function AdminReservationsList() {
 
   useEffect(() => {
     if (creating && venues.length === 0) {
-      venueApi
-        .list({ limit: 50 })
+      // Admin endpoint — includes deactivated venues too, unlike the public
+      // list (which would silently make a paused venue unreachable here).
+      adminApi
+        .venues()
         .then((r) => {
-          const list = r.data?.data?.data ?? r.data?.data ?? r.data ?? [];
-          setVenues(Array.isArray(list) ? list : []);
+          const all = r.data?.data ?? r.data ?? [];
+          // Only active venues make sense to book a table at.
+          const list = (Array.isArray(all) ? all : []).filter((v: any) => v.isActive !== false);
+          setVenues(list);
           if (list.length && !draft.venueId) setDraft((d) => ({ ...d, venueId: list[0].id }));
         })
         .catch(() => {});
@@ -94,52 +104,91 @@ export default function AdminReservationsList() {
       setPicked(null);
       setDraft({ venueId: venues[0]?.id ?? '', date: '', timeSlot: '20:00', partySize: '2', notes: '' });
       load();
-      Alert.alert('Reserva creada', 'Quedo CONFIRMADA. El cliente fue notificado.');
-    } catch (e: any) {
-      Alert.alert('Error', e?.response?.data?.message ?? 'No se pudo crear');
+      Alert.alert('Reserva creada', 'Quedó CONFIRMADA. El cliente fue notificado.');
+    } catch (err) {
+      Alert.alert('Error', apiError(err));
     } finally {
       setSubmitting(false);
     }
   }
 
-  const load = useCallback(async () => {
-    try {
-      const r = await adminApi.reservations({ limit: 100 });
-      setRows(r.data?.data?.data ?? r.data?.data ?? []);
-    } catch {}
-    finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, []);
+  const [meta, setMeta] = useState<{ page: number; hasNextPage: boolean; total: number }>({ page: 1, hasNextPage: false, total: 0 });
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const reqId = useRef(0);
+
+  const params = useCallback(
+    (page: number) => ({ page, limit: PAGE, ...(filter !== 'all' ? { status: filter } : {}) }),
+    [filter],
+  );
+
+  const load = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      const id = ++reqId.current;
+      if (!opts?.silent) { setLoading(true); setError(null); }
+      try {
+        const r = await adminApi.reservations(params(1));
+        if (id !== reqId.current) return;
+        const payload = r.data?.data;
+        setRows(payload?.data ?? []);
+        setMeta({
+          page: payload?.meta?.page ?? 1,
+          hasNextPage: !!payload?.meta?.hasNextPage,
+          total: payload?.meta?.total ?? payload?.data?.length ?? 0,
+        });
+        setError(null);
+      } catch (err) {
+        if (id !== reqId.current) return;
+        setError(apiError(err));
+      } finally {
+        if (id === reqId.current) { setLoading(false); setRefreshing(false); }
+      }
+    },
+    [params],
+  );
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  const shown = useMemo(() => {
-    if (filter === 'all') return rows;
-    return rows.filter((r) => r.status === filter);
-  }, [rows, filter]);
+  async function loadMore() {
+    if (loadingMore || loading || !meta.hasNextPage) return;
+    setLoadingMore(true);
+    try {
+      const r = await adminApi.reservations(params(meta.page + 1));
+      const payload = r.data?.data;
+      const next: any[] = payload?.data ?? [];
+      setRows((prev) => {
+        const seen = new Set(prev.map((x) => x.id));
+        return [...prev, ...next.filter((x) => !seen.has(x.id))];
+      });
+      setMeta({
+        page: payload?.meta?.page ?? meta.page + 1,
+        hasNextPage: !!payload?.meta?.hasNextPage,
+        total: payload?.meta?.total ?? meta.total,
+      });
+    } catch (err) {
+      setError(apiError(err));
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
-  const counts = useMemo(() => {
-    return rows.reduce<Record<string, number>>((acc, r) => {
-      acc[r.status] = (acc[r.status] ?? 0) + 1;
-      return acc;
-    }, {});
-  }, [rows]);
+  const shown = rows;
 
   const tabs: { value: Filter; label: string }[] = [
-    { value: 'all', label: `Todas (${rows.length})` },
-    { value: 'PENDING', label: `Pendiente (${counts.PENDING ?? 0})` },
-    { value: 'CONFIRMED', label: `Confirmada (${counts.CONFIRMED ?? 0})` },
-    { value: 'SEATED', label: `En mesa (${counts.SEATED ?? 0})` },
-    { value: 'CANCELLED', label: `Canceladas (${counts.CANCELLED ?? 0})` },
+    { value: 'all', label: `Todas (${meta.total})` },
+    { value: 'PENDING', label: 'Pendiente' },
+    { value: 'CONFIRMED', label: 'Confirmada' },
+    { value: 'SEATED', label: 'En mesa' },
+    { value: 'COMPLETED', label: 'Completada' },
+    { value: 'CANCELLED', label: 'Cancelada' },
+    { value: 'NO_SHOW', label: 'No se presentó' },
   ];
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
       <AdminHeader
         title="Reservaciones"
-        kicker="Gestion"
+        kicker="Gestión"
         onBack={goBack}
         right={
           <View style={{ flexDirection: 'row', gap: Spacing[2] }}>
@@ -156,7 +205,7 @@ export default function AdminReservationsList() {
               onPress={() => router.push('/(admin)/manage/reservations/config' as never)}
               hitSlop={10}
               accessibilityRole="button"
-              accessibilityLabel="Configuracion"
+              accessibilityLabel="Configuración"
               style={({ pressed }) => [styles.iconBtn, pressed && styles.pressed]}
             >
               <Feather name="sliders" size={16} color={Colors.textPrimary} />
@@ -195,6 +244,8 @@ export default function AdminReservationsList() {
         <View style={styles.center}>
           <ActivityIndicator color={Colors.accentPrimary} />
         </View>
+      ) : error ? (
+        <ErrorState message={error} onRetry={() => load()} />
       ) : (
         <FlatList
           data={shown}
@@ -207,13 +258,17 @@ export default function AdminReservationsList() {
               tintColor={Colors.accentPrimary}
             />
           }
+          onEndReachedThreshold={0.4}
+          onEndReached={loadMore}
           ListEmptyComponent={
-            <View style={styles.empty}>
-              <Feather name="home" size={32} color={Colors.textMuted} />
-              <Caption tone="muted" style={{ marginTop: Spacing[2] }}>
-                Sin reservaciones en esta categoria.
-              </Caption>
-            </View>
+            <EmptyState icon="home" title="Sin reservaciones" message="Sin reservaciones en esta categoría." />
+          }
+          ListFooterComponent={
+            loadingMore ? (
+              <View style={{ paddingVertical: Spacing[4] }}>
+                <ActivityIndicator color={Colors.accentPrimary} />
+              </View>
+            ) : null
           }
           renderItem={({ item }) => {
             const meta = STATUS_TONE[item.status] ?? STATUS_TONE.PENDING;

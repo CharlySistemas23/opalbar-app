@@ -3,12 +3,20 @@ import { useState } from 'react';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+import Constants from 'expo-constants';
 import { useAuthStore } from '@/stores/auth.store';
 import { Colors, Radius, Spacing } from '@/constants/tokens';
 import { Body, Caption, ConfirmDialog, Kicker, Subhead } from '@/components/ui';
 import { AdminHeader } from '@/components/admin';
 
 type FeatherIcon = React.ComponentProps<typeof Feather>['name'];
+
+// Same source as the user-facing About screen — real version/build instead
+// of a hand-typed string that goes stale the moment it ships.
+const APP_VERSION = Constants.expoConfig?.version ?? '1.0.0';
+const BUILD_NUMBER =
+  Constants.expoConfig?.ios?.buildNumber ??
+  String(Constants.expoConfig?.android?.versionCode ?? '');
 
 interface Row {
   icon: FeatherIcon;
@@ -24,6 +32,8 @@ export default function AdminSettings() {
   const router = useRouter();
   const { user, logout } = useAuthStore();
   const [confirmLogout, setConfirmLogout] = useState(false);
+  // Backend: notifications/broadcast + insights/audience are ADMIN/SUPER_ADMIN only.
+  const canSeeComms = user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN';
 
   async function performLogout() {
     setConfirmLogout(false);
@@ -39,15 +49,17 @@ export default function AdminSettings() {
         { icon: 'camera', label: 'Escanear QR (Staff)', sub: 'Check-in de reservas y canjes', color: Colors.accentSuccess, path: '/(app)/staff/scan' },
       ],
     },
+    ...(canSeeComms
+      ? [{
+          title: 'Comunicación',
+          rows: [
+            { icon: 'bell' as FeatherIcon, label: 'Push Notifications', sub: 'Enviar notificación masiva', color: Colors.accentPrimary, path: '/(admin)/notifications' },
+            { icon: 'bar-chart-2' as FeatherIcon, label: 'Analytics', sub: 'Métricas del sistema', color: Colors.accentChampagne, path: '/(admin)/analytics' },
+          ],
+        }]
+      : []),
     {
-      title: 'Comunicacion',
-      rows: [
-        { icon: 'bell', label: 'Push Notifications', sub: 'Enviar notificacion masiva', color: Colors.accentPrimary, path: '/(admin)/notifications' },
-        { icon: 'bar-chart-2', label: 'Analytics', sub: 'Metricas del sistema', color: Colors.accentChampagne, path: '/(admin)/analytics' },
-      ],
-    },
-    {
-      title: 'Operacion',
+      title: 'Operación',
       rows: [
         { icon: 'users', label: 'Equipo staff', sub: 'Administradores y moderadores', color: Colors.accentInfo, path: '/(admin)/staff' },
         { icon: 'award', label: 'Niveles de fidelidad', sub: 'Beneficios por nivel', color: Colors.accentPrimary, path: '/(admin)/loyalty' },
@@ -58,16 +70,16 @@ export default function AdminSettings() {
       title: 'Sistema',
       rows: [
         { icon: 'activity', label: 'Actividad reciente', sub: 'Historial de eventos', color: Colors.accentChampagne, path: '/(admin)/activity' },
-        { icon: 'shield', label: 'Solicitudes GDPR', sub: 'Exportacion y eliminacion de datos', color: Colors.accentDanger, path: '/(admin)/gdpr' },
-        { icon: 'info', label: 'Acerca de', sub: 'OPALBAR v1.0.0 · Build 2026-04', color: Colors.textMuted },
+        { icon: 'shield', label: 'Solicitudes GDPR', sub: 'Exportación y eliminación de datos', color: Colors.accentDanger, path: '/(admin)/gdpr' },
+        { icon: 'info', label: 'Acerca de', sub: `OPALBAR v${APP_VERSION}${BUILD_NUMBER ? ` · Build ${BUILD_NUMBER}` : ''}`, color: Colors.textMuted },
       ],
     },
     {
-      title: 'Sesion',
+      title: 'Sesión',
       rows: [
         {
           icon: 'log-out',
-          label: 'Cerrar sesion',
+          label: 'Cerrar sesión',
           color: Colors.accentDanger,
           destructive: true,
           onPress: () => setConfirmLogout(true),
@@ -147,9 +159,9 @@ export default function AdminSettings() {
         open={confirmLogout}
         onClose={() => setConfirmLogout(false)}
         onConfirm={performLogout}
-        title="Cerrar sesion"
-        description="Seguro que quieres cerrar sesion?"
-        confirmLabel="Cerrar sesion"
+        title="Cerrar sesión"
+        description="¿Seguro que quieres cerrar sesión?"
+        confirmLabel="Cerrar sesión"
         confirmVariant="danger"
       />
     </SafeAreaView>

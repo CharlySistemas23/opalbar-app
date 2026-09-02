@@ -31,7 +31,7 @@ import { Feather } from '@expo/vector-icons';
 import { Colors, EditorialSpacing, Radius, Spacing, TypePresets } from '@/constants/tokens';
 import { HitSlop, Roles } from '@/constants/a11y';
 import { playUiSound } from '@/hooks/useFeedback';
-import { eventsApi, offersApi } from '@/api/client';
+import { eventsApi, offersApi, toAbsoluteImageUrl } from '@/api/client';
 import { useAppStore } from '@/stores/app.store';
 import { useAuthStore } from '@/stores/auth.store';
 import { FadeIn, Pressy, Skeleton } from '@/components/ui';
@@ -46,22 +46,36 @@ interface EventItem {
   startDate?: string;
   imageUrl?: string;
   category?: { name?: string; color?: string };
-  spotsLeft?: number;
+  maxCapacity?: number | null;
+  currentCapacity?: number;
 }
 
 interface OfferItem {
   id: string;
   title: string;
   description?: string;
-  validWhen?: string;
+  daysOfWeek?: number[];
+  startTime?: string | null;
+  endTime?: string | null;
 }
 
-function toAbsoluteImageUrl(url?: string): string | undefined {
-  if (!url) return undefined;
-  if (/^https?:\/\//i.test(url) || url.startsWith('data:image/')) return url;
-  const api = process.env['EXPO_PUBLIC_API_URL'] || 'http://localhost:3000/api/v1';
-  const base = api.replace(/\/api\/v1\/?$/, '').replace(/\/$/, '');
-  return `${base}${url.startsWith('/') ? '' : '/'}${url}`;
+/** Real schedule ("Vie, Sáb · 20:00–02:00") — falls back to the description. */
+function offerSchedule(offer: OfferItem, t: boolean): string | undefined {
+  const DAY_ES = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+  const DAY_EN = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const labels = t ? DAY_ES : DAY_EN;
+  const days = offer.daysOfWeek;
+  let dayStr: string | undefined;
+  if (days && days.length > 0 && days.length < 7) {
+    dayStr = [...days].sort((a, b) => a - b).map((d) => labels[d]).join(', ');
+  } else if (days && days.length === 7) {
+    dayStr = t ? 'Todos los días' : 'Every day';
+  }
+  const timeStr = offer.startTime && offer.endTime
+    ? `${offer.startTime}–${offer.endTime}`
+    : offer.startTime || offer.endTime || undefined;
+  if (dayStr && timeStr) return `${dayStr} · ${timeStr}`;
+  return dayStr || timeStr || offer.description;
 }
 
 function formatTime(d: string | undefined, language: string): string {
@@ -109,7 +123,8 @@ export default function Home() {
     setErrored(false);
     try {
       const [er, or] = await Promise.all([
-        eventsApi.list({ limit: 5 }).catch(() => null),
+        // "Esta noche" must never lead with a past event.
+        eventsApi.list({ limit: 5, startDate: new Date().toISOString() }).catch(() => null),
         offersApi.list({ limit: 3 }).catch(() => null),
       ]);
       const evs = er?.data?.data?.data ?? [];
@@ -137,6 +152,7 @@ export default function Home() {
   const validThrough = formatValidThrough(user?.createdAt);
 
   const hero = events[0];
+  const heroSpotsLeft = hero?.maxCapacity != null ? Math.max(0, hero.maxCapacity - (hero.currentCapacity ?? 0)) : null;
   const privileges = offers.slice(0, 2);
 
   return (
@@ -230,9 +246,7 @@ export default function Home() {
                         accessibilityIgnoresInvertColors
                       />
                     ) : (
-                      <Text style={[TypePresets.caption, { color: Colors.textMuted }]}>
-                        [ Imagen evento ]
-                      </Text>
+                      <Feather name="image" size={22} color={Colors.textMuted} />
                     )}
                   </View>
                   <View style={styles.tonightText}>
@@ -242,9 +256,9 @@ export default function Home() {
                     <Text style={[TypePresets.subhead, { color: Colors.textPrimary }]} numberOfLines={2}>
                       {hero.title || hero.name || (t ? 'Sin título' : 'Untitled')}
                     </Text>
-                    {hero.spotsLeft != null ? (
+                    {heroSpotsLeft != null ? (
                       <Text style={[TypePresets.caption, { color: Colors.textMuted }]}>
-                        {t ? `${hero.spotsLeft} plazas disponibles` : `${hero.spotsLeft} spots available`}
+                        {t ? `${heroSpotsLeft} plazas disponibles` : `${heroSpotsLeft} spots available`}
                       </Text>
                     ) : null}
                   </View>
@@ -271,30 +285,33 @@ export default function Home() {
                   {t ? 'Pronto habrá nuevas cortesías para ti.' : 'New privileges coming soon.'}
                 </Text>
               ) : (
-                privileges.map((off, idx) => (
-                  <FadeIn key={off.id ?? idx} delay={60 * idx}>
-                    <Pressy
-                      onPress={() => off.id && router.push(`/(app)/offers/${off.id}` as never)}
-                      haptic="select"
-                      accessibilityRole={Roles.button}
-                      accessibilityLabel={off.title}
-                      style={styles.privilegeRow}
-                    >
-                      <View style={styles.privilegeDot} />
-                      <View style={styles.privilegeText}>
-                        <Text style={[TypePresets.subhead, { color: Colors.textPrimary }]} numberOfLines={1}>
-                          {off.title}
-                        </Text>
-                        {off.validWhen || off.description ? (
-                          <Text style={[TypePresets.caption, { color: Colors.textMuted }]} numberOfLines={1}>
-                            {off.validWhen || off.description}
+                privileges.map((off, idx) => {
+                  const schedule = offerSchedule(off, t);
+                  return (
+                    <FadeIn key={off.id ?? idx} delay={60 * idx}>
+                      <Pressy
+                        onPress={() => off.id && router.push(`/(app)/offers/${off.id}` as never)}
+                        haptic="select"
+                        accessibilityRole={Roles.button}
+                        accessibilityLabel={off.title}
+                        style={styles.privilegeRow}
+                      >
+                        <View style={styles.privilegeDot} />
+                        <View style={styles.privilegeText}>
+                          <Text style={[TypePresets.subhead, { color: Colors.textPrimary }]} numberOfLines={1}>
+                            {off.title}
                           </Text>
-                        ) : null}
-                      </View>
-                      <Text style={[TypePresets.body, { color: Colors.textMuted }]}>›</Text>
-                    </Pressy>
-                  </FadeIn>
-                ))
+                          {schedule ? (
+                            <Text style={[TypePresets.caption, { color: Colors.textMuted }]} numberOfLines={1}>
+                              {schedule}
+                            </Text>
+                          ) : null}
+                        </View>
+                        <Text style={[TypePresets.body, { color: Colors.textMuted }]}>›</Text>
+                      </Pressy>
+                    </FadeIn>
+                  );
+                })
               )}
             </View>
           </>

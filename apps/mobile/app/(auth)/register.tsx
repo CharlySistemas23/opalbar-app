@@ -21,6 +21,9 @@ import { Feather } from '@expo/vector-icons';
 import { authApi } from '@/api/client';
 import { useAppStore } from '@/stores/app.store';
 import { apiError } from '@/api/errors';
+import { setPendingPassword } from '@/lib/pending-credentials';
+import { LEGAL_URLS, openLegal } from '@/lib/legal';
+import { useFeedback } from '@/hooks/useFeedback';
 import { Colors, EditorialSpacing, Spacing } from '@/constants/tokens';
 import { HitSlop } from '@/constants/a11y';
 import { PhonePicker } from '@/components/PhonePicker';
@@ -39,6 +42,7 @@ export default function Register() {
   const router = useRouter();
   const { language } = useAppStore();
   const t = language === 'es';
+  const fb = useFeedback();
 
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -102,12 +106,17 @@ export default function Register() {
         password,
         language,
       });
-      // Backend auto-sends EMAIL_VERIFICATION OTP on register — no need to re-send here
+      // Backend auto-sends EMAIL_VERIFICATION OTP on register — no need to re-send here.
+      // Password is parked in memory (never a route param) for the auto-login
+      // that follows a successful verification.
+      setPendingPassword(mail, password);
+      fb.success();
       router.push({
         pathname: '/(auth)/otp-email',
-        params: { email: mail, password, purpose: 'EMAIL_VERIFICATION' },
+        params: { email: mail, purpose: 'EMAIL_VERIFICATION' },
       } as never);
     } catch (err: any) {
+      fb.error();
       setError(apiError(err, t ? 'No se pudo crear la cuenta.' : 'Could not create account.'));
     } finally {
       setLoading(false);
@@ -289,11 +298,39 @@ export default function Register() {
               />
             </FadeIn>
 
+            {/* Apple 1.2 (UGC): los términos y la política deben ser
+                accesibles y explícitamente aceptados al registrarse. */}
             <View style={styles.legalWrap}>
               <Caption tone="muted" align="center">
+                {t ? 'Al crear tu cuenta aceptas los ' : 'By creating an account you accept the '}
+              </Caption>
+              <View style={styles.legalLinks}>
+                <Pressy
+                  onPress={() => openLegal(LEGAL_URLS.terms)}
+                  accessibilityRole="link"
+                  accessibilityLabel={t ? 'Términos de servicio' : 'Terms of service'}
+                  hitSlop={HitSlop.expand}
+                >
+                  <Caption style={styles.legalLink}>
+                    {t ? 'Términos de servicio' : 'Terms of service'}
+                  </Caption>
+                </Pressy>
+                <Caption tone="muted">{t ? '  ·  ' : '  ·  '}</Caption>
+                <Pressy
+                  onPress={() => openLegal(LEGAL_URLS.privacy)}
+                  accessibilityRole="link"
+                  accessibilityLabel={t ? 'Política de privacidad' : 'Privacy policy'}
+                  hitSlop={HitSlop.expand}
+                >
+                  <Caption style={styles.legalLink}>
+                    {t ? 'Política de privacidad' : 'Privacy policy'}
+                  </Caption>
+                </Pressy>
+              </View>
+              <Caption tone="muted" align="center" style={{ marginTop: Spacing[2] }}>
                 {t
-                  ? 'Al continuar aceptas la Política de Privacidad\ny los Términos de OPALBAR.'
-                  : 'By continuing you accept our Privacy Policy\nand OPALBAR Terms.'}
+                  ? 'No toleramos contenido ofensivo ni abusivo: puedes reportar o bloquear a cualquier usuario desde su perfil.'
+                  : 'We have zero tolerance for objectionable content: you can report or block any user from their profile.'}
               </Caption>
             </View>
 
@@ -352,6 +389,16 @@ const styles = StyleSheet.create({
   },
   legalWrap: {
     marginTop: Spacing[2],
+  },
+  legalLinks: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: Spacing[1],
+  },
+  legalLink: {
+    color: Colors.accentPrimary,
+    textDecorationLine: 'underline',
   },
   loginRow: {
     flexDirection: 'row',

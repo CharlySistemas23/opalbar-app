@@ -12,7 +12,10 @@ import { useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { adminApi } from '@/api/client';
+import { apiError } from '@/api/errors';
+import { useAuthStore } from '@/stores/auth.store';
 import { Colors } from '@/constants/tokens';
+import { EmptyState } from '@/components/EmptyState';
 
 // ─────────────────────────────────────────────
 //  Admin · Analytics / "Mis clientes"
@@ -99,25 +102,45 @@ const ENGAGEMENT_LABEL: Record<string, { label: string; color: string }> = {
 };
 
 export default function AdminAnalytics() {
+  const me = useAuthStore((s) => s.user);
+  // Backend: GET /admin/insights/audience is ADMIN/SUPER_ADMIN only.
+  const canView = me?.role === 'ADMIN' || me?.role === 'SUPER_ADMIN';
   const [insights, setInsights] = useState<Insights | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    if (!canView) { setLoading(false); return; }
     try {
       const r = await adminApi.audienceInsights();
       setInsights((r.data?.data ?? r.data) as Insights);
       setError(null);
-    } catch (e: any) {
-      setError(e?.message ?? 'Error al cargar');
+    } catch (err) {
+      setError(apiError(err));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [canView]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  if (!canView) {
+    return (
+      <SafeAreaView style={styles.root} edges={['top']}>
+        <View style={styles.header}>
+          <View style={styles.logo}>
+            <Feather name="users" size={16} color={Colors.accentPrimary} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.title}>Mis clientes</Text>
+          </View>
+        </View>
+        <EmptyState icon="lock" title="Sin acceso" message="Necesitas rol de admin para ver analíticas de audiencia." />
+      </SafeAreaView>
+    );
+  }
 
   const signupSparkline = useMemo(() => {
     if (!insights) return null;
@@ -281,7 +304,7 @@ export default function AdminAnalytics() {
               {insights.discoveryBreakdown.length === 0 ? (
                 <EmptyHint text="Sin datos — activa la pregunta en el signup" />
               ) : (
-                insights.discoveryBreakdown
+                [...insights.discoveryBreakdown]
                   .sort((a, b) => b.count - a.count)
                   .map((row) => (
                     <BarRow
@@ -382,7 +405,7 @@ export default function AdminAnalytics() {
             {insights.loyaltyBreakdown.length > 0 && (
               <Card>
                 <SectionHeader icon="award" title="Niveles de lealtad" />
-                {insights.loyaltyBreakdown
+                {[...insights.loyaltyBreakdown]
                   .sort((a, b) => b.count - a.count)
                   .map((row) => (
                     <BarRow

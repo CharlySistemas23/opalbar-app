@@ -13,6 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { adminApi, eventsApi } from '@/api/client';
 import { apiError } from '@/api/errors';
+import { useAuthStore } from '@/stores/auth.store';
 import { useSafeBack } from '@/hooks/useSafeBack';
 import { Colors, Radius, Spacing } from '@/constants/tokens';
 import {
@@ -24,6 +25,7 @@ import {
   SegmentedControl,
   Subhead,
 } from '@/components/ui';
+import { ErrorState } from '@/components/ErrorState';
 import { AdminHeader, StatusPill } from '@/components/admin';
 import type { SegmentOption } from '@/components/ui';
 
@@ -34,11 +36,15 @@ const STATUS_TONE: Record<string, { tone: 'success' | 'neutral' | 'danger' | 'in
   DRAFT: { tone: 'neutral', label: 'BORRADOR' },
   CANCELLED: { tone: 'danger', label: 'CANCELADO' },
   COMPLETED: { tone: 'info', label: 'FINALIZADO' },
+  FULL: { tone: 'info', label: 'CUPO LLENO' },
 };
 
 export default function AdminEventsList() {
   const router = useRouter();
   const goBack = useSafeBack('/(admin)/manage');
+  const me = useAuthStore((s) => s.user);
+  // Backend: delete is ADMIN/SUPER_ADMIN-only; create/update stay open to MODERATOR.
+  const canDelete = me?.role === 'ADMIN' || me?.role === 'SUPER_ADMIN';
   const [events, setEvents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -46,12 +52,16 @@ export default function AdminEventsList() {
   const [search, setSearch] = useState('');
   const [confirmDel, setConfirmDel] = useState<{ id: string; title: string } | null>(null);
   const [confirmDup, setConfirmDup] = useState<{ id: string; title: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    setError(null);
     try {
       const r = await eventsApi.list({ limit: 100, includeAll: true });
       setEvents(r.data?.data?.data ?? r.data?.data ?? []);
-    } catch {}
+    } catch (err) {
+      setError(apiError(err));
+    }
     finally { setLoading(false); setRefreshing(false); }
   }, []);
 
@@ -105,7 +115,7 @@ export default function AdminEventsList() {
     <SafeAreaView style={styles.root} edges={['top']}>
       <AdminHeader
         title="Eventos"
-        kicker="Gestion"
+        kicker="Gestión"
         onBack={goBack}
         right={
           <View style={{ flexDirection: 'row', gap: Spacing[2] }}>
@@ -113,7 +123,7 @@ export default function AdminEventsList() {
               onPress={() => router.push('/(admin)/manage/events/categories' as never)}
               hitSlop={10}
               accessibilityRole="button"
-              accessibilityLabel="Categorias"
+              accessibilityLabel="Categorías"
               style={({ pressed }) => [styles.iconBtn, pressed && styles.pressed]}
             >
               <Feather name="tag" size={16} color={Colors.textPrimary} />
@@ -150,6 +160,8 @@ export default function AdminEventsList() {
 
       {loading ? (
         <View style={styles.center}><ActivityIndicator color={Colors.accentPrimary} /></View>
+      ) : error ? (
+        <ErrorState message={error} onRetry={load} />
       ) : (
         <FlatList
           data={shown}
@@ -208,12 +220,14 @@ export default function AdminEventsList() {
                     label="Duplicar"
                     onPress={() => setConfirmDup({ id: item.id, title: item.title })}
                   />
-                  <ActionChip
-                    icon="trash-2"
-                    label="Eliminar"
-                    danger
-                    onPress={() => setConfirmDel({ id: item.id, title: item.title })}
-                  />
+                  {canDelete ? (
+                    <ActionChip
+                      icon="trash-2"
+                      label="Eliminar"
+                      danger
+                      onPress={() => setConfirmDel({ id: item.id, title: item.title })}
+                    />
+                  ) : null}
                 </View>
               </View>
             );
@@ -226,7 +240,7 @@ export default function AdminEventsList() {
         onClose={() => setConfirmDel(null)}
         onConfirm={performDelete}
         title="Eliminar evento"
-        description={`Eliminar "${confirmDel?.title ?? ''}" permanentemente? Esta accion no se puede deshacer.`}
+        description={`¿Eliminar "${confirmDel?.title ?? ''}" permanentemente? Esta acción no se puede deshacer.`}
         confirmLabel="Eliminar"
         confirmVariant="danger"
       />
@@ -235,7 +249,7 @@ export default function AdminEventsList() {
         onClose={() => setConfirmDup(null)}
         onConfirm={performDuplicate}
         title="Duplicar evento"
-        description={`Crear una copia de "${confirmDup?.title ?? ''}"? Quedara en BORRADOR con titulo "(copia)" y capacidad reseteada.`}
+        description={`¿Crear una copia de "${confirmDup?.title ?? ''}"? Quedará en BORRADOR con título "(copia)" y capacidad reseteada.`}
         confirmLabel="Duplicar"
       />
     </SafeAreaView>

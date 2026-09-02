@@ -3,13 +3,12 @@
 //
 //  Magazine layout:
 //   · Kicker + Heading header
-//   · 4 grouped sections: VISIBILIDAD · MENSAJES · ETIQUETAS · AMISTAD
-//   · Visibility uses native Switch inside ListItem.rightSlot
-//   · Policy pickers use ListItem rows with custom radio rightSlot, the
-//     selected one carries the accent left bar via ListItem `selected`
-//   · Optimistic updates with toast rollback
+//   · CUENTA (cuenta privada, switch real → PATCH /users/me/privacy)
+//   · Policy pickers: MENSAJES · ETIQUETAS · AMISTAD (radio rows)
+//   · BLOQUEADOS → pantalla de usuarios bloqueados
+//   · Skeleton / ErrorState con reintento · optimistic + rollback + toast
 // ─────────────────────────────────────────────
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Switch, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -24,7 +23,9 @@ import {
 } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { useAppStore } from '@/stores/app.store';
+import { useAuthStore } from '@/stores/auth.store';
 import { useFeedback } from '@/hooks/useFeedback';
+import { useBiometricLock } from '@/lib/biometric';
 import { Colors, EditorialSpacing, Spacing } from '@/constants/tokens';
 import { HitSlop, Roles } from '@/constants/a11y';
 import {
@@ -33,97 +34,154 @@ import {
   Kicker,
   ListItem,
   Pressy,
+  Skeleton,
 } from '@/components/ui';
+import { ErrorState } from '@/components/ErrorState';
 import { toast } from '@/components/Toast';
 
 type DmPolicy = 'EVERYONE' | 'FOLLOWING' | 'FRIENDS_OF_FRIENDS' | 'FRIENDS_ONLY' | 'NONE';
 
+interface PrivacyState {
+  isPrivate: boolean;
+  dmPolicy: DmPolicy;
+  friendPolicy: FriendPolicy;
+  mentionPolicy: MentionPolicy;
+}
+
+const DM_VALUES: DmPolicy[] = ['EVERYONE', 'FOLLOWING', 'FRIENDS_OF_FRIENDS', 'FRIENDS_ONLY', 'NONE'];
+const FRIEND_VALUES: FriendPolicy[] = ['EVERYONE', 'FRIENDS_OF_FRIENDS', 'NONE'];
+const MENTION_VALUES: MentionPolicy[] = ['EVERYONE', 'FRIENDS_OF_FRIENDS', 'FRIENDS_ONLY', 'NONE'];
+
+function pick<T extends string>(value: unknown, allowed: T[], fallback: T): T {
+  return typeof value === 'string' && (allowed as string[]).includes(value) ? (value as T) : fallback;
+}
+
 export default function Privacy() {
   const router = useRouter();
   const { language } = useAppStore();
+  const refreshUser = useAuthStore((s) => s.refreshUser);
   const fb = useFeedback();
   const t = language === 'es';
 
-  const [settings, setSettings] = useState({ showProfile: true, showActivity: false, allowMessages: true });
-  const [dmPolicy, setDmPolicy] = useState<DmPolicy>('EVERYONE');
-  const [friendPolicy, setFriendPolicy] = useState<FriendPolicy>('EVERYONE');
-  const [mentionPolicy, setMentionPolicy] = useState<MentionPolicy>('EVERYONE');
-  const [loadingPolicy, setLoadingPolicy] = useState(true);
+  const [state, setState] = useState<PrivacyState | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [savingPrivate, setSavingPrivate] = useState(false);
+  const bio = useBiometricLock();
+  const [savingBio, setSavingBio] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await usersApi.me();
+      const me = res?.data?.data ?? {};
+      setState({
+        isPrivate: !!me.isPrivate,
+        dmPolicy: pick<DmPolicy>(me.dmPolicy, DM_VALUES, 'FRIENDS_ONLY'),
+        friendPolicy: pick<FriendPolicy>(me.friendPolicy, FRIEND_VALUES, 'EVERYONE'),
+        mentionPolicy: pick<MentionPolicy>(me.mentionPolicy, MENTION_VALUES, 'EVERYONE'),
+      });
+    } catch (err) {
+      setError(apiError(err, t ? 'No se pudo cargar tu privacidad.' : 'Could not load your privacy settings.'));
+    } finally {
+      setLoading(false);
+    }
+  }, [t]);
 
   useEffect(() => {
-    let mounted = true;
-    usersApi
-      .me()
-      .then((res: any) => {
-        if (!mounted) return;
-        const dm = res?.data?.dmPolicy as DmPolicy | undefined;
-        const fp = res?.data?.friendPolicy as FriendPolicy | undefined;
-        const mp = res?.data?.mentionPolicy as MentionPolicy | undefined;
-        if (dm) setDmPolicy(dm);
-        if (fp) setFriendPolicy(fp);
-        if (mp) setMentionPolicy(mp);
-      })
-      .catch(() => {})
-      .finally(() => mounted && setLoadingPolicy(false));
-    return () => {
-      mounted = false;
-    };
-  }, []);
+    load();
+  }, [load]);
 
-  async function toggle(key: keyof typeof settings) {
-    const prev = settings[key];
+  const saveFailed = t ? 'No se pudo guardar.' : 'Save failed.';
+
+  async function toggleBiometric(next: boolean) {
+    if (savingBio) return;
+    setSavingBio(true);
+    try {
+      const ok = await bio.setEnabled(next);
+      if (!ok) {
+        // Refused / cancelled / no enrollment — the preference stays as-is.
+        toast(
+          t ? 'No se activó el bloqueo. Inténtalo de nuevo.' : 'The lock was not enabled. Try again.',
+          'warning',
+        );
+        return;
+      }
+      fb.toggle(next);
+      toast(
+        next
+          ? t ? 'Bloqueo activado.' : 'Lock enabled.'
+          : t ? 'Bloqueo desactivado.' : 'Lock disabled.',
+        'success',
+      );
+    } finally {
+      setSavingBio(false);
+    }
+  }
+
+  async function togglePrivate() {
+    if (!state || savingPrivate) return;
+    const prev = state.isPrivate;
     const next = !prev;
     fb.toggle(next);
-    setSettings((p) => ({ ...p, [key]: next }));
+    setState((s) => (s ? { ...s, isPrivate: next } : s));
+    setSavingPrivate(true);
     try {
-      await usersApi.updatePrivacy({ ...settings, [key]: next });
-    } catch (err: any) {
-      setSettings((p) => ({ ...p, [key]: prev }));
-      toast(apiError(err, t ? 'No se pudo guardar.' : 'Save failed.'), 'danger');
+      await usersApi.updatePrivacy({ isPrivate: next });
+      toast(
+        next
+          ? t ? 'Tu cuenta ahora es privada.' : 'Your account is now private.'
+          : t ? 'Tu cuenta ahora es pública.' : 'Your account is now public.',
+        'success',
+      );
+      refreshUser().catch(() => undefined);
+    } catch (err) {
+      setState((s) => (s ? { ...s, isPrivate: prev } : s));
+      toast(apiError(err, saveFailed), 'danger');
+    } finally {
+      setSavingPrivate(false);
     }
   }
 
   async function selectDmPolicy(next: DmPolicy) {
-    if (next === dmPolicy) return;
-    const prev = dmPolicy;
-    setDmPolicy(next);
+    if (!state || next === state.dmPolicy) return;
+    const prev = state.dmPolicy;
+    fb.toggle(true);
+    setState((s) => (s ? { ...s, dmPolicy: next } : s));
     try {
       await usersApi.updateDmPolicy(next);
-    } catch (err: any) {
-      setDmPolicy(prev);
-      toast(apiError(err, t ? 'No se pudo guardar.' : 'Save failed.'), 'danger');
+    } catch (err) {
+      setState((s) => (s ? { ...s, dmPolicy: prev } : s));
+      toast(apiError(err, saveFailed), 'danger');
     }
   }
 
   async function selectFriendPolicy(next: FriendPolicy) {
-    if (next === friendPolicy) return;
-    const prev = friendPolicy;
-    setFriendPolicy(next);
+    if (!state || next === state.friendPolicy) return;
+    const prev = state.friendPolicy;
+    fb.toggle(true);
+    setState((s) => (s ? { ...s, friendPolicy: next } : s));
     try {
       await friendshipsApi.updatePolicy(next);
-    } catch (err: any) {
-      setFriendPolicy(prev);
-      toast(apiError(err, t ? 'No se pudo guardar.' : 'Save failed.'), 'danger');
+    } catch (err) {
+      setState((s) => (s ? { ...s, friendPolicy: prev } : s));
+      toast(apiError(err, saveFailed), 'danger');
     }
   }
 
   async function selectMentionPolicy(next: MentionPolicy) {
-    if (next === mentionPolicy) return;
-    const prev = mentionPolicy;
-    setMentionPolicy(next);
+    if (!state || next === state.mentionPolicy) return;
+    const prev = state.mentionPolicy;
+    fb.toggle(true);
+    setState((s) => (s ? { ...s, mentionPolicy: next } : s));
     try {
       await mentionsApi.updatePolicy(next);
-    } catch (err: any) {
-      setMentionPolicy(prev);
-      toast(apiError(err, t ? 'No se pudo guardar.' : 'Save failed.'), 'danger');
+    } catch (err) {
+      setState((s) => (s ? { ...s, mentionPolicy: prev } : s));
+      toast(apiError(err, saveFailed), 'danger');
     }
   }
-
-  const visibility = [
-    { key: 'showProfile' as const, label: t ? 'Perfil público' : 'Public profile', desc: t ? 'Otros usuarios pueden ver tu perfil.' : 'Other users can see your profile.' },
-    { key: 'showActivity' as const, label: t ? 'Mostrar actividad' : 'Show activity', desc: t ? 'Tu actividad reciente es visible.' : 'Your recent activity is visible.' },
-    { key: 'allowMessages' as const, label: t ? 'Recibir mensajes' : 'Receive messages', desc: t ? 'Otros pueden enviarte mensajes.' : 'Others can send you messages.' },
-  ];
 
   const dmOptions: { value: DmPolicy; label: string; desc: string }[] = [
     {
@@ -215,57 +273,143 @@ export default function Privacy() {
           <Heading size="md">{t ? 'Privacidad' : 'Privacy'}</Heading>
         </FadeIn>
 
-        {/* ── Visibilidad ── */}
-        <FadeIn delay={80} style={styles.section}>
-          <Kicker tone="muted" style={{ marginBottom: Spacing[3] }}>
-            {t ? 'VISIBILIDAD' : 'VISIBILITY'}
-          </Kicker>
-          <View style={styles.listShell}>
-            {visibility.map((it, idx) => (
-              <View key={it.key}>
+        {loading ? (
+          <View style={styles.section}>
+            <Skeleton height={18} width="30%" />
+            <View style={{ height: Spacing[3] }} />
+            <Skeleton height={72} radius={14} />
+            <View style={{ height: Spacing[8] }} />
+            <Skeleton height={18} width="45%" />
+            <View style={{ height: Spacing[3] }} />
+            <Skeleton height={300} radius={14} />
+          </View>
+        ) : error || !state ? (
+          <ErrorState
+            title={t ? 'No pudimos cargar tu privacidad' : 'Could not load your privacy'}
+            message={error ?? (t ? 'Inténtalo de nuevo.' : 'Try again.')}
+            retryLabel={t ? 'Reintentar' : 'Retry'}
+            onRetry={load}
+            icon="shield-off"
+          />
+        ) : (
+          <>
+            {/* ── Cuenta ── */}
+            <FadeIn delay={80} style={styles.section}>
+              <Kicker tone="muted" style={{ marginBottom: Spacing[3] }}>
+                {t ? 'CUENTA' : 'ACCOUNT'}
+              </Kicker>
+              <View style={styles.listShell}>
                 <ListItem
-                  title={it.label}
-                  subtitle={it.desc}
+                  title={t ? 'Cuenta privada' : 'Private account'}
+                  subtitle={
+                    t
+                      ? 'Solo tus amigos y seguidores aceptados ven tu bio, publicaciones y listas.'
+                      : 'Only friends and accepted followers can see your bio, posts and lists.'
+                  }
+                  leftIcon={<Feather name="lock" size={18} color={Colors.accentPrimary} />}
                   rightSlot={
                     <Switch
-                      value={settings[it.key]}
-                      onValueChange={() => toggle(it.key)}
+                      value={state.isPrivate}
+                      onValueChange={togglePrivate}
+                      disabled={savingPrivate}
                       trackColor={{ false: Colors.border, true: Colors.accentPrimary }}
                       thumbColor={Colors.textInverse}
-                      accessibilityLabel={it.label}
+                      accessibilityLabel={t ? 'Cuenta privada' : 'Private account'}
                     />
                   }
                 />
-                {idx < visibility.length - 1 ? <ListItem.Separator /> : null}
               </View>
-            ))}
-          </View>
-        </FadeIn>
+            </FadeIn>
 
-        <PolicyGroup
-          kicker={t ? 'QUIÉN PUEDE ESCRIBIRME' : 'WHO CAN MESSAGE ME'}
-          options={dmOptions}
-          value={dmPolicy}
-          onSelect={selectDmPolicy}
-          disabled={loadingPolicy}
-          delay={140}
-        />
-        <PolicyGroup
-          kicker={t ? 'QUIÉN PUEDE ETIQUETARME' : 'WHO CAN TAG ME'}
-          options={mentionOptions}
-          value={mentionPolicy}
-          onSelect={selectMentionPolicy}
-          disabled={loadingPolicy}
-          delay={200}
-        />
-        <PolicyGroup
-          kicker={t ? 'SOLICITUDES DE AMISTAD' : 'FRIEND REQUESTS'}
-          options={friendOptions}
-          value={friendPolicy}
-          onSelect={selectFriendPolicy}
-          disabled={loadingPolicy}
-          delay={260}
-        />
+            <PolicyGroup
+              kicker={t ? 'QUIÉN PUEDE ESCRIBIRME' : 'WHO CAN MESSAGE ME'}
+              options={dmOptions}
+              value={state.dmPolicy}
+              onSelect={selectDmPolicy}
+              delay={140}
+            />
+            <PolicyGroup
+              kicker={t ? 'QUIÉN PUEDE ETIQUETARME' : 'WHO CAN TAG ME'}
+              options={mentionOptions}
+              value={state.mentionPolicy}
+              onSelect={selectMentionPolicy}
+              delay={200}
+            />
+            <PolicyGroup
+              kicker={t ? 'SOLICITUDES DE AMISTAD' : 'FRIEND REQUESTS'}
+              options={friendOptions}
+              value={state.friendPolicy}
+              onSelect={selectFriendPolicy}
+              delay={260}
+            />
+
+            {/* ── Seguridad ── */}
+            {bio.ready && bio.available ? (
+              <FadeIn delay={300} style={styles.section}>
+                <Kicker tone="muted" style={{ marginBottom: Spacing[3] }}>
+                  {t ? 'SEGURIDAD' : 'SECURITY'}
+                </Kicker>
+                <View style={styles.listShell}>
+                  <ListItem
+                    title={
+                      bio.kind === 'face'
+                        ? (t ? 'Bloqueo con Face ID' : 'Face ID lock')
+                        : bio.kind === 'fingerprint'
+                          ? (t ? 'Bloqueo con huella' : 'Fingerprint lock')
+                          : (t ? 'Bloqueo biométrico' : 'Biometric lock')
+                    }
+                    subtitle={
+                      bio.enrolled
+                        ? (t
+                          ? 'Pide tu biometría al abrir la app y al volver de segundo plano.'
+                          : 'Asks for biometrics on open and when returning from the background.')
+                        : (t
+                          ? 'Configura Face ID o tu huella en los ajustes del teléfono para usarlo.'
+                          : 'Set up Face ID or your fingerprint in phone settings to use this.')
+                    }
+                    leftIcon={
+                      <Feather
+                        name={bio.kind === 'face' ? 'smile' : 'unlock'}
+                        size={18}
+                        color={bio.enrolled ? Colors.accentPrimary : Colors.textMuted}
+                      />
+                    }
+                    rightSlot={
+                      <Switch
+                        value={bio.enabled}
+                        disabled={!bio.enrolled || savingBio}
+                        onValueChange={toggleBiometric}
+                        trackColor={{ false: Colors.border, true: Colors.accentPrimary }}
+                        thumbColor={Colors.textInverse}
+                        accessibilityLabel={t ? 'Bloqueo biométrico' : 'Biometric lock'}
+                      />
+                    }
+                  />
+                </View>
+              </FadeIn>
+            ) : null}
+
+            {/* ── Bloqueados ── */}
+            <FadeIn delay={320} style={styles.section}>
+              <Kicker tone="muted" style={{ marginBottom: Spacing[3] }}>
+                {t ? 'BLOQUEOS' : 'BLOCKING'}
+              </Kicker>
+              <View style={styles.listShell}>
+                <ListItem
+                  title={t ? 'Usuarios bloqueados' : 'Blocked users'}
+                  subtitle={
+                    t
+                      ? 'Las personas bloqueadas no pueden verte, escribirte ni etiquetarte.'
+                      : "Blocked people can't see you, message you or tag you."
+                  }
+                  leftIcon={<Feather name="slash" size={18} color={Colors.accentDanger} />}
+                  showChevron
+                  onPress={() => router.push('/(app)/profile/blocked' as never)}
+                />
+              </View>
+            </FadeIn>
+          </>
+        )}
       </ScrollView>
     </SafeAreaView>
   );

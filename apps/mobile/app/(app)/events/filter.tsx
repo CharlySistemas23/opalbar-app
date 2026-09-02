@@ -2,11 +2,15 @@
 //  Event Filter — Editorial Premium
 //
 //  Modal-style filter page: kicker + Heading title, hairline-divided
-//  sections (day / category), clear & apply actions in a sticky footer.
+//  sections (quick date range / category), clear & apply actions in a
+//  sticky footer. Categories come from `eventsApi.categories()` — the
+//  four hardcoded ids used to render chips that mapped to nothing in the
+//  `/events` query. Applying pushes categoryId/startDate/endDate back to
+//  the events list as route params.
 // ─────────────────────────────────────────────
-import { useState } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, ScrollView, StyleSheet, View } from 'react-native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 
@@ -21,32 +25,91 @@ import {
   Pressy,
   Subhead,
 } from '@/components/ui';
-import { Colors, EditorialSpacing, Radius, Spacing } from '@/constants/tokens';
+import { Colors, EditorialSpacing, Spacing } from '@/constants/tokens';
 import { HitSlop, Roles } from '@/constants/a11y';
 import { useAppStore } from '@/stores/app.store';
+import { eventsApi } from '@/api/client';
+import { apiError } from '@/api/errors';
 
-const DAYS_ES = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
-const DAYS_EN = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+type QuickRange = 'all' | 'today' | 'week' | 'weekend';
+
+interface CategoryOption {
+  id: string;
+  name: string;
+  nameEn?: string | null;
+}
+
+function rangeToDates(range: QuickRange): { startDate?: string; endDate?: string } {
+  const now = new Date();
+  if (range === 'all') return {};
+  if (range === 'today') {
+    const end = new Date(now);
+    end.setHours(23, 59, 59, 999);
+    return { startDate: now.toISOString(), endDate: end.toISOString() };
+  }
+  if (range === 'week') {
+    const end = new Date(now);
+    end.setDate(end.getDate() + 7);
+    return { startDate: now.toISOString(), endDate: end.toISOString() };
+  }
+  // weekend — through the coming (or current) Fri–Sun window
+  const day = now.getDay(); // 0 Sun … 6 Sat
+  const daysUntilFriday = (5 - day + 7) % 7;
+  const friday = new Date(now);
+  friday.setDate(now.getDate() + daysUntilFriday);
+  friday.setHours(0, 0, 0, 0);
+  const sunday = new Date(friday);
+  sunday.setDate(friday.getDate() + 2);
+  sunday.setHours(23, 59, 59, 999);
+  const start = daysUntilFriday === 0 ? now : friday;
+  return { startDate: start.toISOString(), endDate: sunday.toISOString() };
+}
 
 export default function EventFilter() {
   const router = useRouter();
   const { language } = useAppStore();
   const t = language === 'es';
+  const params = useLocalSearchParams<{ categoryId?: string; range?: string }>();
 
-  const [selectedDays, setSelectedDays] = useState<number[]>([]);
-  const [selectedCategory, setSelectedCategory] = useState('');
+  const [range, setRange] = useState<QuickRange>((params.range as QuickRange) || 'all');
+  const [selectedCategory, setSelectedCategory] = useState(params.categoryId || '');
+  const [categories, setCategories] = useState<CategoryOption[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const categories = [
-    { id: 'live_music', label: t ? 'Música en vivo' : 'Live music' },
-    { id: 'dj', label: 'DJ' },
-    { id: 'art', label: t ? 'Arte' : 'Art' },
-    { id: 'food', label: t ? 'Gastronomía' : 'Food' },
+  const load = useCallback(() => {
+    setError(null);
+    eventsApi
+      .categories()
+      .then((r) => {
+        const payload = r.data?.data;
+        const rows: CategoryOption[] = Array.isArray(payload) ? payload : payload?.data ?? [];
+        setCategories(rows);
+      })
+      .catch((err) => setError(apiError(err)))
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const rangeOptions: Array<{ value: QuickRange; label: string }> = [
+    { value: 'all', label: t ? 'Cualquier fecha' : 'Any date' },
+    { value: 'today', label: t ? 'Hoy' : 'Today' },
+    { value: 'weekend', label: t ? 'Este fin de semana' : 'This weekend' },
+    { value: 'week', label: t ? 'Próximos 7 días' : 'Next 7 days' },
   ];
 
-  const days = t ? DAYS_ES : DAYS_EN;
-
-  function toggleDay(i: number) {
-    setSelectedDays((prev) => (prev.includes(i) ? prev.filter((x) => x !== i) : [...prev, i]));
+  function apply() {
+    const { startDate, endDate } = rangeToDates(range);
+    router.push({
+      pathname: '/(tabs)/events',
+      params: {
+        categoryId: selectedCategory || '',
+        range,
+        ...(startDate ? { startDate } : {}),
+        ...(endDate ? { endDate } : {}),
+      },
+    });
   }
 
   return (
@@ -63,7 +126,7 @@ export default function EventFilter() {
         </Pressy>
         <Pressy
           onPress={() => {
-            setSelectedDays([]);
+            setRange('all');
             setSelectedCategory('');
           }}
           accessibilityLabel={t ? 'Limpiar' : 'Clear'}
@@ -88,49 +151,24 @@ export default function EventFilter() {
           <Heading size="lg">{t ? 'Filtrar eventos.' : 'Filter events.'}</Heading>
         </FadeIn>
 
-        {/* Day of week ───────────────────── */}
+        {/* Quick date range ───────────────── */}
         <FadeIn delay={160} style={{ marginTop: Spacing[8] }}>
-          <Kicker tone="muted">{t ? 'DÍA DE LA SEMANA' : 'DAY OF WEEK'}</Kicker>
-          <View style={styles.daysRow}>
-            {days.map((day, i) => {
-              const active = selectedDays.includes(i);
-              return (
-                <Pressy
-                  key={i}
-                  onPress={() => toggleDay(i)}
-                  accessibilityRole={Roles.button}
-                  accessibilityLabel={day}
-                  accessibilityState={{ selected: active }}
-                  haptic="select"
-                  style={[styles.dayChip, active && styles.dayChipActive]}
-                >
-                  <Caption tone={active ? 'inverse' : 'secondary'} style={{ fontWeight: '600' }}>
-                    {day}
-                  </Caption>
-                </Pressy>
-              );
-            })}
-          </View>
-        </FadeIn>
-
-        {/* Category ────────────────────── */}
-        <FadeIn delay={240} style={{ marginTop: Spacing[8] }}>
-          <Kicker tone="muted">{t ? 'CATEGORÍA' : 'CATEGORY'}</Kicker>
+          <Kicker tone="muted">{t ? 'CUÁNDO' : 'WHEN'}</Kicker>
           <View style={{ marginTop: Spacing[3] }}>
             <Hairline variant="subtle" />
-            {categories.map((cat) => {
-              const active = selectedCategory === cat.id;
+            {rangeOptions.map((opt) => {
+              const active = range === opt.value;
               return (
-                <View key={cat.id}>
+                <View key={opt.value}>
                   <Pressy
-                    onPress={() => setSelectedCategory(active ? '' : cat.id)}
+                    onPress={() => setRange(opt.value)}
                     accessibilityRole={Roles.button}
-                    accessibilityLabel={cat.label}
+                    accessibilityLabel={opt.label}
                     accessibilityState={{ selected: active }}
                     haptic="select"
                     style={styles.catRow}
                   >
-                    <Subhead tone={active ? 'accent' : 'primary'}>{cat.label}</Subhead>
+                    <Subhead tone={active ? 'accent' : 'primary'}>{opt.label}</Subhead>
                     {active ? (
                       <Feather name="check" size={18} color={Colors.accentPrimary} />
                     ) : null}
@@ -141,6 +179,52 @@ export default function EventFilter() {
             })}
           </View>
         </FadeIn>
+
+        {/* Category ────────────────────── */}
+        <FadeIn delay={240} style={{ marginTop: Spacing[8] }}>
+          <Kicker tone="muted">{t ? 'CATEGORÍA' : 'CATEGORY'}</Kicker>
+          <View style={{ marginTop: Spacing[3] }}>
+            {loading ? (
+              <View style={{ paddingVertical: Spacing[6], alignItems: 'center' }}>
+                <ActivityIndicator color={Colors.accentPrimary} />
+              </View>
+            ) : error ? (
+              <Body tone="secondary" style={{ paddingVertical: Spacing[4] }}>
+                {error}
+              </Body>
+            ) : categories.length === 0 ? (
+              <Body tone="muted" style={{ paddingVertical: Spacing[4] }}>
+                {t ? 'Sin categorías por ahora.' : 'No categories yet.'}
+              </Body>
+            ) : (
+              <>
+                <Hairline variant="subtle" />
+                {categories.map((cat) => {
+                  const active = selectedCategory === cat.id;
+                  const label = t ? cat.name : cat.nameEn || cat.name;
+                  return (
+                    <View key={cat.id}>
+                      <Pressy
+                        onPress={() => setSelectedCategory(active ? '' : cat.id)}
+                        accessibilityRole={Roles.button}
+                        accessibilityLabel={label}
+                        accessibilityState={{ selected: active }}
+                        haptic="select"
+                        style={styles.catRow}
+                      >
+                        <Subhead tone={active ? 'accent' : 'primary'}>{label}</Subhead>
+                        {active ? (
+                          <Feather name="check" size={18} color={Colors.accentPrimary} />
+                        ) : null}
+                      </Pressy>
+                      <Hairline variant="subtle" />
+                    </View>
+                  );
+                })}
+              </>
+            )}
+          </View>
+        </FadeIn>
       </ScrollView>
 
       <View style={styles.footer}>
@@ -148,7 +232,7 @@ export default function EventFilter() {
         <View style={styles.footerInner}>
           <Button
             label={t ? 'Aplicar filtros' : 'Apply filters'}
-            onPress={() => router.back()}
+            onPress={apply}
             variant="primary"
             size="lg"
             fullWidth
@@ -158,8 +242,6 @@ export default function EventFilter() {
     </SafeAreaView>
   );
 }
-
-void Body;
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.bgPrimary },
@@ -189,27 +271,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: EditorialSpacing.pageGutter,
     paddingTop: Spacing[6],
     paddingBottom: 120,
-  },
-
-  daysRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: Spacing[2],
-    marginTop: Spacing[3],
-  },
-  dayChip: {
-    width: 48,
-    height: 44,
-    borderRadius: Radius.full,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    backgroundColor: Colors.bgCard,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  dayChipActive: {
-    backgroundColor: Colors.accentPrimary,
-    borderColor: Colors.accentPrimary,
   },
 
   catRow: {

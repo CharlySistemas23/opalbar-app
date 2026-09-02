@@ -29,7 +29,7 @@ import {
 import { Colors, EditorialSpacing, Radius, Spacing } from '@/constants/tokens';
 import { HitSlop, Roles } from '@/constants/a11y';
 import { playUiSound } from '@/hooks/useFeedback';
-import { offersApi } from '@/api/client';
+import { offersApi, walletApi } from '@/api/client';
 import { apiError } from '@/api/errors';
 import { useAuthStore } from '@/stores/auth.store';
 import { useAppStore } from '@/stores/app.store';
@@ -45,12 +45,40 @@ interface OfferItem {
   imageUrl?: string;
   maxRedemptions?: number;
   currentRedemptions?: number;
-  validWhen?: string;
+  daysOfWeek?: number[];
+  startTime?: string | null;
+  endTime?: string | null;
   usesLeft?: number;
   badge?: string;
   badgeColor?: string;
   icon?: FeatherIcon;
   iconColor?: string;
+}
+
+interface LoyaltyLevelLite {
+  id: string;
+  name: string;
+  nameEn?: string | null;
+  minPoints: number;
+}
+
+/** Real schedule ("Vie, Sáb · 20:00–02:00") — falls back to the description. */
+function offerSchedule(offer: OfferItem, t: boolean): string | undefined {
+  const DAY_ES = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+  const DAY_EN = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const labels = t ? DAY_ES : DAY_EN;
+  const days = offer.daysOfWeek;
+  let dayStr: string | undefined;
+  if (days && days.length > 0 && days.length < 7) {
+    dayStr = [...days].sort((a, b) => a - b).map((d) => labels[d]).join(', ');
+  } else if (days && days.length === 7) {
+    dayStr = t ? 'Todos los días' : 'Every day';
+  }
+  const timeStr = offer.startTime && offer.endTime
+    ? `${offer.startTime}–${offer.endTime}`
+    : offer.startTime || offer.endTime || undefined;
+  if (dayStr && timeStr) return `${dayStr} · ${timeStr}`;
+  return dayStr || timeStr || offer.description;
 }
 
 const OFFERS_INITIAL_LIMIT = 20;
@@ -65,17 +93,51 @@ export default function OffersList() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loyalty, setLoyalty] = useState<{
+    points: number;
+    current: LoyaltyLevelLite | null;
+    next: LoyaltyLevelLite | null;
+  } | null>(null);
 
-  const points = user?.points ?? 0;
+  const points = loyalty?.points ?? user?.points ?? 0;
 
   const load = useCallback(async () => {
     setError(null);
     try {
-      const r = await offersApi.list({ limit: OFFERS_INITIAL_LIMIT });
-      setItems(r.data?.data?.data ?? []);
-    } catch (err) {
-      setItems([]);
-      setError(apiError(err));
+      const [offersRes, walletRes, levelsRes] = await Promise.allSettled([
+        offersApi.list({ limit: OFFERS_INITIAL_LIMIT }),
+        walletApi.wallet(),
+        walletApi.levels(),
+      ]);
+
+      if (offersRes.status === 'fulfilled') {
+        setItems(offersRes.value.data?.data?.data ?? []);
+      } else {
+        setItems([]);
+        setError(apiError(offersRes.reason));
+      }
+
+      if (walletRes.status === 'fulfilled') {
+        const w = walletRes.value.data?.data;
+        const pts = w?.points ?? 0;
+        const levelsPayload = levelsRes.status === 'fulfilled' ? levelsRes.value.data?.data : null;
+        const allLevels: LoyaltyLevelLite[] = (
+          Array.isArray(levelsPayload) ? levelsPayload : levelsPayload?.data ?? []
+        )
+          .slice()
+          .sort((a: LoyaltyLevelLite, b: LoyaltyLevelLite) => (a.minPoints ?? 0) - (b.minPoints ?? 0));
+
+        let current: LoyaltyLevelLite | null = w?.profile?.loyaltyLevel ?? null;
+        let next: LoyaltyLevelLite | null = w?.nextLevel ?? null;
+        if (allLevels.length > 0) {
+          current = null;
+          for (const lvl of allLevels) {
+            if (pts >= (lvl.minPoints ?? 0)) current = lvl;
+          }
+          next = allLevels.find((lvl) => (lvl.minPoints ?? 0) > pts) ?? null;
+        }
+        setLoyalty({ points: pts, current, next });
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -83,8 +145,6 @@ export default function OffersList() {
   }, []);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
-
-  const nextLevelDelta = Math.max(0, 1500 - points);
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
@@ -137,9 +197,21 @@ export default function OffersList() {
                 </Numeric>
               </View>
               <Caption tone="muted" style={{ marginTop: Spacing[1] }}>
-                {t
-                  ? `Nivel Ámbar · ${nextLevelDelta} para Platino`
-                  : `Amber level · ${nextLevelDelta} to Platinum`}
+                {loyalty?.current
+                  ? t
+                    ? `Nivel ${loyalty.current.name}${
+                        loyalty.next
+                          ? ` · ${Math.max(0, (loyalty.next.minPoints ?? 0) - points)} para ${loyalty.next.name}`
+                          : ' · Nivel máximo'
+                      }`
+                    : `${loyalty.current.nameEn || loyalty.current.name} level${
+                        loyalty.next
+                          ? ` · ${Math.max(0, (loyalty.next.minPoints ?? 0) - points)} to ${loyalty.next.nameEn || loyalty.next.name}`
+                          : ' · Top tier'
+                      }`
+                  : t
+                    ? 'Cargando nivel…'
+                    : 'Loading tier…'}
               </Caption>
             </View>
           </View>
@@ -198,6 +270,7 @@ function OfferRow({
     (offer.maxRedemptions != null
       ? Math.max(0, offer.maxRedemptions - (offer.currentRedemptions ?? 0))
       : null);
+  const schedule = offerSchedule(offer, t);
 
   return (
     <Card
@@ -232,9 +305,9 @@ function OfferRow({
             </View>
           ) : null}
           <Subhead numberOfLines={2}>{offer.title}</Subhead>
-          {offer.validWhen || offer.description ? (
+          {schedule ? (
             <Caption tone="muted" style={{ marginTop: Spacing[1] }} numberOfLines={2}>
-              {offer.validWhen || offer.description}
+              {schedule}
             </Caption>
           ) : null}
           <View style={styles.rowFooter}>

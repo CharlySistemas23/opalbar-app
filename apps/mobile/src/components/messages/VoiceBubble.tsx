@@ -4,6 +4,10 @@
 //  Tap to play / pause. Animated waveform progress derived deterministically
 //  from the audio URL (same shape every render). Editorial colors: amber on
 //  the receiver, ink on the sender side.
+//
+//  Single-playback: only one voice note plays at a time app-wide. Starting a
+//  bubble stops (and unloads) whichever bubble was playing before, like
+//  WhatsApp / iMessage.
 // ─────────────────────────────────────────────
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
@@ -12,6 +16,7 @@ import { Feather } from '@expo/vector-icons';
 
 import { Colors, Spacing } from '@/constants/tokens';
 import { Caption } from '@/components/ui';
+import { useAppStore } from '@/stores/app.store';
 
 interface Props {
   url: string;
@@ -39,10 +44,38 @@ function waveformFor(url: string, bars = 28) {
   return out;
 }
 
+// ── Module-level "currently playing" registry ────────────────────────────
+// Each mounted bubble registers a stop() when it starts playing; starting a
+// different bubble calls the previous stop() first. Kept outside React so it
+// works across screens (e.g. a bubble left playing on a thread you popped).
+let currentStop: (() => Promise<void>) | null = null;
+let currentSound: Audio.Sound | null = null;
+
+async function claimPlayback(sound: Audio.Sound, stop: () => Promise<void>) {
+  if (currentSound && currentSound !== sound && currentStop) {
+    const prev = currentStop;
+    currentStop = null;
+    currentSound = null;
+    try { await prev(); } catch {}
+  }
+  currentSound = sound;
+  currentStop = stop;
+}
+
+function releasePlayback(sound: Audio.Sound) {
+  if (currentSound === sound) {
+    currentSound = null;
+    currentStop = null;
+  }
+}
+
 export function VoiceBubble({ url, durationSec, isMe }: Props) {
+  const language = useAppStore((s) => s.language);
+  const es = language === 'es';
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [failed, setFailed] = useState(false);
   const soundRef = useRef<Audio.Sound | null>(null);
   const bars = useMemo(() => waveformFor(url), [url]);
 
@@ -50,10 +83,19 @@ export function VoiceBubble({ url, durationSec, isMe }: Props) {
     const s = soundRef.current;
     soundRef.current = null;
     if (s) {
+      releasePlayback(s);
       try { s.setOnPlaybackStatusUpdate(null as any); } catch {}
       try { await s.unloadAsync(); } catch {}
     }
   }, []);
+
+  // Stop used by the registry when another bubble takes over: reset the UI
+  // (paused at start) and unload to free the audio session.
+  const stopForOther = useCallback(async () => {
+    setIsPlaying(false);
+    setProgress(0);
+    await cleanup();
+  }, [cleanup]);
 
   useEffect(() => () => { cleanup(); }, [cleanup]);
 
@@ -65,12 +107,14 @@ export function VoiceBubble({ url, durationSec, isMe }: Props) {
           await soundRef.current.pauseAsync();
           setIsPlaying(false);
         } else if (status.isLoaded) {
+          await claimPlayback(soundRef.current, stopForOther);
           await soundRef.current.playAsync();
           setIsPlaying(true);
         }
         return;
       }
       setLoading(true);
+      setFailed(false);
       try {
         await Audio.setAudioModeAsync({
           allowsRecordingIOS: false,
@@ -79,13 +123,20 @@ export function VoiceBubble({ url, durationSec, isMe }: Props) {
       } catch {}
       const { sound } = await Audio.Sound.createAsync(
         { uri: url },
-        { shouldPlay: true, isLooping: false, volume: 1.0 },
+        { shouldPlay: false, isLooping: false, volume: 1.0 },
       );
       soundRef.current = sound;
-      setLoading(false);
-      setIsPlaying(true);
+      await claimPlayback(sound, stopForOther);
       sound.setOnPlaybackStatusUpdate((status: any) => {
-        if (!status?.isLoaded) return;
+        if (!status?.isLoaded) {
+          if (status?.error) {
+            setFailed(true);
+            setIsPlaying(false);
+            setLoading(false);
+            cleanup();
+          }
+          return;
+        }
         if (status.durationMillis) {
           setProgress(Math.min(1, status.positionMillis / status.durationMillis));
         }
@@ -95,15 +146,26 @@ export function VoiceBubble({ url, durationSec, isMe }: Props) {
           cleanup();
         }
       });
+      await sound.playAsync();
+      setLoading(false);
+      setIsPlaying(true);
     } catch {
       setLoading(false);
+      setFailed(true);
+      cleanup();
     }
-  }, [url, cleanup]);
+  }, [url, cleanup, stopForOther]);
 
   const fillColor = isMe ? 'rgba(15,13,12,0.85)' : Colors.accentPrimary;
   const dimColor = isMe ? 'rgba(15,13,12,0.28)' : Colors.borderStrong;
   const iconBg = isMe ? 'rgba(15,13,12,0.10)' : Colors.accentPrimary;
-  const iconColor = isMe ? Colors.textInverse : Colors.textInverse;
+  const iconColor = Colors.textInverse;
+
+  const a11y = failed
+    ? (es ? 'No se pudo reproducir la nota de voz. Toca para reintentar' : 'Could not play voice note. Tap to retry')
+    : isPlaying
+      ? (es ? 'Pausar nota de voz' : 'Pause voice note')
+      : (es ? 'Reproducir nota de voz' : 'Play voice note');
 
   return (
     <View style={styles.row}>
@@ -111,13 +173,14 @@ export function VoiceBubble({ url, durationSec, isMe }: Props) {
         onPress={toggle}
         hitSlop={6}
         accessibilityRole="button"
-        accessibilityLabel={isPlaying ? 'Pausar nota de voz' : 'Reproducir nota de voz'}
-        style={[styles.play, { backgroundColor: iconBg }]}
+        accessibilityLabel={a11y}
+        accessibilityState={{ busy: loading }}
+        style={[styles.play, { backgroundColor: failed ? Colors.accentDanger : iconBg }]}
       >
         {loading ? (
-          <ActivityIndicator size="small" color={isMe ? Colors.textInverse : Colors.textInverse} />
+          <ActivityIndicator size="small" color={iconColor} />
         ) : (
-          <Feather name={isPlaying ? 'pause' : 'play'} size={14} color={iconColor} />
+          <Feather name={failed ? 'alert-circle' : isPlaying ? 'pause' : 'play'} size={14} color={iconColor} />
         )}
       </Pressable>
       <View style={styles.waveform}>
